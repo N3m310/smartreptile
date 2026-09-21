@@ -1,6 +1,6 @@
-import { apiBase, getJson, getReadiness } from './api.js';
-import { createStore, freshnessOf, formatAge, formatValue } from './store.js';
-import { metricName, statusClass, statusLabel, t } from './i18n.js';
+import { apiBase, getJson, getReadiness } from '../api.js';
+import { createStore, freshnessOf, formatAge, formatValue } from '../store.js';
+import { metricName, statusClass, statusLabel, t } from '../i18n.js';
 
 // Live dashboard page (W2 in docs/02-design/04 §1.2).
 //
