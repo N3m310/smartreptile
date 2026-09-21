@@ -91,14 +91,10 @@
 #define SR_NTP_RESYNC_INTERVAL_SEC 86400
 
 // ---------------------------------------------------------------------------------------------
-// Quality flags — the low byte is shared with the server's QualityFlags enum (readings/QualityFlags.cs)
+// Quality flags: defined in lib/firmware_core/payload.h as sr::payload::QualityFlag, so that the
+// firmware and the host tests cannot drift apart. The bit values there must match the server's
+// QualityFlags enum (backend/.../Readings/QualityFlags.cs).
 // ---------------------------------------------------------------------------------------------
-#define SR_Q_SENSOR_FAULT 0x01
-#define SR_Q_IMPLAUSIBLE 0x02
-#define SR_Q_FIRST_AFTER_BOOT 0x04
-#define SR_Q_BACKFILLED 0x08
-#define SR_Q_CLOCK_UNSYNCED 0x10
-#define SR_Q_CALIBRATION_APPLIED 0x20
 
 // ---------------------------------------------------------------------------------------------
 // Bench mode (never released): swaps real sensors for a synthetic profile so the alert path can be

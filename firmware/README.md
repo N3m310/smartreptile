@@ -8,7 +8,7 @@ Monitoring only: the node reads sensors, filters, buffers and publishes. It hold
 | Path | Purpose |
 |---|---|
 | `platformio.ini` | Two environments: `esp32dev` (real node, pinned platform + libraries) and `native` (host tests) |
-| `include/sr_config.h` | Pin map, intervals, payload budget, quality flags, plausibility bounds (prefixed `sr_` so the ESP32 framework's own `config.h` cannot shadow it) |
+| `include/sr_config.h` | Pin map, intervals, payload budget, plausibility bounds (prefixed `sr_` so the ESP32 framework's own `config.h` cannot shadow it). Quality-flag names live in `lib/firmware_core/payload.h` instead, so firmware and tests share one definition |
 | `lib/firmware_core/` | Pure C++ with no Arduino headers: `filters`, `ring_buffer`, `payload` — the host-tested part |
 | `src/main.cpp` | M1 skeleton: boot logging, status LED, 1 Hz tick, ring-buffer writes. Sensor drivers and transport land in M2 |
 | `test/` | Unity tests for the native environment |

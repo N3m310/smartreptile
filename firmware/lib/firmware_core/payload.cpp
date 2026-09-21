@@ -81,7 +81,7 @@ uint8_t qualityFlagsFor(Metric metric, float value, uint8_t baseFlags) {
     uint8_t flags = baseFlags;
 
     if (!isPlausible(metric, value)) {
-        flags |= SR_Q_IMPLAUSIBLE;
+        flags |= QualityImplausible;
     }
 
     return flags;

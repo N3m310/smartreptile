@@ -37,7 +37,7 @@ sr::storage::SampleRecord takeSample(uint32_t nowMs) {
 
     record.epoch = 0;                     // M2: NTP time; SR_Q_CLOCK_UNSYNCED is set until the first sync
     record.sequence = ++g_sequence;
-    record.qualityFlags = SR_Q_FIRST_AFTER_BOOT;
+    record.qualityFlags = sr::payload::QualityFirstAfterBoot;
 
 #if SR_BENCH_MODE
     // Bench mode: a smooth synthetic curve so the server pipeline can be exercised without hardware

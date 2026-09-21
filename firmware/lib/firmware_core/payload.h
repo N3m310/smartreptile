@@ -9,6 +9,21 @@
 namespace sr {
 namespace payload {
 
+/// Quality bitmask values carried on a sample.
+///
+/// These live here, in the library header, rather than in the firmware configuration header: they are part of
+/// this API (the return value of `qualityFlagsFor`) and both the firmware and the host tests must see the same
+/// names. They MUST stay bit-for-bit identical to the server's `QualityFlags` enum
+/// (`backend/src/SmartReptile.Domain/Readings/QualityFlags.cs`) and to §07-appendices/03 §3.2.
+enum QualityFlag : uint8_t {
+    QualitySensorFault = 1u << 0,         ///< a sensor read failed; the server marks the metric unavailable
+    QualityImplausible = 1u << 1,         ///< outside the metric's plausibility range (rule V-06)
+    QualityFirstAfterBoot = 1u << 2,      ///< first reading after a reset; the sensor has not settled
+    QualityBackfilled = 1u << 3,          ///< delivered from the ring buffer after an outage
+    QualityClockUnsynced = 1u << 4,       ///< NTP had not synced when the sample was produced
+    QualityCalibrationApplied = 1u << 5,  ///< a calibration offset was applied at ingest
+};
+
 /// Metrics the node can report. The wire keys are short on purpose: a 12 h back-fill has to fit in 4 KB batches.
 enum class Metric : uint8_t {
     AirTemperature = 0,
@@ -28,7 +43,7 @@ const char* metricUnit(Metric metric);
 /// published, but flagged, so calibration problems remain visible instead of being thrown away.
 bool isPlausible(Metric metric, float value);
 
-/// Composes quality flags for one reading: adds SR_Q_IMPLAUSIBLE when the value is out of range.
+/// Composes quality flags for one reading: adds the implausible bit when the value is out of range.
 uint8_t qualityFlagsFor(Metric metric, float value, uint8_t baseFlags);
 
 /// Seconds between the batch's base timestamp and this sample. Negative deltas (clock stepped backwards,

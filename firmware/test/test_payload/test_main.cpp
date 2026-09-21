@@ -6,6 +6,15 @@
 
 #include "payload.h"
 
+// Unity's RUN_TEST needs a declaration in scope before the definition further down the file.
+void test_temperature_plausibility_boundaries(void);          // NOLINT(readability-identifier-naming) Unity naming
+void test_humidity_and_lux_plausibility_boundaries(void);
+void test_implausible_value_is_flagged_not_dropped(void);
+void test_quality_flags_preserve_base_bits(void);
+void test_relative_seconds_are_ascending_within_a_batch(void);
+void test_relative_seconds_reject_out_of_order_samples(void);
+void test_centi_encoding_round_trips(void);
+void test_payload_budget_allows_a_backfill_batch(void);
 void process_payload(void);
 
 void setUp(void) {}
@@ -64,14 +73,15 @@ void test_humidity_and_lux_plausibility_boundaries(void) {
 void test_implausible_value_is_flagged_not_dropped(void) {
     const uint8_t flags = sr::payload::qualityFlagsFor(sr::payload::Metric::AirTemperature, 85.0f, 0);
 
-    TEST_ASSERT_BITS_HIGH(SR_Q_IMPLAUSIBLE, flags);
+    TEST_ASSERT_BITS_HIGH(sr::payload::QualityImplausible, flags);
 }
 
 void test_quality_flags_preserve_base_bits(void) {
     const uint8_t flags = sr::payload::qualityFlagsFor(
-        sr::payload::Metric::AirTemperature, 28.5f, SR_Q_BACKFILLED | SR_Q_CALIBRATION_APPLIED);
+        sr::payload::Metric::AirTemperature, 28.5f,
+        sr::payload::QualityBackfilled | sr::payload::QualityCalibrationApplied);
 
-    TEST_ASSERT_EQUAL_UINT8(SR_Q_BACKFILLED | SR_Q_CALIBRATION_APPLIED, flags);
+    TEST_ASSERT_EQUAL_UINT8(sr::payload::QualityBackfilled | sr::payload::QualityCalibrationApplied, flags);
 }
 
 // TC-U-FW-07 — `t` is a seconds offset from the batch timestamp and must increase; the server rejects
