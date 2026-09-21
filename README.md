@@ -109,7 +109,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **19 tests passed** |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
 | No committed secrets or build output | `git ls-files` audit | ✅ 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores |
-| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`), ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
+| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
 | Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **8 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, and the SQL-level invariants reject what they should |
 
 ### What M1 still does *not* verify (stated, not hidden)
