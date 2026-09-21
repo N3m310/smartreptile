@@ -107,6 +107,13 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 | Weekly (M3 onward) | 8 h soak overnight with the real node | Trend recorded; regression investigated |
 | Before submission | Full run: unit + integration + widget + E2E + soak + chaos drills | All evidence saved as screenshots/logs for the report |
 
+> **As-built vs. plan (measured 2026-09-21, first green run `35596343801`).** The CI row above is the *target*.
+> What the four jobs actually contain today: 54 backend unit tests, `flutter analyze` + 19 app tests, 22 firmware
+> host tests + `pio run -e esp32dev`, and the full-history secret scan. There are **no integration tests yet and
+> no SQL Server service container**, so nothing in CI exercises the migration apply, the reference seeder or the
+> health checks — those are verified by hand and would not fail a pull request if they broke. Adding an
+> integration job is what turns that row from a plan into a description.
+
 ## 8. Defect management
 
 - Bugs found by tests get an id `BUG-xx` in `05-release/03-risks-assumptions-decisions.md` §4 with: symptom,

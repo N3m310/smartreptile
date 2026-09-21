@@ -109,11 +109,14 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **19 tests passed** |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
 | No committed secrets or build output | `git ls-files` audit | ✅ 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores |
+| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all four jobs green** (`backend`, `app`, `firmware`, `secret-scan`), first green run `35596343801` on 2026-09-21, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
-- **CI has never run.** The repository has no git remote yet, so `.github/workflows/ci.yml` is unvalidated YAML —
-  a badge from it would currently mean nothing.
+- **CI runs no database-dependent tests.** The four jobs cover build, formatting, unit tests, the firmware host
+  tests, the ESP32 target build, and secret scanning. Nothing in CI starts SQL Server, so the migration apply,
+  the reference seeder and the health checks are verified by hand (gate table above) and would not fail a PR if
+  they broke. An integration job with a SQL Server service container is the obvious next step.
 - **The REST surface does not exist yet.** The API exposes ops endpoints only (`/health`, `/version`, `/metrics`,
   the SignalR hub), so the dashboard's live view requests `/api/v1/terrariums`, receives `404`, and degrades to
   its empty state showing `(http_404)` — by design, not by accident; those endpoints are M2/M3 work.
@@ -126,7 +129,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 
 ### Defects found by running it (all fixed)
 
-Eleven issues surfaced only because each gate was executed rather than assumed:
+Twelve issues surfaced only because each gate was executed rather than assumed:
 
 1. **The firmware would not compile** — the ESP32 framework's own `config.h` silently shadowed ours, leaving every
    `SR_*` macro undefined without any "file not found" error. Renamed to `sr_config.h` plus `-Iinclude`.
@@ -157,8 +160,11 @@ Eleven issues surfaced only because each gate was executed rather than assumed:
     actually **executed** rather than compiled. The estimate is now calibrated against the measured §3.2 payload
     (~1.6 KB typical, ~2.8 KB worst case with the optional `raw` object) and the test asserts against the
     configured constants instead of copies of them.
-
-One environment trap is worth writing down because it cost real time and produces a misleading symptom: on
+12. **The secret-scan job failed on its very first run** — `gitleaks-action` computed the range
+    `<root-commit>^..HEAD`, and `^` cannot resolve for a commit that has no parent, so it exited 1 after scanning
+    **0 bytes** with nothing to find (verified: the same repo scans clean locally). Only reachable by executing
+    the pipeline. The step now installs a pinned gitleaks and scans the full history, which also catches secrets
+    committed and later removed.
 Windows `localhost` resolves to IPv6 `::1` first, Docker Desktop does not proxy a container's published port on
 `::1`, and a refused IPv6 attempt is followed by a **connect timeout** rather than a quick fallback — so use
 `127.0.0.1` in every host-side connection string.
