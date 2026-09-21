@@ -10,6 +10,11 @@ on:
 #   app      — analyze + widget/unit tests
 #   firmware — host unit tests (native env) + ESP32 build
 #   secrets  — the scan that keeps .env out of the repository (NFR-04)
+#
+# Action versions are chosen so every action runs on the Node 24 runtime: checkout v5, setup-dotnet v5,
+# setup-python v6. The previous majors run on Node 20, which the runner now force-upgrades and annotates on every
+# run (https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/). Do not
+# "simplify" these back to the older majors without checking `runs.using` in each action's action.yml.
 
 jobs:
   backend:
@@ -20,9 +25,9 @@ jobs:
         working-directory: backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
@@ -49,7 +54,7 @@ jobs:
         working-directory: app
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The team develops on Flutter stable; 3.47.x was current when this pipeline was written. The exact
       # local version is recorded in docs/03-implementation/01 §1.
@@ -78,9 +83,9 @@ jobs:
         working-directory: firmware
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -100,8 +105,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
+          # The secret scan walks the whole history, so it needs every commit, not just the tip.
           fetch-depth: 0
 
       - name: Install gitleaks (pinned)
