@@ -1,0 +1,91 @@
+# SmartReptile — local demo stack (§03-implementation/01 §6, ADR-012)
+#
+# NOTE: there is deliberately NO separate `mqtt` service — the MQTT broker is hosted
+# inside the API process (MQTTnet, §03-implementation/01 §1), so topics 1883/8883 are
+# published by the `api` service. If the broker is ever extracted to its own container
+# (e.g. Mosquitto / HiveMQ), add a `mqtt` service here and point MQTT_HOST at it.
+
+name: smartreptile
+
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: smartreptile-db
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+      MSSQL_PID: Developer
+    ports:
+      # bound to loopback only — never expose SQL Server to the network (§02-design/06 §6)
+      - "127.0.0.1:1433:1433"
+    volumes:
+      - db-data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: src/SmartReptile.Api/Dockerfile
+      args:
+        VERSION: ${VERSION:-0.1.0}
+    container_name: smartreptile-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: ${DB_CONNECTION_STRING}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
+      Jwt__AccessTokenMinutes: ${JWT_ACCESS_MINUTES:-15}
+      Jwt__RefreshTokenDays: ${JWT_REFRESH_DAYS:-30}
+      Mqtt__Host: ${MQTT_HOST:-0.0.0.0}
+      Mqtt__Port: ${MQTT_PORT:-1883}
+      Mqtt__EnableTls: ${MQTT_ENABLE_TLS:-false}
+      Mqtt__TlsPort: ${MQTT_TLS_PORT:-8883}
+      Mqtt__DisablePlaintextEndpoint: ${MQTT_DISABLE_PLAINTEXT:-false}
+      Mqtt__ServerCertificatePath: ${MQTT_SERVER_CERT_PATH:-}
+      Mqtt__ServerCertificatePassword: ${MQTT_SERVER_CERT_PASSWORD:-}
+      Mqtt__RequireClientAuthentication: ${MQTT_REQUIRE_CLIENT_AUTH:-true}
+      Provisioning__SharedKey: ${PROVISIONING_SHARED_KEY:-}
+      Provisioning__ClaimCodeMinutes: ${PROVISIONING_CLAIM_CODE_MINUTES:-15}
+      Retention__RawDays: ${RETENTION_RAW_DAYS:-90}
+      Retention__RollupMonths: ${RETENTION_ROLLUP_MONTHS:-24}
+      Defaults__TimeZoneId: ${DEFAULT_TIMEZONE:-Asia/Ho_Chi_Minh}
+      Ingest__HttpFallbackEnabled: ${INGEST_HTTP_FALLBACK_ENABLED:-true}
+      Startup__ApplyMigrationsOnStartup: ${STARTUP_APPLY_MIGRATIONS:-true}
+      Startup__SeedReferenceDataOnStartup: ${STARTUP_SEED_REFERENCE_DATA:-true}
+      Cors__AllowedOrigins__0: ${CORS_ORIGIN_0:-http://localhost:8081}
+      Cors__AllowedOrigins__1: ${CORS_ORIGIN_1:-http://localhost:8080}
+      OpenTelemetry__ServiceName: ${OTEL_SERVICE_NAME:-SmartReptile}
+      OpenTelemetry__Tracing__SampleRatio: ${OTEL_TRACE_SAMPLE_RATIO:-0.25}
+      OpenTelemetry__Otlp__Endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports:
+      - "8080:8080"      # REST + SignalR
+      - "1883:1883"      # MQTT plaintext (dev only; disabled in the release runbook, FR-05)
+      - "8883:8883"      # MQTT over TLS
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads      # camera snapshots + export files (FR-15/FR-17)
+      - ./certs:/certs:ro
+    restart: unless-stopped
+
+  web:
+    image: nginx:1.27-alpine
+    container_name: smartreptile-web
+    ports:
+      - "8081:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  uploads:

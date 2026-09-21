@@ -1,0 +1,9 @@
+# Normalise line endings so the CI formatting gate (dotnet format --verify-no-changes) does not fail on the
+# difference between a Windows checkout and a Linux runner.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.apk binary
+*.aab binary

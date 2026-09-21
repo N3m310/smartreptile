@@ -1,0 +1,49 @@
+{
+  "@@locale": "en",
+  "appTitle": "SmartReptile",
+  "tabHome": "Home",
+  "tabHistory": "History",
+  "tabAlerts": "Alerts",
+  "tabMore": "More",
+  "statusInRange": "In range",
+  "statusOutOfRange": "Out of range",
+  "statusCritical": "Critical",
+  "statusNoData": "No data",
+  "statusUnavailable": "Sensor unavailable",
+  "statusMaintenance": "Maintenance",
+  "deviceOnline": "online",
+  "deviceOffline": "offline",
+  "livePaused": "Live updates paused",
+  "band": "band",
+  "metricTempC": "Temperature",
+  "metricHumidityPct": "Humidity",
+  "metricLightLux": "Light",
+  "metricUvIndex": "UV index",
+  "metricSurfaceTempC": "Surface temperature",
+  "targetBandLabel": "Target {min}–{max} {unit}",
+  "@targetBandLabel": {
+    "placeholders": {
+      "min": { "type": "String" },
+      "max": { "type": "String" },
+      "unit": { "type": "String" }
+    }
+  },
+  "lastUpdatedSeconds": "{count, plural, =1 {1 second ago} other {{count} seconds ago}}",
+  "@lastUpdatedSeconds": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lastUpdatedMinutes": "{count, plural, =1 {1 minute ago} other {{count} minutes ago}}",
+  "@lastUpdatedMinutes": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lastUpdatedHours": "{count, plural, =1 {1 hour ago} other {{count} hours ago}}",
+  "@lastUpdatedHours": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "emptyStateTitle": "No terrarium yet",
+  "emptyStateBody": "Create a terrarium, claim a sensor node, and readings will appear here.",
+  "errorGeneric": "Something went wrong",
+  "errorBackendUnreachable": "Cannot reach the server. Showing the last known values.",
+  "retry": "Retry",
+  "maintenanceNotice": "Maintenance mode: alerts are recorded but not sent"
+}

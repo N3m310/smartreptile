@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- API host: endpoints, authentication, SignalR hub, background workers, DI wiring. -->
+  <PropertyGroup>
+    <RootNamespace>SmartReptile.Api</RootNamespace>
+    <AssemblyName>SmartReptile.Api</AssemblyName>
+    <UserSecretsId>smartreptile-api</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartReptile.Application\SmartReptile.Application.csproj" />
+    <ProjectReference Include="..\SmartReptile.Infrastructure\SmartReptile.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+    <!-- Required by the EF Core tools: `dotnet ef` treats the startup project as the design-time host. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

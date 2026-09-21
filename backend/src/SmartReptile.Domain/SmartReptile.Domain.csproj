@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Domain: entities, value objects and rules. Depends on nothing (no EF Core, no HTTP).
+    See §02-design/01 §4 — dependency rules are enforced by project references.
+  -->
+  <PropertyGroup>
+    <RootNamespace>SmartReptile.Domain</RootNamespace>
+    <AssemblyName>SmartReptile.Domain</AssemblyName>
+  </PropertyGroup>
+</Project>

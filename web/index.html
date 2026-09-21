@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Injected at container start so the same static files work on localhost and on the demo host. -->
+    <meta name="api-base" content="http://localhost:8080" />
+    <title>SmartReptile · Live</title>
+    <link rel="stylesheet" href="css/app.css?v=0.1.0" />
+  </head>
+  <body>
+    <header class="page">
+      <h1>SmartReptile</h1>
+      <span class="muted">API: <span id="api-base-label">—</span></span>
+    </header>
+
+    <nav class="tabs">
+      <a href="index.html" aria-current="page">Live</a>
+      <a href="wallboard.html">Wallboard</a>
+      <a href="health.html">Health</a>
+    </nav>
+
+    <div id="banner" class="banner warn" hidden></div>
+
+    <p>
+      <label for="terrarium" class="muted">Terrarium</label>
+      <select id="terrarium"></select>
+      <span id="device-header" class="muted"></span>
+    </p>
+
+    <main id="cards" class="grid"></main>
+
+    <script type="module" src="js/pages/live.js?v=0.1.0"></script>
+  </body>
+</html>

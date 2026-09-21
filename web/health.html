@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="api-base" content="http://localhost:8080" />
+    <title>SmartReptile · Health</title>
+    <link rel="stylesheet" href="css/app.css?v=0.1.0" />
+  </head>
+  <!--
+    Health page (W8, M1 version): shows exactly what docs/04-quality/03 §5 drills rely on — readiness of the
+    database and the MQTT broker, plus the counter snapshot from /metrics. Honest numbers, no decoration.
+  -->
+  <body>
+    <header class="page">
+      <h1>SmartReptile · Health</h1>
+      <span class="muted">API: <span id="api-base-label">—</span></span>
+    </header>
+
+    <nav class="tabs">
+      <a href="index.html">Live</a>
+      <a href="wallboard.html">Wallboard</a>
+      <a href="health.html" aria-current="page">Health</a>
+    </nav>
+
+    <h2>Readiness</h2>
+    <pre id="ready" class="card">loading…</pre>
+
+    <h2>Counters</h2>
+    <pre id="metrics" class="card">loading…</pre>
+
+    <script type="module">
+      import { getJson } from './js/api.js';
+
+      const ready = document.getElementById('ready');
+      const metrics = document.getElementById('metrics');
+
+      async function load() {
+        try {
+          ready.textContent = JSON.stringify(await getJson('/health/ready'), null, 2);
+        } catch (error) {
+          ready.textContent = `unreachable: ${error.code}`;
+        }
+
+        try {
+          metrics.textContent = JSON.stringify(await getJson('/metrics'), null, 2);
+        } catch (error) {
+          metrics.textContent = `unreachable: ${error.code}`;
+        }
+      }
+
+      load();
+      setInterval(load, 15000);
+    </script>
+  </body>
+</html>

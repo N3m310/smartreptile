@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+# One pipeline, four gates (§03-implementation/01 §1, §04-quality/01 §7):
+#   backend  — build, formatting, unit tests, vulnerable packages
+#   app      — analyze + widget/unit tests
+#   firmware — host unit tests (native env) + ESP32 build
+#   secrets  — the scan that keeps .env out of the repository (NFR-04)
+
+jobs:
+  backend:
+    name: Backend (build, format, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore SmartReptile.sln
+
+      - name: Build (warnings are errors)
+        run: dotnet build SmartReptile.sln --configuration Release --no-restore
+
+      - name: Formatting gate
+        run: dotnet format SmartReptile.sln --verify-no-changes --severity error --no-restore
+
+      - name: Unit tests
+        run: dotnet test SmartReptile.sln --configuration Release --no-build --verbosity normal
+
+      - name: Vulnerable packages
+        run: dotnet list SmartReptile.sln package --vulnerable --include-transitive
+
+  app:
+    name: Flutter app (analyze, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The team develops on Flutter stable; 3.47.x was current when this pipeline was written. The exact
+      # local version is recorded in docs/03-implementation/01 §1.
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Generate localisations
+        run: flutter gen-l10n
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Tests
+        run: flutter test --coverage
+
+  firmware:
+    name: Firmware (native tests, ESP32 build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: pip install "platformio==6.*"
+
+      # Host build of the pure logic: filters, ring buffer, payload rules. No hardware, no network.
+      - name: Native unit tests
+        run: pio test -e native
+
+      # Real target build. This is the gate that catches Arduino/ESP32 API mistakes.
+      - name: Build for ESP32
+        run: pio run -e esp32dev
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Belt and braces: a plain grep for the shapes of secret that this project actually uses.
+      - name: Repository must not contain a real .env or certificate
+        run: |
+          set -e
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked in git. Remove it and rotate every value it contained."
+            exit 1
+          fi
+          if git ls-files | grep -E '\.(pfx|p12|jks|keystore)$'; then
+            echo "::error::a signing/certificate file is tracked in git"
+            exit 1
+          fi
+          echo "no committed secrets or certificates"

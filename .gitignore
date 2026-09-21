@@ -1,0 +1,51 @@
+# ---- secrets: never commit these ----
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.pem
+*.key
+secrets/
+firebase-service-account*.json
+
+# ---- .NET ----
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.lscache
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+
+# ---- Flutter / Dart ----
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/android/.gradle/
+app/android/local.properties
+app/android/key.properties
+app/android/app/*.jks
+app/ios/Pods/
+app/ios/.symlinks/
+app/**/generated_plugin_registrant.dart
+app/lib/l10n/generated/
+
+# ---- PlatformIO / firmware ----
+firmware/.pio/
+firmware/include/secrets.h
+firmware/.pioenvs/
+
+# ---- node / tooling ----
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+__pycache__/
+.venv/

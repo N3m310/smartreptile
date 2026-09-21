@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Application: use cases, service contracts and DTOs. Interfaces live here, implementations live in
+    Infrastructure (§03-implementation/02 §2.1).
+  -->
+  <PropertyGroup>
+    <RootNamespace>SmartReptile.Application</RootNamespace>
+    <AssemblyName>SmartReptile.Application</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartReptile.Domain\SmartReptile.Domain.csproj" />
+  </ItemGroup>
+</Project>

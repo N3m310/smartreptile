@@ -1,0 +1,42 @@
+{
+  "@@locale": "vi",
+  "appTitle": "SmartReptile",
+  "tabHome": "Trang chủ",
+  "tabHistory": "Lịch sử",
+  "tabAlerts": "Cảnh báo",
+  "tabMore": "Thêm",
+  "statusInRange": "Trong ngưỡng",
+  "statusOutOfRange": "Ngoài ngưỡng",
+  "statusCritical": "Nguy hiểm",
+  "statusNoData": "Không có dữ liệu",
+  "statusUnavailable": "Cảm biến lỗi",
+  "statusMaintenance": "Đang bảo trì",
+  "deviceOnline": "trực tuyến",
+  "deviceOffline": "ngoại tuyến",
+  "livePaused": "Đã tạm dừng cập nhật trực tiếp",
+  "band": "ngưỡng",
+  "metricTempC": "Nhiệt độ",
+  "metricHumidityPct": "Độ ẩm",
+  "metricLightLux": "Ánh sáng",
+  "metricUvIndex": "Chỉ số UV",
+  "metricSurfaceTempC": "Nhiệt độ bề mặt",
+  "targetBandLabel": "Ngưỡng {min}–{max} {unit}",
+  "lastUpdatedSeconds": "{count, plural, =1 {1 giây trước} other {{count} giây trước}}",
+  "@lastUpdatedSeconds": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lastUpdatedMinutes": "{count, plural, =1 {1 phút trước} other {{count} phút trước}}",
+  "@lastUpdatedMinutes": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lastUpdatedHours": "{count, plural, =1 {1 giờ trước} other {{count} giờ trước}}",
+  "@lastUpdatedHours": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "emptyStateTitle": "Chưa có bể nuôi",
+  "emptyStateBody": "Tạo bể nuôi, kết nối thiết bị cảm biến, dữ liệu sẽ hiển thị tại đây.",
+  "errorGeneric": "Đã xảy ra lỗi",
+  "errorBackendUnreachable": "Không kết nối được máy chủ. Đang hiển thị giá trị gần nhất.",
+  "retry": "Thử lại",
+  "maintenanceNotice": "Chế độ bảo trì: cảnh báo vẫn được ghi nhận nhưng không gửi đi"
+}

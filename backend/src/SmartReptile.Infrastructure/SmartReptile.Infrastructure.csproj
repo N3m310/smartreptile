@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Infrastructure: EF Core, MQTT broker, notification channels, health checks.
+    It implements Application interfaces; it never makes business decisions (§02-design/01 §4).
+  -->
+  <PropertyGroup>
+    <RootNamespace>SmartReptile.Infrastructure</RootNamespace>
+    <AssemblyName>SmartReptile.Infrastructure</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartReptile.Domain\SmartReptile.Domain.csproj" />
+    <ProjectReference Include="..\SmartReptile.Application\SmartReptile.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The Web SDK adds these implicitly for the API; a class library needs them declared. -->
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="10.0.2" />
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+  </ItemGroup>
+</Project>

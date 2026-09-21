@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="api-base" content="http://localhost:8080" />
+    <title>SmartReptile · Wallboard</title>
+    <link rel="stylesheet" href="css/app.css?v=0.1.0" />
+  </head>
+  <!--
+    Wallboard (W1): no navigation chrome, large type, readable from two metres, left on a screen during the
+    demo and used for report screenshots (docs/02-design/04 §1.2, docs/04-quality/03 §4.7).
+  -->
+  <body class="wallboard">
+    <header class="page">
+      <h1 id="title">SmartReptile</h1>
+      <span class="muted" id="device-header"></span>
+    </header>
+
+    <div id="banner" class="banner warn" hidden></div>
+    <main id="cards" class="grid"></main>
+
+    <select id="terrarium" hidden></select>
+    <span id="api-base-label" hidden></span>
+
+    <script type="module" src="js/pages/live.js?v=0.1.0"></script>
+  </body>
+</html>

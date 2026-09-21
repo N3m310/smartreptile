@@ -1,0 +1,65 @@
+/* SmartReptile dashboard styles (design tokens from docs/02-design/04 §3).
+   Deliberately plain CSS with no build step: a demo must not fail because npm was unavailable (ADR-003). */
+
+:root {
+  --color-in-range: #2e7d32;
+  --color-warning: #ed6c02;
+  --color-critical: #c62828;
+  --color-unknown: #616161;
+  --radius: 8px;
+  --space: 16px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: var(--space);
+  font-family: var(--font);
+  color: #1b1b1b;
+  background: #fafafa;
+}
+
+header.page { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+header.page h1 { font-size: 20px; margin: 0; }
+.muted { color: #5f5f5f; font-size: 13px; }
+
+nav.tabs { display: flex; gap: 12px; margin-bottom: var(--space); font-size: 14px; }
+nav.tabs a { color: #1b1b1b; text-decoration: none; padding: 4px 8px; border-radius: 6px; }
+nav.tabs a[aria-current="page"] { background: #e8f5e9; font-weight: 600; }
+
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+
+.card {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.card.in-range { border-color: rgba(46, 125, 50, 0.45); }
+.card.out-of-range { border-color: rgba(237, 108, 2, 0.5); }
+.card.critical { border-color: rgba(198, 40, 40, 0.55); }
+.card.stale { opacity: 0.55; }
+
+.card .metric-name { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #5f5f5f; }
+.card .value { font-size: 30px; font-weight: 600; }
+.card .unit { font-size: 14px; margin-left: 4px; }
+.card .band, .card .age { font-size: 12px; color: #5f5f5f; margin-top: 4px; }
+
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+.badge.in-range { color: var(--color-in-range); background: rgba(46, 125, 50, 0.12); }
+.badge.out-of-range { color: var(--color-warning); background: rgba(237, 108, 2, 0.12); }
+.badge.critical { color: var(--color-critical); background: rgba(198, 40, 40, 0.12); }
+.badge.no-data, .badge.unavailable, .badge.maintenance { color: var(--color-unknown); background: rgba(97, 97, 97, 0.12); }
+
+.banner { padding: 12px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; }
+.banner.warn { background: rgba(237, 108, 2, 0.12); color: #8a4b00; }
+.banner.error { background: rgba(198, 40, 40, 0.12); color: #8a1c1c; }
+
+/* Wallboard: no chrome, big type, readable from two metres (docs/04-quality/03 §4.7). */
+body.wallboard { background: #101010; color: #f5f5f5; padding: 32px; }
+body.wallboard .card { background: #1c1c1c; border-color: rgba(255, 255, 255, 0.14); }
+body.wallboard .card .value { font-size: 72px; }
+body.wallboard .card .metric-name, body.wallboard .card .band, body.wallboard .card .age { color: #bdbdbd; }
+body.wallboard header.page h1 { font-size: 32px; }
