@@ -26,6 +26,14 @@ widget tests.
 | TC-U-FW-11 | Backoff schedule caps and jitters | 8 consecutive failures | Delay sequence 2,4,8,16,32,60,60,60 with ±20% jitter, never exceeding 60 s | 2 | FR-06 |
 | TC-U-FW-12 | Clock-unsynced flag when NTP never succeeds | NTP stub fails | Samples carry quality bit 16 and are still produced | 1 | NFR-10 |
 
+> **Implementation status (measured 2026-09-21).** 22 host cases exist and pass — 8 `test_filters`, 8
+> `test_payload`, 6 `test_ringbuffer`. They cover TC-U-FW-01…06 and TC-U-FW-09 in full, and TC-U-FW-07
+> partially: the `t`-offset ordering and the 4 KB payload budget are tested, but "emits the documented keys"
+> awaits the M2 payload builder. TC-U-FW-08 and TC-U-FW-10…12 are **not written** — they need the payload
+> builder, the transport state machine, the backoff schedule and the NTP flag, none of which exist yet. So the
+> `12` above is the number of *documented* cases; the release checklist quotes **22** because that is the number
+> *executed*. Keep those two numbers distinct when reporting them.
+
 ```cpp
 // firmware/test/test_filters/test_main.cpp
 void test_median_rejects_single_glitch(void) {

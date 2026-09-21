@@ -1,0 +1,7 @@
+# The host-test image copies nothing from the source tree (the code is bind-mounted at run time), so the build
+# context only needs the Dockerfile. Excluding the PlatformIO build cache keeps context transfer instant instead
+# of tarring .pio/ on every build.
+
+.pio/
+build/
+*.zip

@@ -107,8 +107,28 @@ float decodeCenti(int16_t value) {
 }
 
 bool isPayloadWithinBudget(std::size_t metricCount, std::size_t sampleCount) {
-    // Rough but conservative: ~48 bytes per metric per sample plus ~200 bytes of envelope, against a 4 KB budget.
-    const std::size_t estimated = 200 + (metricCount * 48 * sampleCount);
+    // Sizing constants, worst case, for one metric in the §3.2 shape: a 3-char key plus quotes, colon, comma
+    // and a sign + 4 integer digits + 2 decimals ("lux":-3276.8,) is 14 bytes, so 16 leaves headroom.
+    //
+    // These numbers replace a first attempt of `200 + metricCount * 48 * sampleCount`, which estimated 5000
+    // bytes for the 5 × 20 batch that SR_BACKFILL_BATCH_MAX is documented to keep *under* the 4 KB budget —
+    // i.e. the guard was refusing the very batch the configuration told the firmware to send. The previous
+    // constants were calibrated against nothing; these are checked against the real serialisation, which
+    // measures ~1.6 KB for 5 × 20 without the optional `raw` object and ~2.8 KB with it.
+    //
+    // `kRawMetricsPerSample` is counted even though M1 firmware does not emit `raw` yet: §3.2 permits it, so
+    // the guard must not start under-reporting the day the sampling path grows one.
+    //
+    // Capacity check: 256 + 20 × (24 + 8 × 16) = 3296 bytes ≤ 4096, so a configured 20-sample batch fits with
+    // ~20 % margin while a 120-sample batch (the server's cap) is still refused at 18496 bytes.
+    constexpr std::size_t kEnvelopeBytes = 256;      // deviceId, seq, fw, ts, health, array brackets
+    constexpr std::size_t kPerSampleBytes = 24;      // {"t":86400, … "q":63},
+    constexpr std::size_t kPerMetricBytes = 16;      // "lux":-3276.8,
+    constexpr std::size_t kRawMetricsPerSample = 3;  // the optional per-sample `raw` sub-object (§3.2)
+
+    const std::size_t perSample = kPerSampleBytes + ((metricCount + kRawMetricsPerSample) * kPerMetricBytes);
+    const std::size_t estimated = kEnvelopeBytes + (sampleCount * perSample);
+
     return estimated <= SR_PAYLOAD_MAX_BYTES;
 }
 

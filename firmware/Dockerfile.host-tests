@@ -1,0 +1,31 @@
+# Host-test runner for the firmware's pure logic (filters, ring buffer, payload rules).
+#
+# WHY THIS EXISTS: `pio test -e native` needs a host C++ compiler, and the development machine has none
+# (no gcc/g++/clang, no MSVC C++ workload, no WSL build-essential), while PlatformIO ships no
+# `toolchain-gccnative` package for Windows. Without this image the 22 host cases can only ever run in CI,
+# which means they are effectively unrun while you are developing.
+#
+# It is ordinary Debian + g++ + PlatformIO — the same thing `ubuntu-latest` gives CI — so a green run here and
+# a green run there mean the same thing.
+#
+# Usage (from the repository root):
+#   docker build -f firmware/Dockerfile.host-tests -t smartreptile-fw-test firmware
+#   docker run --rm -v "$PWD/firmware:/firmware" smartreptile-fw-test
+#
+# The source is bind-mounted at run time rather than COPYed, so editing a test and re-running needs no rebuild.
+
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pinned to match the local PlatformIO (NFR-08). CI installs `platformio==6.*`.
+RUN pip install --no-cache-dir "platformio==6.2.0"
+
+WORKDIR /firmware
+
+# The `native` environment's platform package and the Unity framework are downloaded on first run and cached in
+# /root/.platformio inside the container, NOT in the bind mount. On a real project you would mount a named volume
+# there to keep runs fast; for 22 test cases the download is a few seconds and not worth the extra moving part.
+CMD ["pio", "test", "-e", "native"]

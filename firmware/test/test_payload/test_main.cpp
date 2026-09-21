@@ -5,6 +5,7 @@
 #include <unity.h>
 
 #include "payload.h"
+#include "sr_config.h"  // the budget and batch size the guard has to agree with, not a copy of them
 
 // Unity's RUN_TEST needs a declaration in scope before the definition further down the file.
 void test_temperature_plausibility_boundaries(void);          // NOLINT(readability-identifier-naming) Unity naming
@@ -109,9 +110,12 @@ void test_centi_encoding_round_trips(void) {
 }
 
 void test_payload_budget_allows_a_backfill_batch(void) {
-    // 5 metrics × 20 samples (the back-fill batch size) must fit the 4 KB payload budget.
-    TEST_ASSERT_TRUE(sr::payload::isPayloadWithinBudget(5, 20));
+    // Asserted against the configured constants, not copies of them: raising SR_BACKFILL_BATCH_MAX, or adding a
+    // sixth metric (which grows kMetricCount), must fail here rather than on hardware in the field. This is the
+    // test that caught the guard refusing its own configured batch at 5000 bytes estimated vs 4096 allowed.
+    TEST_ASSERT_TRUE(sr::payload::isPayloadWithinBudget(sr::payload::kMetricCount, SR_BACKFILL_BATCH_MAX));
 
-    // …and the budget must actually bite rather than being decorative.
-    TEST_ASSERT_FALSE(sr::payload::isPayloadWithinBudget(5, 120));
+    // …and the budget must actually bite rather than being decorative. The server caps a batch at 120 samples
+    // (§07-appendices/03 §4); the device-side guard has to refuse that well before the server does.
+    TEST_ASSERT_FALSE(sr::payload::isPayloadWithinBudget(sr::payload::kMetricCount, 120));
 }

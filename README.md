@@ -105,15 +105,15 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | MQTT rejects anonymous devices | `paho-mqtt` connect without credentials | ✅ `CONNACK: Bad user name or password`, and `mqtt_rejected_connections_total` incremented |
 | MQTT verifies the device secret | — | ⬜ **M2 work**: M1 rejects anonymous connections only; the `DeviceCredential` lookup lands with provisioning (FR-05) |
 | Firmware builds for the target | `pio run -e esp32dev` | ✅ RAM 13.6% (44 536 B), Flash 20.7% (270 673 B) |
-| Firmware host unit tests | `pio test -e native` | ⚠️ 22 cases written; **runs in CI only** — this machine has no host C++ compiler (see `firmware/README.md`) |
+| Firmware host unit tests | `docker run --rm -v "$PWD/firmware:/firmware" smartreptile-fw-test` (image from `firmware/Dockerfile.host-tests`; plain `pio test -e native` wherever a host compiler exists) | ✅ **22/22 passed** — 8 filters + 8 payload + 6 ring buffer, ~18 s. First ever execution, and it caught defect 11 |
 | App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **19 tests passed** |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
-| No committed secrets or build output | `git ls-files` audit | ✅ 127 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores |
+| No committed secrets or build output | `git ls-files` audit | ✅ 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
-- **CI has never run.** The repository has no git remote yet, so `.github/workflows/ci.yml` is unvalidated YAML.
-  It matters most for the `firmware` job, which is the only place the 22 host tests are ever *executed*.
+- **CI has never run.** The repository has no git remote yet, so `.github/workflows/ci.yml` is unvalidated YAML —
+  a badge from it would currently mean nothing.
 - **The REST surface does not exist yet.** The API exposes ops endpoints only (`/health`, `/version`, `/metrics`,
   the SignalR hub), so the dashboard's live view requests `/api/v1/terrariums`, receives `404`, and degrades to
   its empty state showing `(http_404)` — by design, not by accident; those endpoints are M2/M3 work.
@@ -126,7 +126,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 
 ### Defects found by running it (all fixed)
 
-Ten issues surfaced only because each gate was executed rather than assumed:
+Eleven issues surfaced only because each gate was executed rather than assumed:
 
 1. **The firmware would not compile** — the ESP32 framework's own `config.h` silently shadowed ours, leaving every
    `SR_*` macro undefined without any "file not found" error. Renamed to `sr_config.h` plus `-Iinclude`.
@@ -151,6 +151,12 @@ Ten issues surfaced only because each gate was executed rather than assumed:
     token during pre-login and caps at its own 15 s timeout, *and* `CanConnectAsync` blocks its caller
     synchronously before returning a task — so racing it against a delay started the timer too late. The probe now
     runs on a thread-pool thread and answers in 3.0 s.
+11. **The firmware's payload-budget guard refused its own configured batch.** `isPayloadWithinBudget` estimated
+    5000 bytes for 5 metrics × 20 samples against a 4096-byte budget, so the guard rejected exactly the batch
+    `SR_BACKFILL_BATCH_MAX` is documented to keep *under* that budget. Only visible once the 22 host cases were
+    actually **executed** rather than compiled. The estimate is now calibrated against the measured §3.2 payload
+    (~1.6 KB typical, ~2.8 KB worst case with the optional `raw` object) and the test asserts against the
+    configured constants instead of copies of them.
 
 One environment trap is worth writing down because it cost real time and produces a misleading symptom: on
 Windows `localhost` resolves to IPv6 `::1` first, Docker Desktop does not proxy a container's published port on

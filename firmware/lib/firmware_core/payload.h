@@ -57,7 +57,12 @@ int16_t encodeCenti(float value);
 /// Decodes centi-units back to a float.
 float decodeCenti(int16_t value);
 
-/// True when the key list for a sample stays inside the payload budget (rule V-01).
+/// Number of metrics in the wire format. Derived from the enum rather than hard-coded, so adding a metric
+/// cannot quietly leave the payload-budget check — or the tests that call it — out of date.
+constexpr std::size_t kMetricCount = static_cast<std::size_t>(Metric::SurfaceTemperature) + 1;
+
+/// True when a batch of `sampleCount` samples × `metricCount` metrics stays inside the payload budget (rule
+/// V-01). The estimate is calibrated against measured §3.2 payload sizes, not guessed — see `payload.cpp`.
 bool isPayloadWithinBudget(std::size_t metricCount, std::size_t sampleCount);
 
 }  // namespace payload

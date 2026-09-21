@@ -21,18 +21,23 @@ firmware `build_info.h`, the API assembly, and the app's `--dart-define=APP_VERS
 
 ```bash
 cd firmware
-pio run -e native && pio test -e native          # 12 native tests must pass first
+pio test -e native                               # 22 host cases must pass first (see firmware/README.md if no g++)
 pio run -e esp32dev                              # release build
 pio run -e esp32dev -t size                      # record flash/RAM numbers for the report
 pio run -e esp32dev -t upload                    # flash
 pio device monitor -b 115200                     # confirm version + first sample
 ```
 
+> `pio run -e native` is deliberately absent: the `native` environment exists to be *tested*, and a plain
+> `pio run -e native` tries to compile `src/main.cpp`, which needs Arduino headers and cannot build for the host.
+> On a machine with no host C++ compiler, run the cases through the image in `firmware/Dockerfile.host-tests`
+> instead of installing a toolchain — that is how the 22/22 figure below was measured.
+
 Release checklist:
 
 | # | Item | Evidence |
 |---|---|---|
-| 2.1 | `pio test -e native` green (12/12) | terminal output saved |
+| 2.1 | `pio test -e native` green — **22/22** host cases (8 filters + 8 payload + 6 ring buffer), measured 2026-09-21 | terminal output saved |
 | 2.2 | Version string matches `VERSION` | serial banner screenshot |
 | 2.3 | No secret in the binary or the logs | `pio run -t upload` then grep the serial log for the secret pattern → no match |
 | 2.4 | `1883` unused; TLS `8883` verified against the real broker certificate | serial log shows successful TLS handshake |
