@@ -3,8 +3,8 @@
 IoT environmental monitoring and alerting for reptile terrariums — **v1: measure, store, display, alert.
 No AI, no actuation** (see `docs/07-appendices/06-v2-ai-roadmap.md` for what comes next).
 
-> Design documentation for this repository lives in [`../smartreptile-docs/`](../smartreptile-docs/) (34 files:
-> product, design, implementation, quality, release, report, appendices). Section references below (`§`) point there.
+> Design documentation for this repository lives in [`docs/`](docs/) — 34 files covering product, design,
+> implementation, quality, release, report and the appendices. Section references below (`§`) point there.
 
 | Component | Path | Stack |
 |---|---|---|
