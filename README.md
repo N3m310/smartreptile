@@ -109,14 +109,16 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **19 tests passed** |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
 | No committed secrets or build output | `git ls-files` audit | ✅ 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores |
-| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all four jobs green** (`backend`, `app`, `firmware`, `secret-scan`), first green run `35596343801` on 2026-09-21, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
+| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`), ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **8 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, and the SQL-level invariants reject what they should |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
-- **CI runs no database-dependent tests.** The four jobs cover build, formatting, unit tests, the firmware host
-  tests, the ESP32 target build, and secret scanning. Nothing in CI starts SQL Server, so the migration apply,
-  the reference seeder and the health checks are verified by hand (gate table above) and would not fail a PR if
-  they broke. An integration job with a SQL Server service container is the obvious next step.
+- **No end-to-end, soak or chaos coverage.** The database paths are enforced by the `integration` job now, but
+  nothing drives the full chain (device → broker → threshold engine → alert → notification), no test runs for hours,
+  and no failure drill has been executed against a live stack — those are M5 work by plan. The integration tests
+  also run against a single SQL Server that is already up, so they say nothing about a database that disappears
+  mid-run.
 - **The REST surface does not exist yet.** The API exposes ops endpoints only (`/health`, `/version`, `/metrics`,
   the SignalR hub), so the dashboard's live view requests `/api/v1/terrariums`, receives `404`, and degrades to
   its empty state showing `(http_404)` — by design, not by accident; those endpoints are M2/M3 work.

@@ -107,12 +107,16 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 | Weekly (M3 onward) | 8 h soak overnight with the real node | Trend recorded; regression investigated |
 | Before submission | Full run: unit + integration + widget + E2E + soak + chaos drills | All evidence saved as screenshots/logs for the report |
 
-> **As-built vs. plan (measured 2026-09-21, first green run `35596343801`).** The CI row above is the *target*.
-> What the four jobs actually contain today: 54 backend unit tests, `flutter analyze` + 19 app tests, 22 firmware
-> host tests + `pio run -e esp32dev`, and the full-history secret scan. There are **no integration tests yet and
-> no SQL Server service container**, so nothing in CI exercises the migration apply, the reference seeder or the
-> health checks — those are verified by hand and would not fail a pull request if they broke. Adding an
-> integration job is what turns that row from a plan into a description.
+> **As-built vs. plan (measured 2026-09-21).** The CI row above is the target, and most of it now exists. The five
+> jobs contain: 54 backend unit tests, `flutter analyze` + 19 app tests, 22 firmware host tests +
+> `pio run -e esp32dev`, the full-history secret scan, and an **integration job** with a SQL Server 2022 service
+> container that runs 8 tests — migrations applied, reference data seeded idempotently, the SQL-level invariants —
+> and then boots the API and requires `/health/ready` to report Healthy.
+>
+> Still missing from that row: the E2E script set, the overnight soak and the chaos drills, which belong to M3/M5 as
+> planned. One caveat worth stating rather than letting a green check imply otherwise: the integration tests run
+> against a single SQL Server instance that is already up, so they say nothing about behaviour when the database is
+> unreachable mid-run — that is what the M5 drills are for.
 
 ## 8. Defect management
 

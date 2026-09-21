@@ -199,20 +199,30 @@ Index: `(EntityName, EntityId, OccurredAt DESC)`, `(OccurredAt)`.
 
 ## 4. DDL excerpts (the parts that carry invariants)
 
+> **Transcribed from the applied migration** (`20260921091523_InitialSchema`), not from the sketch that first
+> appeared here. The sketch named these `FK_Sample_Terrarium`, `IX_Sample_Device_Seq`, `UX_Alert_Open_Dedupe` and
+> `UX_Device_Terrarium_Active`; the migration creates none of those names. EF Core derives index and key names by
+> convention (`IX_<Table>_<Columns>`, `FK_<Child>_<Parent>_<Column>`) and appends the filter configured in
+> `OnModelCreating`, so a name in this appendix has to be copied from the database, never invented. The
+> integration tests assert these names, so a rename here without a migration change fails the build.
+>
+> Read them back with:
+> `SELECT i.name, i.filter_definition FROM sys.indexes i WHERE i.has_filter = 1;`
+
 ```sql
-ALTER TABLE [TelemetrySample]
-  ADD CONSTRAINT [FK_Sample_Terrarium] FOREIGN KEY ([TerrariumId]) REFERENCES [Terrarium]([Id]);
-CREATE UNIQUE INDEX [IX_Sample_Device_Seq] ON [TelemetrySample]([DeviceId], [Sequence]);
+ALTER TABLE [TelemetrySample] ADD CONSTRAINT [FK_TelemetrySample_Terrarium_TerrariumId]
+  FOREIGN KEY ([TerrariumId]) REFERENCES [Terrarium]([Id]) ON DELETE CASCADE;
+CREATE UNIQUE INDEX [IX_TelemetrySample_DeviceId_Sequence] ON [TelemetrySample]([DeviceId], [Sequence]);
 
-CREATE INDEX [IX_Sample_Terrarium_Recorded]
-  ON [TelemetrySample]([TerrariumId], [RecordedAt] DESC) INCLUDE ([Id]);
+CREATE INDEX [IX_TelemetrySample_TerrariumId_RecordedAt]
+  ON [TelemetrySample]([TerrariumId], [RecordedAt] DESC);
 
-CREATE UNIQUE INDEX [IX_Reading_Sample_Metric] ON [MetricReading]([SampleId], [MetricId]);
-ALTER TABLE [MetricReading] ADD CONSTRAINT [FK_Reading_Sample]
+CREATE UNIQUE INDEX [IX_MetricReading_SampleId_Metric] ON [MetricReading]([SampleId], [Metric]);
+ALTER TABLE [MetricReading] ADD CONSTRAINT [FK_MetricReading_TelemetrySample_SampleId]
   FOREIGN KEY ([SampleId]) REFERENCES [TelemetrySample]([Id]) ON DELETE CASCADE;
 
-CREATE UNIQUE INDEX [UX_Alert_Open_Dedupe] ON [Alert]([DedupeKey]) WHERE [State] <> 2;
-CREATE UNIQUE INDEX [UX_Device_Terrarium_Active] ON [Device]([TerrariumId])
+CREATE UNIQUE INDEX [IX_Alert_DedupeKey] ON [Alert]([DedupeKey]) WHERE [State] <> 2;
+CREATE UNIQUE INDEX [IX_Device_TerrariumId] ON [Device]([TerrariumId])
   WHERE [TerrariumId] IS NOT NULL AND [Status] <> 3;
 
 ALTER TABLE [Threshold] ADD CONSTRAINT [CK_Threshold_TargetOrder]
@@ -221,11 +231,12 @@ ALTER TABLE [Threshold] ADD CONSTRAINT [CK_Threshold_CriticalOrder]
   CHECK ([CriticalMin] IS NULL OR ([CriticalMin] <= [TargetMin] AND [CriticalMax] >= [TargetMax]));
 ```
 
-Why these five live in the database rather than in application code:
+Why these live in the database rather than in application code:
 an alert could be opened by a worker while a user acknowledges another (race), and a claim endpoint could be
 called twice concurrently. Application-level checks would pass a single-threaded test and fail in production;
-the filtered unique indexes make the invariant impossible to violate. The API maps the resulting
-`DbUpdateException` to `alert_duplicate` / `terrarium_already_bound` instead of returning a 500.
+the filtered unique indexes make the invariant impossible to violate. The API is to map the resulting
+`DbUpdateException` to `alert_duplicate` / `terrarium_already_bound` instead of returning a 500 (M2, with the
+endpoints that raise them).
 
 ---
 
