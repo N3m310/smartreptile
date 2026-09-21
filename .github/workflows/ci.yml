@@ -104,10 +104,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install gitleaks (pinned)
+        run: |
+          set -euo pipefail
+          version=8.24.3
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          sudo tar -xzf gitleaks.tar.gz -C /usr/local/bin gitleaks
+          rm gitleaks.tar.gz
+          gitleaks version
+
+      # Scans the whole history rather than using gitleaks-action's `<before>^..<after>` range. On a repository's
+      # FIRST push the oldest commit in the range is the root commit, which has no parent, so `<root>^` is an
+      # unknown revision: the action aborts with "ERROR: Unexpected exit code [1]" after scanning ~0 bytes —
+      # a red pipeline with nothing to find. Measured on run 35595915820, where the other three jobs passed and
+      # only this step failed, with `fatal: ambiguous argument '76d984b…^..a2a3a6a…': unknown revision` in the
+      # log. The same footgun returns whenever a repository is re-created or an orphan branch is pushed.
+      #
+      # Full-history scanning is also strictly stronger than per-push diffing: a credential committed and later
+      # removed is still found. Cost is negligible here (7 commits, ~900 KB, ~3 s). Verified against this
+      # repository before committing to it: "7 commits scanned ... no leaks found", exit 0.
+      - name: Scan the full history
+        run: gitleaks detect --source . --redact -v
 
       # Belt and braces: a plain grep for the shapes of secret that this project actually uses.
       - name: Repository must not contain a real .env or certificate
