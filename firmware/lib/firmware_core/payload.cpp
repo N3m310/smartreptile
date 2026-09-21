@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include "config.h"
+#include "sr_config.h"
 
 namespace sr {
 namespace payload {

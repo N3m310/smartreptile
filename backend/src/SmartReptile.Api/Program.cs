@@ -113,9 +113,12 @@ app.MapGet("/", () => Results.Ok(new
 })).WithTags("ops");
 
 // ---- start-up initialisation -------------------------------------------------------------------------
-// Migrations and reference-data seeding run here (not in a hosted service) so failures are logged before the
-// first request. A failure degrades the API instead of killing it: /health/ready reports the database as
-// unhealthy and the dashboard shows that data is unavailable rather than fabricating it.
+// The listener starts FIRST, then migrations/seeding run. Binding the port before touching the database keeps
+// the process responsive when SQL Server is slow or down: /health/live answers immediately and /health/ready
+// reports the failure, instead of the whole API looking dead for the duration of the connection retries
+// (NFR-03 degraded mode). A failure here degrades the API; it does not kill it.
+await app.StartAsync();
+
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var initializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
@@ -134,11 +137,11 @@ await using (var scope = app.Services.CreateAsyncScope())
     {
         logger.LogError(
             ex,
-            "Database initialisation failed; the API will start in degraded mode and /health/ready will report unhealthy");
+            "Database initialisation failed; the API keeps serving in degraded mode and /health/ready reports unhealthy");
     }
 }
 
-await app.RunAsync();
+await app.WaitForShutdownAsync();
 
 /// <summary>Exposed so integration tests can reference the API assembly.</summary>
 public partial class Program;

@@ -15,7 +15,7 @@
 
 #include <Arduino.h>
 
-#include "config.h"
+#include "sr_config.h"
 #include "filters.h"
 #include "payload.h"
 #include "ring_buffer.h"
