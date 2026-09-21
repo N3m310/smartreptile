@@ -1,0 +1,27 @@
+# Build context is ./backend (see src/SmartReptile.Api/Dockerfile). This file is REQUIRED for correctness,
+# not just speed: without it `COPY src/ src/` overwrites the Linux restore output produced inside the image
+# with whatever the developer's machine left in obj/. On Windows that assets file hard-codes
+# C:\Users\<user>\.nuget\packages\ paths, so `dotnet publish --no-restore` fails in the container with
+# NETSDK1064 ("package was not found ... might have been deleted since NuGet restore") even though every
+# package is present. Verified by reproducing that exact failure, then fixing it with this file.
+
+**/bin/
+**/obj/
+**/TestResults/
+**/publish/
+
+# Tooling / editor noise that must never reach the image.
+.vs/
+.vscode/
+*.user
+*.suo
+*.DotSettings.user
+
+# Local secrets and environment overrides.
+.env
+*.env
+!*.env.example
+appsettings.Local.json
+*.pfx
+*.p12
+*.snk

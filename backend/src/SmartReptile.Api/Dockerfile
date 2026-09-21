@@ -33,7 +33,12 @@ ENV ASPNETCORE_URLS=http://+:8080 \
 
 EXPOSE 8080 1883 8883
 
+# The aspnet runtime image ships NEITHER wget NOR curl, so the obvious `wget -qO- http://127.0.0.1:8080/...`
+# probe reports an application that is serving traffic perfectly well as `unhealthy` — verified: the check log
+# read "/bin/sh: 1: wget: not found" while /health/ready was answering 200 to the host. bash's /dev/tcp is
+# already in the base image, needs no extra package or build-time network access, and opens a real socket, so
+# a closed port still fails the probe.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD ["/bin/sh", "-c", "wget -qO- http://127.0.0.1:8080/health/live || exit 1"]
+    CMD ["/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health/live HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200 '"]
 
 ENTRYPOINT ["dotnet", "SmartReptile.Api.dll"]

@@ -16,8 +16,10 @@ services:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
       MSSQL_PID: Developer
     ports:
-      # bound to loopback only — never expose SQL Server to the network (§02-design/06 §6)
-      - "127.0.0.1:1433:1433"
+      # Published on loopback only, never exposed to the network (§02-design/06 §6). The host port is 14330, not
+      # 1433, because the aeroponic-iot stack on the same machine already binds 1433 and two course projects must
+      # be able to run at once. Inside the Compose network the API still reaches the database on db:1433.
+      - "127.0.0.1:14330:1433"
     volumes:
       - db-data:/var/opt/mssql
     healthcheck:
@@ -38,7 +40,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Default: ${DB_CONNECTION_STRING}
+      # Built here rather than taken from .env: Docker Compose interpolates variables in THIS file, but it does
+      # not expand ${...} inside .env values. A connection string containing a nested ${MSSQL_SA_PASSWORD} in
+      # .env would reach the container literally and the SQL login would fail with a confusing error.
+      ConnectionStrings__Default: "Server=db,1433;Database=SmartReptile;User Id=sa;Password=${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env};TrustServerCertificate=True;Encrypt=False"
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
       Jwt__AccessTokenMinutes: ${JWT_ACCESS_MINUTES:-15}
       Jwt__RefreshTokenDays: ${JWT_REFRESH_DAYS:-30}
@@ -58,8 +63,15 @@ services:
       Ingest__HttpFallbackEnabled: ${INGEST_HTTP_FALLBACK_ENABLED:-true}
       Startup__ApplyMigrationsOnStartup: ${STARTUP_APPLY_MIGRATIONS:-true}
       Startup__SeedReferenceDataOnStartup: ${STARTUP_SEED_REFERENCE_DATA:-true}
+      # The dashboard is a static page and the API is another origin, so the browser preflights every call.
+      # Both spellings are listed on purpose: a browser at http://127.0.0.1:8081 sends
+      # `Origin: http://127.0.0.1:8081`, which does NOT match http://localhost:8081. With only the localhost
+      # entries the API logs "CORS policy execution failed" and answers 200 with no Access-Control-Allow-Origin
+      # header, so the browser discards the response and the dashboard looks broken while the server looks fine.
       Cors__AllowedOrigins__0: ${CORS_ORIGIN_0:-http://localhost:8081}
       Cors__AllowedOrigins__1: ${CORS_ORIGIN_1:-http://localhost:8080}
+      Cors__AllowedOrigins__2: ${CORS_ORIGIN_2:-http://127.0.0.1:8081}
+      Cors__AllowedOrigins__3: ${CORS_ORIGIN_3:-http://127.0.0.1:8080}
       OpenTelemetry__ServiceName: ${OTEL_SERVICE_NAME:-SmartReptile}
       OpenTelemetry__Tracing__SampleRatio: ${OTEL_TRACE_SAMPLE_RATIO:-0.25}
       OpenTelemetry__Otlp__Endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
