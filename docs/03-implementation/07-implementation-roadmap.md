@@ -27,19 +27,30 @@ gantt
 
 **Goal:** every member can run the whole stack locally and one real sensor produces a number.
 
-| # | Task | Owner track | Acceptance |
-|---|---|---|---|
-| 1.1 | Close the open decisions `[TBC-1…4]` with the mentor (species, box size meaning, channels, pairing method) | all | Values written into this doc set; `01-product/01` §6 updated |
-| 1.2 | Freeze FR/NFR list and ids | all | No id changes after this point without a note in `05-release/03` |
-| 1.3 | Create the monorepo skeleton + CI job running `dotnet build`, `flutter analyze`, `pio run`, `pio test -e native` | backend | CI green on an empty scaffold |
-| 1.4 | Docker Compose: SQL Server + API skeleton + broker with `/health` | backend | `/health` green, `/ready` reports `db`+`broker` |
-| 1.5 | Bench bring-up: SHT31 + BH1750 (+ DS18B20) on a breadboard, serial print at 1 Hz | firmware | Serial shows plausible values; `04-quality/03` §2 checklist partially signed |
-| 1.6 | Sensor accuracy spot check (fridge/room/lamp, hygrometer comparison) | firmware | Numbers within datasheet tolerance, recorded in the QA log |
-| 1.7 | Flutter app scaffold: routing, theme, providers wired to a stub API, `flutter test` green | app | App runs, empty screens, tests green |
-| 1.8 | `07-appendices/05` literature pass 1 (collect sources, mark verified rows) | doc/report | ≥ 60% of threshold rows have a citation |
+| # | Task | Owner track | Acceptance | Status (2026-09-21, measured) |
+|---|---|---|---|---|
+| 1.1 | Close the open decisions `[TBC-1…4]` with the mentor (species, box size meaning, channels, pairing method) | all | Values written into this doc set; `01-product/01` §6 updated | **Partial** — decisions are recorded (TBC-1…3 in `01-product/01` §6, TBC-4 = pairing token, option A), but mentor sign-off cannot be evidenced from the repository, and `02-design/06` §5 still presents TBC-4 as open |
+| 1.2 | Freeze FR/NFR list and ids | all | No id changes after this point without a note in `05-release/03` | **Complete** — the id scheme is in use across all 34 documents |
+| 1.3 | Create the monorepo skeleton + CI job running `dotnet build`, `flutter analyze`, `pio run`, `pio test -e native` | backend | CI green on an empty scaffold | **Complete, exceeded** — five green jobs on every push (`backend`, `integration`, `app`, `firmware`, `secret-scan`); the firmware job executes the 22 host tests |
+| 1.4 | Docker Compose: SQL Server + API skeleton + broker with `/health` | backend | `/health` green, `/health/ready` reports `database` + `mqtt-broker` | **Complete** — stack up and healthy; `/health/ready` reports both checks Healthy; the DB-outage drill returns `503` in 3.0 s and recovers in 7 ms with zero API restarts |
+| 1.5 | Bench bring-up: SHT31 + BH1750 (+ DS18B20) on a breadboard, serial print at 1 Hz | firmware | Serial shows plausible values; `04-quality/03` §2 checklist partially signed | **Not started** — no hardware has been connected; `main.cpp` reports placeholder values and the QA checklist is unsigned |
+| 1.6 | Sensor accuracy spot check (fridge/room/lamp, hygrometer comparison) | firmware | Numbers within datasheet tolerance, recorded in the QA log | **Not started** — depends on 1.5 |
+| 1.7 | Flutter app scaffold: routing, theme, providers wired to a stub API, `flutter test` green | app | App runs, empty screens, tests green | **Complete** — `flutter analyze` clean, 19 tests pass, provider wiring and en/vi localisation in place |
+| 1.8 | `07-appendices/05` literature pass 1 (collect sources, mark verified rows) | doc/report | ≥ 60% of threshold rows have a citation | **Partial** — every seeded band carries `SourceRef` + `SourceUrl`, but all are stamped `PENDING VERIFICATION` and the §5 checklist is 0 of 13 rows signed |
 
 **DoD:** `README` quick start reproduces the environment on a teammate's machine in ≤ 30 min; sensor data on
 serial; CI green. **Risk burn-down:** toolchain/JDK/Wi-Fi-band issues surface here, not in week 5.
+
+**DoD status, measured 2026-09-21:** two of the three lines hold — the quick start has been run repeatedly on this
+machine, and CI is green — but *"sensor data on serial"* does not, because 1.5 and 1.6 are unstarted. **M1 is
+therefore not closed**, and the milestone's own goal statement ("one real sensor produces a number") is the single
+line keeping it open. Everything the milestone asked for that does not need a breadboard is done, and the Status
+column above records how each was verified rather than that it was attempted.
+
+Beyond M1: task **2.1** (domain entities, EF Core model, `InitialSchema` migration, seeders for the metric
+dictionary, three profiles and their bands) is also complete and enforced by the `integration` CI job, and 2.3 is
+partly in place (the broker is hosted in-process and refuses anonymous connections, but credential verification
+against `DeviceCredential` is not written). The M2 table below is not starting from zero.
 
 ---
 
