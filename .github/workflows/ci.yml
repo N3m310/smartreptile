@@ -5,11 +5,12 @@ on:
     branches: ["main", "master"]
   pull_request:
 
-# One pipeline, four gates (§03-implementation/01 §1, §04-quality/01 §7):
-#   backend  — build, formatting, unit tests, vulnerable packages
-#   app      — analyze + widget/unit tests
-#   firmware — host unit tests (native env) + ESP32 build
-#   secrets  — the scan that keeps .env out of the repository (NFR-04)
+# One pipeline, five gates (§03-implementation/01 §1, §04-quality/01 §7):
+#   backend     — build, formatting, unit tests, vulnerable packages
+#   integration — real SQL Server: migrations, seeding, SQL-level invariants, /health/ready
+#   app         — analyze + widget/unit tests
+#   firmware    — host unit tests (native env) + ESP32 build
+#   secrets     — the scan that keeps .env out of the repository (NFR-04)
 #
 # Action versions are chosen so every action runs on the Node 24 runtime: checkout v5, setup-dotnet v5,
 # setup-python v6. The previous majors run on Node 20, which the runner now force-upgrades and annotates on every
@@ -45,6 +46,100 @@ jobs:
 
       - name: Vulnerable packages
         run: dotnet list SmartReptile.sln package --vulnerable --include-transitive
+
+  integration:
+    name: Integration (real SQL Server)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # The password never appears in this file: it is a repository secret, and the container it protects exists
+    # only for the duration of the job. (A literal value here would also be a candidate for the secret-scan job,
+    # which would be an entertaining way to fail the pipeline we just fixed.)
+    env:
+      ConnectionStrings__Default: "Server=127.0.0.1,1433;Database=SmartReptile;User Id=sa;Password=${{ secrets.CI_SQL_PASSWORD }};TrustServerCertificate=True;Encrypt=False"
+      MSSQL_SA_PASSWORD: ${{ secrets.CI_SQL_PASSWORD }}
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: ${{ secrets.CI_SQL_PASSWORD }}
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 18
+          --health-start-period 40s
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore SmartReptile.sln
+
+      - name: Build (warnings are errors)
+        run: dotnet build SmartReptile.sln --configuration Release --no-restore
+
+      # The integration project is deliberately outside the solution (see its csproj), so it needs its own restore
+      # and its own formatting gate — otherwise "the format gate is clean" would quietly exclude it.
+      - name: Restore integration tests
+        run: dotnet restore tests/SmartReptile.Tests.Integration/SmartReptile.Tests.Integration.csproj
+
+      - name: Formatting gate (integration tests)
+        run: >-
+          dotnet format tests/SmartReptile.Tests.Integration/SmartReptile.Tests.Integration.csproj
+          --verify-no-changes --severity error --no-restore
+
+      # Applies migrations and seeds through the application's own start-up path, then asserts the schema, the
+      # seeded reference data and the invariants that exist only in SQL Server.
+      - name: Migrations, seeding and SQL-level invariants
+        run: dotnet test tests/SmartReptile.Tests.Integration/SmartReptile.Tests.Integration.csproj --configuration Release --no-restore --verbosity normal
+
+      # The one thing the tests cannot prove on their own: that the application boots against a real database and
+      # reports itself ready. This is the path M1 could only verify by hand.
+      - name: Boot the API against the real database and require /health/ready to report Healthy
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:8080
+          Startup__ApplyMigrationsOnStartup: "true"
+          Startup__SeedReferenceDataOnStartup: "true"
+        run: |
+          set -euo pipefail
+          dotnet run --project src/SmartReptile.Api --configuration Release --no-build --no-restore > /tmp/api.log 2>&1 &
+          api_pid=$!
+
+          for attempt in $(seq 1 30); do
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::the API exited during start-up"
+              tail -40 /tmp/api.log
+              exit 1
+            fi
+
+            if curl -fsS http://127.0.0.1:8080/health/ready -o /tmp/ready.json 2>/dev/null; then
+              cat /tmp/ready.json
+              grep -Eq '"status": *"Healthy"' /tmp/ready.json
+              grep -Eq '"name": *"database"' /tmp/ready.json
+              grep -Eq '"name": *"mqtt-broker"' /tmp/ready.json
+              grep -qv '"status": *"Unhealthy"' /tmp/ready.json
+              echo "ready and healthy on attempt ${attempt}"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "::error::/health/ready never reported 200 within 60 s"
+          tail -40 /tmp/api.log
+          exit 1
 
   app:
     name: Flutter app (analyze, test)

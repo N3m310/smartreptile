@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Deliberately NOT part of SmartReptile.sln.
+       Every test in this project needs a real SQL Server, and keeping it out of the solution means
+       `dotnet test SmartReptile.sln` stays runnable with no database — which is what keeps the inner loop fast
+       and what lets the `backend` CI job stay database-free. The `integration` CI job builds and runs this
+       project explicitly, and applies the same formatting gate to it. -->
+  <PropertyGroup>
+    <RootNamespace>SmartReptile.Tests.Integration</RootNamespace>
+    <AssemblyName>SmartReptile.Tests.Integration</AssemblyName>
+    <IsPackable>false</IsPackable>
+
+    <!-- Same reasoning as the unit test project: xUnit analyser nudges are warnings here, not build errors. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SmartReptile.Infrastructure\SmartReptile.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="7.0.0" />
+  </ItemGroup>
+
+</Project>
