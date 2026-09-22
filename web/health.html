@@ -30,7 +30,11 @@
     <pre id="metrics" class="card">loading…</pre>
 
     <script type="module">
-      import { getJson } from './js/api.js';
+      import { apiBase, getJson } from './js/api.js';
+
+      // The other two pages get this from js/pages/live.js; this page had its own script and never set it, so the
+      // header showed a bare em dash and you could not tell which API the numbers came from.
+      document.getElementById('api-base-label').textContent = apiBase;
 
       const ready = document.getElementById('ready');
       const metrics = document.getElementById('metrics');
