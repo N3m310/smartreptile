@@ -132,7 +132,7 @@ Index: `(UserId, FamilyId)`, unique `(TokenHash)`.
 Unique: `(Name)` where `CreatedByUserId IS NULL` (built-ins unique); user profiles unique per `(CreatedByUserId, Name)`.
 
 ### 3.4 `Threshold` / `ThresholdOverride`
-`Threshold`: `(Id, SpeciesProfileId FK, MetricId FK, Phase tinyint /*0 Any, 1 Day, 2 Night*/, TargetMin decimal(9,3), TargetMax, CriticalMin null, CriticalMax null, DwellWarnMinutes smallint, DwellCritMinutes smallint, RecoveryMargin decimal(9,3), SourceRef nvarchar(200), SourceUrl nvarchar(400) null, Enabled bit)`
+`Threshold`: `(Id, SpeciesProfileId FK, MetricId FK, Phase tinyint /*0 Any, 1 Day, 2 Night*/, TargetMin decimal(9,3), TargetMax, CriticalMin null, CriticalMax null, DwellWarnMinutes smallint, DwellCritMinutes smallint, RecoveryMargin decimal(9,3), SourceRef nvarchar(300), SourceUrl nvarchar(400) null, Enabled bit)`
 Unique: `(SpeciesProfileId, MetricId, Phase)`.
 Check constraints: `TargetMin < TargetMax`; `CriticalMin <= TargetMin AND CriticalMax >= TargetMax`.
 

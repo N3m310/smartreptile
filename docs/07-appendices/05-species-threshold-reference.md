@@ -100,6 +100,22 @@ A row without a page reference is not verified, even if the number "looks right"
 Row 13 matters: dwell time and hysteresis come from engineering judgement about sensor noise and alert
 fatigue. The report must not imply they are sourced from biology.
 
+**Two things a reader of this checklist has to know** (added 2026-09-23, when the seeder side was wired up):
+
+1. **It is not a one-to-one map of the seeded bands.** Rows 5, 11, 12 and 13 describe profile-level data or engine
+   parameters — the humid-hide note, the photoperiod, the lx values, dwell/recovery — rather than bands. Closing a
+   row is therefore not a documentation-only act: `ReferenceDataSeeder` has to agree with it. While a row is
+   unsigned the band's `SourceRef` reads `PENDING VERIFICATION` and its `SourceUrl` is **null** rather than a link
+   to a source nobody has opened. When a row is signed, pass the verified citation at that band's call site and
+   decrement `ReferenceDataSeeder.BandsAwaitingVerification` in the same commit;
+   `SchemaAndSeedingTests.Bands_awaiting_verification_match_the_declared_count` fails if the two drift, so the
+   stamp cannot outlive this checklist.
+2. **Two coverage gaps, both still open** (found by comparing §3 with the seeded bands, not by reading either one
+   alone). (a) Row 7 verifies an *Arid ambient 28–33 °C* band belonging to an `Arid-cool` variant that §3
+describes but the seeder never creates — either seed the variant or drop the row. (b) The seeded `Arid`
+   **surface** band (38–45 °C) is in neither §3 nor this checklist. These are decisions rather than typos: pick an
+   answer and make §3, §5 and the seeder say the same thing.
+
 ## 6. Candidate literature and reference list
 
 > **Citation hygiene.** Titles/journals below are real works in the field, but **edition, year, page and DOI

@@ -61,6 +61,48 @@ public sealed class SchemaAndSeedingTests(DatabaseFixture fixture)
     }
 
     [Fact]
+    public async Task Bands_awaiting_verification_match_the_declared_count()
+    {
+        await using var db = fixture.CreateContext();
+
+        var stillPending = await db.Thresholds
+            .CountAsync(t => t.SourceRef != null
+                          && t.SourceRef.Contains(ReferenceDataSeeder.PendingVerificationMarker));
+
+        // The appendix's §5 checklist and this number have to move together: signing a row means passing the
+        // verified citation at that band's call site *and* decrementing BandsAwaitingVerification. If they drift,
+        // either the document claims more than the database ships or the database still says "PENDING" after
+        // somebody signed the row — both are the kind of unverified claim this project keeps trying not to make.
+        stillPending.Should().Be(
+            ReferenceDataSeeder.BandsAwaitingVerification,
+            "docs/07-appendices/05 §5 and ReferenceDataSeeder must agree on how many ranges are still unverified");
+    }
+
+    [Fact]
+    public async Task No_band_ships_a_placeholder_source_link()
+    {
+        await using var db = fixture.CreateContext();
+
+        var sources = await db.Thresholds.Select(t => new { t.SourceRef, t.SourceUrl }).ToListAsync();
+
+        // The seeded source used to be "…github.com/your-org/smartreptile…", which resolves for nobody, and the
+        // test below used to pass anyway because it only checked that the reference was non-empty.
+        // Both fields are searched: the first version of this gate looked only at SourceRef and therefore passed
+        // against exactly the rows it was written to catch — the dead link lives in SourceUrl.
+        sources.Should().OnlyContain(s => !HasPlaceholder(s.SourceRef) && !HasPlaceholder(s.SourceUrl));
+
+        // A link is either a real https one or absent. Books have no URL, and a pending range has nothing to
+        // link to yet, so null is the honest value for both (appendix §6 citation hygiene).
+        sources.Should().OnlyContain(s => s.SourceUrl == null || s.SourceUrl.StartsWith("https://", StringComparison.Ordinal));
+    }
+
+    private static bool HasPlaceholder(string? text) =>
+        text is not null
+        && (text.Contains("your-org", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("example.com", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("TODO", StringComparison.Ordinal));
+
+    [Fact]
     public async Task Seeding_twice_does_not_duplicate_anything()
     {
         await using var db = fixture.CreateContext();

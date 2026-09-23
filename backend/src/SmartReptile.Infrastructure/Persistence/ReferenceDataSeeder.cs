@@ -12,13 +12,37 @@ namespace SmartReptile.Infrastructure.Persistence;
 /// <remarks>
 /// <b>Threshold provenance.</b> The numbers below are the typical published captive-husbandry ranges collected
 /// in <c>docs/07-appendices/05-species-threshold-reference.md</c>. Every seeded band carries a
-/// <see cref="Threshold.SourceRef"/> and <see cref="Threshold.SourceUrl"/>; the references are marked
-/// <c>PENDING VERIFICATION</c> until the verification checklist in that appendix is closed — a band without a
-/// verified citation does not ship (roadmap gate 1.8 / 3.8).
+/// <see cref="Threshold.SourceRef"/>; while the verification checklist in that appendix is unsigned the
+/// reference says so, and <see cref="Threshold.SourceUrl"/> stays <c>null</c> rather than pointing at a link
+/// nobody has checked. A band with no verified citation does not ship (roadmap gates 1.8 and 3.8), and the
+/// checklist and this seeder are kept in step by <see cref="BandsAwaitingVerification"/>.
 /// </remarks>
 public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<ReferenceDataSeeder> logger)
 {
-    private const string PendingVerification = "PENDING VERIFICATION — typical published husbandry range, see docs/07-appendices/05 §5";
+    /// <summary>Appears in <see cref="Threshold.SourceRef"/> while a range still awaits literature
+    /// verification. Public so the integration gate can assert on it.</summary>
+    public const string PendingVerificationMarker = "PENDING VERIFICATION";
+
+    /// <summary>
+    /// How many seeded bands still carry <see cref="PendingVerificationMarker"/>, i.e. whose range nobody has
+    /// checked against a source yet. The light bands are not counted: their numbers are not literature at all
+    /// (they are inert — the real rule is accumulated light-hours).
+    /// <para><b>Closing a checklist row means editing this file:</b> pass the verified citation at that band's
+    /// call site (<c>source: BandSources.…</c>) and decrement this number in the same commit.
+    /// <c>SchemaAndSeedingTests.Bands_awaiting_verification_match_the_declared_count</c> asserts that the
+    /// database agrees, so the stamp cannot outlive the checklist. Gate: ≥ 60 % of rows cited for M1 (task
+    /// 1.8), 100 % for M3 (task 3.8).</para>
+    /// </summary>
+    public const int BandsAwaitingVerification = 14;
+
+    private const string PendingVerification =
+        PendingVerificationMarker + " — typical published husbandry range, see docs/07-appendices/05 §5";
+
+    /// <summary>Dwell time and hysteresis are engineering judgement about sensor noise and alert fatigue, not
+    /// biology. Every band says so, so neither the report nor the UI can imply they were sourced (appendix §5
+    /// row 13).</summary>
+    private const string EngineParametersProvenance =
+        "dwell/recovery are team design choices, not literature (docs/07-appendices/05 §5 row 13)";
 
     /// <summary>Seeds the built-in profiles if they are missing.</summary>
     public async Task<int> SeedAsync(CancellationToken cancellationToken = default)
@@ -40,7 +64,8 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
                 Band(MetricCode.TempC, ThresholdPhase.Day, 24m, 28m, 18m, 31m, margin: 0.5m),
                 Band(MetricCode.TempC, ThresholdPhase.Night, 20m, 24m, 16m, 27m, dwellWarn: 10, dwellCrit: 3),
                 Band(MetricCode.HumidityPct, ThresholdPhase.Any, 60m, 80m, 40m, 95m, dwellWarn: 15, margin: 3m),
-                Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m),
+                Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m,
+                     source: BandSources.HusbandryPracticeLight),
                 Band(MetricCode.UvIndex, ThresholdPhase.Day, 0m, 1.0m, 0m, 2.0m, dwellWarn: 15, margin: 0.1m),
             ],
             cancellationToken)
@@ -63,7 +88,8 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
                 Band(MetricCode.TempC, ThresholdPhase.Night, 22m, 27m, 18m, 31m, dwellWarn: 10, dwellCrit: 3),
                 Band(MetricCode.SurfaceTempC, ThresholdPhase.Day, 30m, 34m, 22m, 38m, margin: 1m),
                 Band(MetricCode.HumidityPct, ThresholdPhase.Any, 30m, 40m, 20m, 60m, dwellWarn: 15, margin: 3m),
-                Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m),
+                Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m,
+                     source: BandSources.HusbandryPracticeLight),
                 Band(MetricCode.UvIndex, ThresholdPhase.Day, 0m, 1.5m, 0m, 2.5m, dwellWarn: 15, margin: 0.1m),
             ],
             cancellationToken)
@@ -86,7 +112,8 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
                 Band(MetricCode.TempC, ThresholdPhase.Night, 24m, 28m, 18m, 32m, dwellWarn: 10, dwellCrit: 3, margin: 1m),
                 Band(MetricCode.SurfaceTempC, ThresholdPhase.Day, 38m, 45m, 28m, 50m, margin: 1m),
                 Band(MetricCode.HumidityPct, ThresholdPhase.Any, 30m, 40m, 20m, 55m, dwellWarn: 15, margin: 3m),
-                Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m),
+                Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m,
+                     source: BandSources.HusbandryPracticeLight),
                 Band(MetricCode.UvIndex, ThresholdPhase.Day, 1.0m, 3.5m, 0m, 5.0m, dwellWarn: 15, margin: 0.2m),
             ],
             cancellationToken)
@@ -100,6 +127,22 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
         return created;
     }
 
+    /// <summary>A citation for one band's range. <c>Url</c> is null for a book: the page reference then belongs
+    /// in <c>Reference</c> instead of pretending a link exists (appendix §6 citation hygiene).</summary>
+    internal sealed record BandCitation(string Reference, string? Url = null);
+
+    /// <summary>Ranges whose provenance is already decided rather than pending — currently only the inert light
+    /// bands. Deliberately text-only: no DOI, edition or page is invented here, because the appendix requires
+    /// those to be read off the real copy first.</summary>
+    internal static class BandSources
+    {
+        /// <summary>Used by every seeded <c>LightLux</c> band: the band is inert, and the lx values are
+        /// husbandry practice rather than physiology (appendix §5 row 12 — which the report must state).</summary>
+        internal static readonly BandCitation HusbandryPracticeLight = new(
+            "inert band: the light rule is accumulated light-hours, and the lx values are husbandry practice, "
+            + "not physiology (docs/07-appendices/05 §5 row 12)");
+    }
+
     private static Threshold Band(
         MetricCode metric,
         ThresholdPhase phase,
@@ -109,7 +152,8 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
         decimal? criticalMax = null,
         int dwellWarn = 5,
         int dwellCrit = 2,
-        decimal margin = 0.5m) => new()
+        decimal margin = 0.5m,
+        BandCitation? source = null) => new()
         {
             Metric = metric,
             Phase = phase,
@@ -120,8 +164,10 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
             DwellWarnMinutes = dwellWarn,
             DwellCritMinutes = dwellCrit,
             RecoveryMargin = margin,
-            SourceRef = PendingVerification,
-            SourceUrl = "https://github.com/your-org/smartreptile/blob/main/docs/07-appendices/05-species-threshold-reference.md",
+            // Only a verified citation replaces the pending stamp. SourceUrl stays null while pending: there is
+            // nothing honest to link to for a number nobody has checked yet.
+            SourceRef = $"{source?.Reference ?? PendingVerification} — {EngineParametersProvenance}",
+            SourceUrl = source?.Url,
         };
 
     private async Task<int> EnsureProfileAsync(
