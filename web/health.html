@@ -30,7 +30,7 @@
     <pre id="metrics" class="card">loading…</pre>
 
     <script type="module">
-      import { apiBase, getJson } from './js/api.js';
+      import { apiBase, failureKind, getJson } from './js/api.js?v=0.1.2';
 
       // The other two pages get this from js/pages/live.js; this page had its own script and never set it, so the
       // header showed a bare em dash and you could not tell which API the numbers came from.
@@ -43,13 +43,15 @@
         try {
           ready.textContent = JSON.stringify(await getJson('/health/ready'), null, 2);
         } catch (error) {
-          ready.textContent = `unreachable: ${error.code}`;
+          // "unreachable" is a diagnosis, so it has to be the right one: a 404 means this server answered and
+          // simply has no such endpoint (failureKind is the single classification, shared with the Live page).
+          ready.textContent = `${failureKind(error)}: ${error.code}`;
         }
 
         try {
           metrics.textContent = JSON.stringify(await getJson('/metrics'), null, 2);
         } catch (error) {
-          metrics.textContent = `unreachable: ${error.code}`;
+          metrics.textContent = `${failureKind(error)}: ${error.code}`;
         }
       }
 

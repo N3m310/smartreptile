@@ -98,6 +98,7 @@ Notes to record:
 | 5.8 | Revoked device | Blocked within 60 s; cannot publish until re-provisioned | | ☐ |
 | 5.9 | Phone offline for 10 min, then online | Live values refresh, no stale value displayed as current | | ☐ |
 | 5.10 | 24 h soak | Coverage ≥ 99%; ≤ 1 false positive; heap stable; no reset | | ☐ |
+| 5.11 | Dashboard diagnosis is not wrong | the unbuilt-endpoint case shows a *warning* that the feature is not on the server yet (`http_404`); the dead-port case shows an *error* that the server cannot be reached — never the same message | | ☐ |
 
 ---
 

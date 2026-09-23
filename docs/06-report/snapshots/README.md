@@ -24,8 +24,23 @@ browser → nginx → API → SQL Server + MQTT broker.
 
 Two things this exercise surfaced, both worth fixing rather than hiding:
 
-1. The banner text calls a 404 "cannot reach the server" (Vietnamese original above it). The server *did* answer;
-   it simply has no such endpoint yet. The copy should distinguish "unreachable" from "not implemented".
+1. The banner text called a 404 "cannot reach the server" (Vietnamese original above it). The server *did*
+   answer; it simply has no such endpoint yet. **Fixed on 2026-09-23.** `web/js/api.js` now classifies every
+   failed call in one function, `failureKind(error)`:
+
+   | Kind | Trigger | Banner |
+   |---|---|---|
+   | `unreachable` | no answer at all (`network_unreachable`) | error: "Cannot reach the server. Showing the last known values." |
+   | `missing-endpoint` | 404 **with no problem body** — the route is not built | warning: "This feature is not on the server yet — that part is not built. (http_404)" |
+   | `not-found` | 404 **with** a problem code — the API understood and refused (ownership is hidden as 404, BR-02.2) | warning: "Not found, or you do not have access to it. (not_found)" |
+   | `failed` | any other non-2xx (401, 500, …) | error: "The server answered but refused the request. (…)" |
+
+   The `missing-endpoint` / `not-found` split exists because collapsing them would repeat the original mistake
+   in the other direction once M2 ships: "someone else's terrarium" would be reported as "not built yet".
+   `getReadiness()` distinguishes a missing `/health/ready` from an unhealthy database the same way, and the
+   Health page prints `missing-endpoint: http_404` instead of calling every failure *unreachable*.
+   Verified in a browser on 2026-09-23 against a stub that can serve a bare 404, a problem-coded 404 and no
+   `/health/ready` at all, plus a dead port for the real unreachable case — four messages, four situations.
 2. `health.html` never populated its `API:` label — only `js/pages/live.js` set it, and that file is not loaded by
    the health page, so the header showed a bare em dash. Fixed on 2026-09-22; this snapshot shows the fix.
 

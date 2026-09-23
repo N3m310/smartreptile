@@ -1,6 +1,6 @@
-import { apiBase, getJson, getReadiness } from '../api.js';
+import { apiBase, failureKind, getJson, getReadiness } from '../api.js?v=0.1.2';
 import { createStore, freshnessOf, formatAge, formatValue } from '../store.js';
-import { metricName, statusClass, statusLabel, t } from '../i18n.js';
+import { metricName, statusClass, statusLabel, t } from '../i18n.js?v=0.1.2';
 
 // Live dashboard page (W2 in docs/02-design/04 §1.2).
 //
@@ -11,20 +11,43 @@ const store = createStore();
 let activeTerrariumId = null;
 let refreshTimer = null;
 
+// A server that answers is not an unreachable server. The M1 snapshot pass caught this: `/api/v1/terrariums`
+// returns 404 because those routes are M2 work, and calling that "cannot reach the server" told the keeper
+// something false about the state of the system (docs/06-report/snapshots/README.md).
+function bannerFor(kind, code) {
+  switch (kind) {
+    case 'unreachable':
+      return { className: 'banner error', text: t('errorBackendUnreachable') };
+    case 'missing-endpoint':
+      return { className: 'banner warn', text: `${t('errorEndpointMissing')} (${code})` };
+    case 'not-found':
+      return { className: 'banner warn', text: `${t('errorNotFound')} (${code})` };
+    default:
+      return { className: 'banner error', text: `${t('errorRequestFailed')} (${code})` };
+  }
+}
+
 function renderBanner(state) {
   const banner = document.getElementById('banner');
   const readiness = state.readiness;
 
   if (state.error) {
-    banner.className = 'banner error';
-    banner.textContent = state.error.isNetworkFailure
-      ? t('errorBackendUnreachable')
-      : `${t('errorBackendUnreachable')} (${state.error.code})`;
+    const { className, text } = bannerFor(failureKind(state.error), state.error.code);
+    banner.className = className;
+    banner.textContent = text;
     banner.hidden = false;
     return;
   }
 
   if (readiness && readiness.status !== 'Healthy') {
+    // A missing readiness endpoint is not a failing database: say which one it is.
+    if (readiness.status === 'MissingEndpoint') {
+      banner.className = 'banner warn';
+      banner.textContent = t('readinessMissing');
+      banner.hidden = false;
+      return;
+    }
+
     const failing = (readiness.checks ?? []).filter((check) => check.status !== 'Healthy').map((check) => check.name);
     banner.className = 'banner warn';
     banner.textContent = failing.includes('mqtt-broker') ? t('brokerDown') : t('databaseDown');

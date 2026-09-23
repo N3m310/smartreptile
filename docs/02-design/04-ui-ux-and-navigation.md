@@ -196,6 +196,7 @@ different user actions (wait vs replace a part).
 | **Always show the band next to the value.** Users should not have to remember numbers. | BR-08.1 |
 | **Show coverage alongside any summary.** A 100%-compliant day with 40% data is not compliance. | BR-14.6 |
 | **Explain pauses.** When the device is offline, the dashboard states that evaluation is paused — otherwise a quiet screen implies safety. | UC-06 |
+| **Never report an unbuilt feature as an outage.** A 404 with no problem body means the route is not built ("not built yet"); a 404 *with* a code is a refusal, which is how ownership is hidden (BR-02.2); only a genuine connection failure says "cannot reach the server". | A wrong diagnosis sends the keeper hunting for a network fault that does not exist — and the reverse hides a real outage |
 | **Confirmation only for irreversible actions**, with typed confirmation for purge. | Prevents dialog fatigue, protects real data |
 | **Empty states name the next action** ("Claim a device to start collecting"). | Onboarding without documentation |
 | **Metric cards never animate numbers continuously** (only on value change, 200 ms). | A wallboard should be calm |
@@ -219,7 +220,7 @@ different user actions (wait vs replace a part).
 |---|---|---|
 | Text scaling | App usable at 130% system font scale without clipping metric cards | `04-quality/03` checklist, screenshot |
 | Portrait phone | 320–480 dp wide; cards stack in one column < 420 dp, two columns 480–900 dp, four above | `TC-W-06` |
-| Tablet / web | Wallboard layout above 1 200 px |
+| Tablet / web | Wallboard layout above 1 200 px | `04-quality/03` §4.7, screenshot at 1080p+ |
 | Contrast | ≥ 4.5:1 body, ≥ 3:1 large text | Manual check with a contrast tool, recorded in QA log |
 | Screen reader | Every metric card announced with name + value + unit + status | `TC-W-04` (Semantics assertions) |
 | Landscape phone | Chart usable; no clipping of the alert banner | `04-quality/03` |

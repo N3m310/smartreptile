@@ -27,6 +27,29 @@ export class ApiError extends Error {
   get isNetworkFailure() {
     return this.status === 0;
   }
+
+  /** True when a server answered but has no such endpoint (e.g. the M2 REST routes before they exist). */
+  get isMissingEndpoint() {
+    return this.status === 404;
+  }
+}
+
+/**
+ * How a failed call should be described, decided in one place so no page invents its own wording:
+ *   'unreachable'      nothing answered, so the values on screen really are the last known ones;
+ *   'missing-endpoint' a server answered 404 with no explanation at all -> the route is simply not built yet;
+ *   'not-found'        a server answered 404 *with* a problem code -> the API understood the request and is
+ *                      refusing it, which is how ownership is hidden (BR-02.2: cross-owner access returns 404);
+ *   'failed'           any other non-2xx, i.e. the request was understood and refused (401, 500, ...).
+ * The first two must not be conflated: reporting "cannot reach the server" for an endpoint that is merely
+ * unbuilt is what the M1 snapshot pass caught, and reporting "not built yet" for someone else's terrarium
+ * would be the same mistake in the other direction (docs/06-report/snapshots/README.md).
+ */
+export function failureKind(error) {
+  if (error?.isNetworkFailure) return 'unreachable';
+  if (error?.isMissingEndpoint && error.detail === null) return 'missing-endpoint';
+  if (error?.isMissingEndpoint) return 'not-found';
+  return 'failed';
 }
 
 /** GET a JSON document; throws ApiError on any non-2xx response. */
@@ -70,6 +93,10 @@ export async function getReadiness() {
   } catch (error) {
     if (error instanceof ApiError && error.isNetworkFailure) {
       return { status: 'Unreachable' };
+    }
+    // A 404 means this server has no readiness endpoint at all; reporting 'Unhealthy' would blame the database.
+    if (error instanceof ApiError && error.isMissingEndpoint) {
+      return { status: 'MissingEndpoint' };
     }
     // A 503 body still carries the checks: that is exactly the interesting case.
     return { status: 'Unhealthy' };
