@@ -95,14 +95,16 @@ sequenceDiagram
   D->>B: PUBLISH telemetry (first sample)
 ```
 
-**Open design detail `[TBC-4]`:** how the secret reaches the device in step 10. Two options:
+**Decided `[TBC-4]` → `ADR-016`:** how the secret reaches the device in step 10. Option A is the design; option B
+survives only as the demo-day fallback. Two options were considered:
 
 | Option | Mechanism | Trade-off |
 |---|---|---|
 | A (default) | The app sends the secret to the device over the local network with an **8-digit pairing token** that the device displays (the same channel used for Wi-Fi config), one-time use, 5-min TTL, HTTPS with the device's self-signed cert pinned by fingerprint | Good UX, small attack surface, extra firmware endpoint |
 | B (fallback) | The user types the secret into the captive portal (long base32 string) | No extra endpoint, terrible UX |
 
-Option A is the design intent; option B is the demo-day fallback if the pairing endpoint is not finished.
+Option A is decided (`ADR-016`); option B remains the demo-day fallback if the pairing endpoint is not finished in
+time. Either way the secret is returned exactly once and stored hashed (ADR-006, BR-05.3).
 
 **Anti-abuse on `self-register`:** unauthenticated by necessity, so it is rate-limited (1 request per IP
 per 5 min, 20 per hour globally for the demo), payload-validated, and creates devices in

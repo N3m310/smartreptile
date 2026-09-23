@@ -123,7 +123,7 @@ stateDiagram-v2
 | Back-fill batch | ≤ 20 samples per publish, 1 publish/s | Keeps payload < 4 KB and avoids burst-flooding the broker |
 | HTTPS fallback | Only after 60 s of MQTT failure, ≤ 6 requests/min (server limit), same payload | Second path over the same network; also proves the API contract independently |
 | NTP | `pool.ntp.org` + VN pool, sync before first publish; re-sync daily | Timestamps are the backbone of day/night logic (NFR-10) |
-| Clock fallback | If NTP fails: publish with `q |= clockUnsynced`, server stamps `ReceivedAt` | Never publish a wrong local time as if it were right |
+| Clock fallback | If NTP fails: publish with `q \|= clockUnsynced`, server stamps `ReceivedAt` | Never publish a wrong local time as if it were right |
 | Wi-Fi modem sleep | `WIFI_PS_MIN_MODEM` | ~40% lower average current, latency impact irrelevant at 60 s |
 | Command handling | Subscribe `cmd`, execute, publish to `ack` with `cmdId` within 5 s | `set_config` (intervals), `take_snapshot` (if camera node), `ping` |
 
@@ -179,7 +179,7 @@ ArduinoJson 7's elastic `JsonDocument` avoids the fixed-pool sizing bugs that pl
 4. Show the returned 8-character claim code on the OLED (large font) with a countdown; refresh every
    15 minutes until claimed.
 5. Wait for the pairing secret (`POST` from the app to the device with the 8-digit pairing token shown on
-   the OLED, `[TBC-4]` option A in `02-design/06` §5). On receipt: store in NVS, clear the code, reboot
+   the OLED — `ADR-016`, option A, in `02-design/06` §5). On receipt: store in NVS, clear the code, reboot
    into streaming mode.
 6. If the pairing endpoint is not implemented (fallback option B), the user types the secret into the
    portal's advanced field.

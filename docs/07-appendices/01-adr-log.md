@@ -1,4 +1,4 @@
-# 01 — Architecture Decision Log (ADR-001 … ADR-015)
+# 01 — Architecture Decision Log (ADR-001 … ADR-016)
 
 Append-only. Each entry: **Context → Decision → Consequences → Rejected alternatives.** Numbers are never
 reused; a superseded ADR keeps its id and gains a "Superseded by" note.
@@ -329,3 +329,35 @@ generated `DailyEnvironmentalSummary` stores the `TimeZoneId` it was computed wi
 
 **Rejected.** Local time in the database (DST and multi-device ambiguity, painful queries); device-authoritative
 ordering (a device with a bad clock could reorder an entire day's alerts).
+
+---
+
+## ADR-016 — The claim secret reaches the device by an 8-digit pairing token (closes TBC-4, option A)
+**Status:** Accepted · **Date:** 2026-09-23 · **Related:** FR-04, FR-05, BR-04.2, ADR-006, TBC-4
+
+**Context.** `POST /devices/claim` returns the 256-bit device secret exactly once (BR-04.2, ADR-006), but at that
+moment the device is factory-fresh and unauthenticated: it holds no key that could protect the hand-over, and the
+app is the only party that has the secret. TBC-4 asked how the secret physically gets there. The answer decides
+what someone else on the same Wi-Fi can observe and how much the owner has to type.
+
+**Decision.** **Option A.** The device displays an **8-digit one-time pairing token** on the OLED (5-minute TTL,
+single use). The app posts the secret to the device over the local network — HTTPS with the device's self-signed
+certificate pinned by fingerprint — reusing the same channel that already carries the Wi-Fi configuration. Manual
+entry (option B, the base32 string typed into the captive portal) is kept **only** as the demo-day fallback if the
+pairing endpoint is not finished in time.
+
+**Consequences.**
+- The secret is never transcribed by the user, so claiming stays a one-tap flow (UC-01 steps 5–7).
+- Firmware gains one authenticated endpoint: it must reject an expired or already-used token, regenerate while in
+  provisioning mode, and refuse a second secret while one is stored.
+- The pinned self-signed certificate is what makes "the same Wi-Fi" a reasonable trust boundary. The backend leg
+  is unaffected — that is TLS with a real certificate (ADR-001).
+- A person standing next to the terrarium can read the token off the screen and claim the device; like `L-01`
+  (secret readable from flash) this is accepted physical-access exposure, bounded by revocation (FR-05, BR-05.4).
+- The choice is invisible to the API: `claim` behaviour, error codes and audit rows are unchanged either way,
+  which is why it could be recorded as a decision rather than a schema change.
+
+**Rejected.** Option B as the primary path (no firmware work, but a long base32 string must be transcribed
+correctly — an unacceptable demo and support risk). Proxying the secret through the backend (creates a second
+authoritative path for a secret the server already stores hashed). BLE-assisted pairing (extra stack for one flow,
+and chipset support varies across the cheap dev boards in the BOM).

@@ -51,7 +51,7 @@ flowchart LR
 **Conventions**
 
 - Every requirement has a stable id: `FR-01…FR-18`, `NFR-01…NFR-12`, `US-01…US-20`, `UC-01…UC-07`,
-  `ADR-001…ADR-015`, `TC-U-FW-*` / `TC-U-*` / `TC-I-*` / `TC-W-*` / `TC-E2E-*` (101 test cases).
+  `ADR-001…ADR-016`, `TC-U-FW-*` / `TC-U-*` / `TC-I-*` / `TC-W-*` / `TC-E2E-*` (101 test cases).
 - Paths are relative to this folder unless written with `../`.
 - `MUST` / `SHOULD` / `MAY` follow RFC 2119.
 - Anything marked **`[TBC]`** is an open decision the team must close before the demo — they are
@@ -115,7 +115,7 @@ flowchart LR
 ### 07 — Appendices
 | File | Purpose |
 |---|---|
-| `07-appendices/01-adr-log.md` | ADR-001…ADR-015 (context / decision / consequences / rejected options) |
+| `07-appendices/01-adr-log.md` | ADR-001…ADR-016 (context / decision / consequences / rejected options) |
 | `07-appendices/02-sql-schema-reference.md` | Full table reference: columns, types, keys, indexes, DDL excerpts, seed data |
 | `07-appendices/03-mqtt-and-rest-api-spec.md` | MQTT topics/payloads/QoS + REST endpoint reference with status/error codes |
 | `07-appendices/04-hardware-bom-and-wiring.md` | Bill of materials, pin map, power budget, enclosure notes, bring-up sequence |

@@ -103,14 +103,17 @@ science, and impossible to ignore. The value is not the sensor reading — it is
 
 ## 6. `[TBC]` decisions inherited from the brief
 
-The source document lists three questions that this doc set *assumes an answer to* so it can
-be concrete. Each is reversible but must be confirmed by the team:
+The source document lists the questions this doc set *assumes an answer to* so it can be concrete. Each is
+reversible but must be confirmed by the team. **The canonical, complete list is `05-release/03` §6
+(TBC-1 … TBC-6)** — the four that shape the product itself are repeated here, and TBC-4 is now a recorded
+decision rather than an assumption (`ADR-016`).
 
 | # | Question in the brief | Assumption used here | Close it by |
 |---|---|---|---|
 | TBC-1 | Which reptile species / branch? | **Semi-desert: leopard gecko (*Eublepharis macularius*)** as the demo species; tropical and desert profiles are also seeded so all three climate zones are demonstrable. See `07-appendices/05`. | Milestone M1 (§`03-implementation/07`) |
 | TBC-2 | Is 20×10 cm the floor or the whole box? | **Floor area** of a small starter box; treated as a scale model, and the docs note that a leopard gecko adult would need a larger enclosure. The system is size-agnostic. | M1 |
 | TBC-3 | Alert channel and camera? | **FCM push (app) + Telegram bot** as the two demo channels, SMTP email optional; **camera included as optional FR-17**, snapshot only, no analysis. | M1 |
+| TBC-4 | How does the claim secret reach the device? | **8-digit one-time pairing token** displayed on the OLED, typed nowhere: the app hands the secret to the device over the local network (option A). Manual entry stays as the demo fallback. Recorded as **`ADR-016`**. | M1 |
 
 ## 7. Success metrics
 

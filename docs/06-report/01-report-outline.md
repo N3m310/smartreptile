@@ -109,7 +109,10 @@ and seeding policy.
 **R6.5 Real-time path.** SignalR setup, reconnect + re-fetch rule, degraded polling mode.
 **R6.6 UI/UX implementation.** Screenshot gallery (Home, Alerts detail, Thresholds, Claim, Report, Wallboard),
 plus the "never render a value without its timestamp" rule and how the widget signature enforces it.
-**R6.7 Web dashboard.** Structure and why no build step.
+**R6.7 Web dashboard.** Structure and why no build step. The M1 evidence set is `06-report/snapshots/` — live API
+responses plus captured pages, taken from the running stack; where the Live and Wallboard pages show their empty
+state behind an `http_404` banner, that is the documented milestone boundary (the `/api/v1` routes are M2), not a
+fault, and the caption must say so.
 **R6.8 Code quality.** Commenting convention with an annotated excerpt, analyzer/format gates, coverage gates.
 
 ## R7 — Testing and quality assurance
@@ -127,7 +130,7 @@ running ticker" class of lesson), what is *not* automated and why.
 **R8.1 Assets and threats.** Table from `02-design/06` §1.
 **R8.2 Authentication and authorisation.** User auth, device auth, RBAC matrix, 404-vs-403 policy.
 **R8.3 Provisioning flow.** Sequence diagram, claim-code properties, anti-enumeration behaviour, the
-pairing-token decision (TBC-4).
+pairing-token decision (TBC-4 → `ADR-016`).
 **R8.4 Transport and platform security.** TLS, headers, rate limits, secrets handling, dependency scanning.
 **R8.5 OWASP IoT Top 10 review.** Table with **I3, I4 and I10 explicitly not fully addressed** and the reason —
 a claim of ten green ticks would invite a question the team cannot answer.
@@ -180,13 +183,13 @@ system's usefulness ends (one animal, one terrarium, indicative sensors, no actu
 | # | Content | Source |
 |---|---|---|
 | R14.1 | Contribution table | `06-report/02` |
-| R14.2 | ADR log (ADR-001…015) | `07-appendices/01` |
+| R14.2 | ADR log (ADR-001…016) | `07-appendices/01` |
 | R14.3 | SQL schema reference | `07-appendices/02` |
 | R14.4 | MQTT + REST API specification | `07-appendices/03` |
 | R14.5 | Hardware BOM, pin map, bring-up sequence + QA log | `07-appendices/04`, `04-quality/03` |
 | R14.6 | Species threshold reference + literature list | `07-appendices/05` |
 | R14.7 | v2 AI roadmap | `07-appendices/06` |
-| R14.8 | Screenshots and evidence index | `report/evidence/` |
+| R14.8 | Screenshots and evidence index | `06-report/snapshots/` (the M1 set) and `report/evidence/` (app + demo evidence added at M4/M6) |
 
 ---
 

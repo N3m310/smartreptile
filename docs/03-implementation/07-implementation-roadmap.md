@@ -27,9 +27,9 @@ gantt
 
 **Goal:** every member can run the whole stack locally and one real sensor produces a number.
 
-| # | Task | Owner track | Acceptance | Status (2026-09-21, measured) |
+| # | Task | Owner track | Acceptance | Status (2026-09-23, measured) |
 |---|---|---|---|---|
-| 1.1 | Close the open decisions `[TBC-1…4]` with the mentor (species, box size meaning, channels, pairing method) | all | Values written into this doc set; `01-product/01` §6 updated | **Partial** — decisions are recorded (TBC-1…3 in `01-product/01` §6, TBC-4 = pairing token, option A), but mentor sign-off cannot be evidenced from the repository, and `02-design/06` §5 still presents TBC-4 as open |
+| 1.1 | Close the open decisions `[TBC-1…4]` with the mentor (species, box size meaning, channels, pairing method) | all | Values written into this doc set; `01-product/01` §6 updated | **Partial** — the decisions are now in one canonical list (`05-release/03` §6, TBC-1…TBC-6), the product-facing four are repeated in `01-product/01` §6, TBC-4 is closed as **`ADR-016`**, and `02-design/06` §5 no longer describes it as open. What is still missing is *evidence of sign-off*: an agreement reached verbally is not in the repository, so `05-release/03` §6.1 carries a dated line to fill in. Partial until that line is real |
 | 1.2 | Freeze FR/NFR list and ids | all | No id changes after this point without a note in `05-release/03` | **Complete** — the id scheme is in use across all 34 documents |
 | 1.3 | Create the monorepo skeleton + CI job running `dotnet build`, `flutter analyze`, `pio run`, `pio test -e native` | backend | CI green on an empty scaffold | **Complete, exceeded** — five green jobs on every push (`backend`, `integration`, `app`, `firmware`, `secret-scan`); the firmware job executes the 22 host tests |
 | 1.4 | Docker Compose: SQL Server + API skeleton + broker with `/health` | backend | `/health` green, `/health/ready` reports `database` + `mqtt-broker` | **Complete** — stack up and healthy; `/health/ready` reports both checks Healthy; the DB-outage drill returns `503` in 3.0 s and recovers in 7 ms with zero API restarts |
@@ -46,6 +46,19 @@ machine, and CI is green — but *"sensor data on serial"* does not, because 1.5
 therefore not closed**, and the milestone's own goal statement ("one real sensor produces a number") is the single
 line keeping it open. Everything the milestone asked for that does not need a breadboard is done, and the Status
 column above records how each was verified rather than that it was attempted.
+
+**Re-measured 2026-09-23:** the milestone gained its first real evidence set on 2026-09-22 —
+`06-report/snapshots/` holds the live `/health/ready`, `/version` and `/metrics` responses plus three captured
+dashboard pages, produced from the running stack rather than drawn. `06-dashboard-health.png` is the one that shows
+a complete path today: browser → nginx → API → SQL Server + MQTT broker. That pass also found a genuine defect,
+now fixed: the dashboard reported *any* non-2xx as an unreachable server, so the `404` from the not-yet-built
+`/api/v1/...` routes read as "cannot reach the server" and implied the animal was unmonitored when in fact nothing
+was wrong. Failure messaging is now classified once (`web/js/api.js` → `failureKind`), with the distinction
+recorded as a UX rule (`02-design/04` §6) and a drill that would catch its return (`04-quality/03` §5.11); the
+four cases were exercised in a browser on 2026-09-23. **The DoD verdict is unchanged** — two of three lines hold,
+and *"sensor data on serial"* is still the only missing line. What moved: 1.1 went from "decision recorded" to
+"decision recorded and consistent across the doc set" (`ADR-016`), and M1 now has report-grade screenshots of
+what it actually delivers instead of prose claims about it.
 
 Beyond M1: task **2.1** (domain entities, EF Core model, `InitialSchema` migration, seeders for the metric
 dictionary, three profiles and their bands) is also complete and enforced by the `integration` CI job, and 2.3 is

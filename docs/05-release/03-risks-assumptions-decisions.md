@@ -63,6 +63,7 @@ Full text for each decision is in `07-appendices/01-adr-log.md`.
 | ADR-013 | Bilingual UI (vi default, en), strings localised at render time, not stored per language | Accepted |
 | ADR-014 | SHT31 + BH1750 (+ LTR390/DS18B20) over DHT22; median-of-5 + EMA filtering | Accepted |
 | ADR-015 | UTC everywhere; server-authoritative `ReceivedAt`; local-day bucketing only in the rollup layer | Accepted |
+| ADR-016 | The claim secret reaches the device by an 8-digit one-time pairing token over the local network (closes TBC-4) | Accepted |
 
 ## 4. Bug and issue log (append-only)
 
@@ -89,9 +90,20 @@ regression test exists and fails on the pre-fix commit (`04-quality/01` §8).
 | TBC-1 | Which species/branch defines the demo thresholds? | Semi-desert — leopard gecko, with tropical and arid profiles also seeded | Threshold tables in `07-appendices/05` are re-derived; the engine itself does not change |
 | TBC-2 | Is 20×10 cm the floor or the whole box? | Floor of a small starter box, treated as a scale model | Enclosure planning and the accuracy discussion in the report; no software impact |
 | TBC-3 | Alert channel and camera? | FCM + Telegram for the demo; camera optional (FR-17, snapshot only, no analysis) | If a camera is required, the BOM grows ~250–400 k VND and FR-17 moves from MAY to MUST |
-| TBC-4 | How does the claim secret reach the device? | Pairing token over the local network (option A); manual entry (option B) as fallback | Firmware adds/removes one endpoint; the provisioning UX changes |
+| TBC-4 | How does the claim secret reach the device? | Pairing token over the local network (option A); manual entry (option B) as fallback — **closed as `ADR-016`** | Firmware adds/removes one endpoint; the provisioning UX changes |
 | TBC-5 | Is a web dashboard required in addition to the app? | Both, because the coursework requires the mobile app and the dashboard is cheap on the same API | If only one is required, the web dashboard is reduced to the wallboard page |
 | TBC-6 | Minimum evidence for "release mode proof"? | APK signature output + About screen screenshot + a push received while installed from the APK | Changes the M6 checklist only |
+
+### 6.1 Sign-off record
+
+The table above is the team's proposed answer to each question; what turns a proposal into a decision is the mentor
+confirming it. A verbal confirmation cannot be evidenced from this repository, so record it here when it happens —
+this line is what closes roadmap task **1.1** (`03-implementation/07`):
+
+> confirmed with `<mentor>` on `<date>` via `<channel>` — TBC-1…TBC-6 as recorded above, with no change.
+
+Until that line carries a real date, **1.1 stays partial**, even though every question already has an answer and
+TBC-4 has been recorded as a decision (`ADR-016`).
 
 ## 7. Explicit limitations shipped with v1
 
