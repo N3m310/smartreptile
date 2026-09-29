@@ -60,13 +60,14 @@ list (`03-implementation/06` §8).
 | Temperature | Day (basking) | 38.0 – 42.0 | 30.0 – 45.0 | 5 / 2 min | 1.0 °C | A true heliotherm needs a hot spot; the air temperature alone understates its needs |
 | Temperature | Day (ambient/cool side) | 28.0 – 33.0 | 24.0 – 36.0 | 5 / 2 min | 1.0 °C | Provided as a second profile variant (`Arid-cool`) so both zones can be monitored |
 | Temperature | Night | 24.0 – 28.0 | 18.0 – 32.0 | 10 / 3 min | 1.0 °C | Desert nights are cool; a warm night is not automatically harmful but is not the target |
+| Temperature (surface, optional) | Day | 38.0 – 45.0 | 28.0 – 50.0 | 5 / 2 min | 1.0 °C | The probe sits **on the basking rock, not in the air**: a heliotherm's surface runs well above the air above it, which is why this band is warmer than the air band above. `GradientWarning` also fires if surface − air > 12 °C |
 | Humidity | Any | 30 – 40 | 20 – 55 | 15 / 5 min | 3 %RH | Low ambient humidity; persistently wet conditions cause respiratory problems |
 | Light (lx) | Day | ≥ 2 000 lx for ≥ 10 h/day | — (accumulated rule) | 15 min | — | High light intensity + a strong UVB gradient is the accepted standard for this species |
 | UV index | Day | 1.0 – 3.5 | 0.0 – 5.0 | 15 / 5 min | 0.2 | **Requires a proper UVB lamp**; without a UVB source the lower bound cannot be met, and the app reports "below target" rather than pretending it is fine (UV-Tool guidance, §6 source 1) |
 
 ## 4. Climate-zone plausibility ranges (used for the non-blocking sanity warning, BR-10.5)
 
-| Climate zone | Target temperature ceiling | Target humidity ceiling | Typical photoperiod | Light threshold |
+| Climate zone | Air temperature ceiling (`TempC`) | Target humidity ceiling | Typical photoperiod | Light threshold |
 |---|---|---|---|---|
 | Tropical | 28–30 °C | 70–85 %RH | 12 h | 500 lx |
 | SemiArid | 31–33 °C | 40–50 %RH | 12 h | 1 000 lx |
@@ -75,6 +76,15 @@ list (`03-implementation/06` §8).
 
 If a user enters a band contradicting the zone's plausible range, the UI shows a non-blocking warning
 ("a desert profile normally requires …") — helpful, never paternalistic.
+
+**The ceiling is per metric, and `SurfaceTempC` is judged on its own scale** (clarified 2026-09-29). The
+temperatures above are **air** ceilings, so a `TempC` band is compared against them. A basking *surface* is
+legitimately hotter than the air above it — that is the entire point of the surface band in §2 and §3 — so
+measuring a surface band against an air ceiling would flag the very shape the seeded profiles ship. A
+`SurfaceTempC` band is therefore compared against the ceiling implied by that profile's own seeded surface band
+(its `CriticalMax`): **38 °C** for SemiArid, **50 °C** for Arid. Without the split, the Arid surface band's 45 °C
+target max would trip its own sanity warning — exactly the false positive a *non-blocking* notice must never
+produce.
 
 ## 5. Verification checklist — **gate before the demo**
 
@@ -96,11 +106,16 @@ A row without a page reference is not verified, even if the number "looks right"
 | 11 | All | Photoperiod 12 h | | 2, 4 | | | | ☐ |
 | 12 | All | Light threshold values (500/1 000/2 000 lx) | | 2, 7 | | | | ☐ note these are husbandry practice, not physiology — flag as such |
 | 13 | All | Dwell/recovery parameters are **team design choices**, not literature values | — | — | | | | ☐ state this explicitly in the report |
+| 14 | Arid | Basking **surface** 38–45 °C | | 4, 7 | | | | ☐ |
 
 Row 13 matters: dwell time and hysteresis come from engineering judgement about sensor noise and alert
 fatigue. The report must not imply they are sourced from biology.
 
-**Two things a reader of this checklist has to know** (added 2026-09-23, when the seeder side was wired up):
+Row 14 was added on 2026-09-29 and is the one row that exists because of a *documentation* gap rather than a
+number: the database has always shipped this band, but neither §3 nor this checklist mentioned it (item 2 below).
+
+**Two things a reader of this checklist has to know** (added 2026-09-23, when the seeder side was wired up;
+item 2 updated 2026-09-29):
 
 1. **It is not a one-to-one map of the seeded bands.** Rows 5, 11, 12 and 13 describe profile-level data or engine
    parameters — the humid-hide note, the photoperiod, the lx values, dwell/recovery — rather than bands. Closing a
@@ -110,11 +125,23 @@ fatigue. The report must not imply they are sourced from biology.
    decrement `ReferenceDataSeeder.BandsAwaitingVerification` in the same commit;
    `SchemaAndSeedingTests.Bands_awaiting_verification_match_the_declared_count` fails if the two drift, so the
    stamp cannot outlive this checklist.
-2. **Two coverage gaps, both still open** (found by comparing §3 with the seeded bands, not by reading either one
-   alone). (a) Row 7 verifies an *Arid ambient 28–33 °C* band belonging to an `Arid-cool` variant that §3
-describes but the seeder never creates — either seed the variant or drop the row. (b) The seeded `Arid`
-   **surface** band (38–45 °C) is in neither §3 nor this checklist. These are decisions rather than typos: pick an
-   answer and make §3, §5 and the seeder say the same thing.
+2. **Coverage against the seeded bands** (found by comparing §3 with the seeder rather than reading either one
+   alone). One of the two gaps found on 2026-09-23 is now closed and the other is deliberately still open:
+   - **Closed 2026-09-29 — was gap (b).** The seeded `Arid` **surface** band (target 38.0–45.0 °C, critical
+     28.0–50.0 °C, margin 1.0 °C) was in neither §3 nor this checklist, so the database shipped a band that no
+     document described. It is now the §3 row and row 14 above, so §3, §5 and the seeder describe the same 17
+     bands. No count changed: this band was already one of the 14 pending ones.
+   - **Still open — gap (a).** Row 7 verifies an *Arid ambient 28–33 °C* band belonging to an `Arid-cool` variant
+     that §3 describes but the seeder never creates. It is a decision rather than a typo — seed the variant, or
+     drop the row together with the §3 line — and it was left open on 2026-09-29 rather than resolved for
+     convenience: seeding a fourth profile changes the band counts quoted in `README`, `03-implementation/07`
+     (task 1.8) and `05-release/01`, while dropping the row changes what §3 promises. Until it is decided, §3
+     describes one band the database does not hold.
+3. **Row 14 was appended, not inserted, and rows 1–13 keep their numbers on purpose.** The seeder writes row
+   numbers into the data: `Threshold.SourceRef` literally reads `…docs/07-appendices/05 §5 row 13` for the dwell
+   statement and `…§5 row 12` for the light bands. Renumbering would leave every already-seeded row — including
+   rows already written into a deployed database — citing the wrong row, so the new row sorts after the `All`
+   rows; read the **Profile** column, not the position.
 
 ## 6. Candidate literature and reference list
 

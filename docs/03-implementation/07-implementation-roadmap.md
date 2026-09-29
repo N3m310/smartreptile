@@ -36,7 +36,7 @@ gantt
 | 1.5 | Bench bring-up: SHT31 + BH1750 (+ DS18B20) on a breadboard, serial print at 1 Hz | firmware | Serial shows plausible values; `04-quality/03` §2 checklist partially signed | **Not started** — no hardware has been connected; `main.cpp` reports placeholder values and the QA checklist is unsigned |
 | 1.6 | Sensor accuracy spot check (fridge/room/lamp, hygrometer comparison) | firmware | Numbers within datasheet tolerance, recorded in the QA log | **Not started** — depends on 1.5 |
 | 1.7 | Flutter app scaffold: routing, theme, providers wired to a stub API, `flutter test` green | app | App runs, empty screens, tests green | **Complete** — `flutter analyze` clean, 19 tests pass, provider wiring and en/vi localisation in place |
-| 1.8 | `07-appendices/05` literature pass 1 (collect sources, mark verified rows) | doc/report | ≥ 60% of threshold rows have a citation | **Partial** — every seeded band carries a `SourceRef`, but **0 of 13 rows are signed**, so 14 of the 17 bands still read `PENDING VERIFICATION` (the three light bands are inert by design and cite §5 row 12 instead). The two sides are now held together mechanically: `SourceUrl` is `null` while a range is unverified rather than a dead placeholder link, and `ReferenceDataSeeder.BandsAwaitingVerification` + `SchemaAndSeedingTests` fail CI if the checklist and the database disagree. What is missing is still a person with a book open: the page/table column, the signature and rows 12–13's two statements |
+| 1.8 | `07-appendices/05` literature pass 1 (collect sources, mark verified rows) | doc/report | ≥ 60% of threshold rows have a citation | **Partial** — every seeded band carries a `SourceRef`, but **0 of 14 rows are signed**, so 14 of the 17 bands still read `PENDING VERIFICATION` (the three light bands are inert by design and cite §5 row 12 instead). The two sides are now held together mechanically: `SourceUrl` is `null` while a range is unverified rather than a dead placeholder link, and `ReferenceDataSeeder.BandsAwaitingVerification` + `SchemaAndSeedingTests` fail CI if the checklist and the database disagree. What is missing is still a person with a book open: the page/table column, the signature and rows 12–13's two statements |
 
 **DoD:** `README` quick start reproduces the environment on a teammate's machine in ≤ 30 min; sensor data on
 serial; CI green. **Risk burn-down:** toolchain/JDK/Wi-Fi-band issues surface here, not in week 5.
@@ -59,6 +59,15 @@ four cases were exercised in a browser on 2026-09-23. **The DoD verdict is uncha
 and *"sensor data on serial"* is still the only missing line. What moved: 1.1 went from "decision recorded" to
 "decision recorded and consistent across the doc set" (`ADR-016`), and M1 now has report-grade screenshots of
 what it actually delivers instead of prose claims about it.
+
+**Re-measured 2026-09-29:** no new gate was run, because 1.8 moved on the documentation side only. The checklist
+gained its 14th row: the seeded `Arid` **surface** band (38–45 °C) is now in §3 and in §5, closing the coverage gap
+where the database shipped a band no document described (the rule is still "pick an answer and make §3, §5 and the
+seeder agree"). The **other** gap was left open on purpose — row 7 verifies an `Arid-cool` ambient band the seeder
+never creates, and closing it means either seeding a fourth profile or deleting a row, both of which move band
+counts quoted in `README`, here and `05-release/01`. So of the three M1 tasks still short of complete, two (1.5,
+1.6) are short of hardware and one (1.1) is short of a mentor's dated confirmation; **1.8 is short only of a
+person with the books open**. The DoD verdict stays 2 of 3.
 
 Beyond M1: task **2.1** (domain entities, EF Core model, `InitialSchema` migration, seeders for the metric
 dictionary, three profiles and their bands) is also complete and enforced by the `integration` CI job, and 2.3 is

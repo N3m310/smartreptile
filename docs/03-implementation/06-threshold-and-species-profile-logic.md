@@ -39,7 +39,7 @@ would create a fourth alert outcome that the data does not support.
 | Dwell | `DwellCritMinutes ≤ DwellWarnMinutes` | critical slower to fire than warning would be incoherent |
 | Recovery margin fits | `RecoveryMargin < (TargetMax − TargetMin) / 2` | margin larger than half the band would make recovery impossible |
 | Phase sanity | night band must not be *hotter* than day band for temperature | warning (non-blocking): a warmer night is almost always a data-entry mistake |
-| Climate-zone plausibility | within the zone's `[plausibleMin, plausibleMax]` from `07-appendices/05` | "desert" profile with `TargetMax < 20 °C` → non-blocking warning (BR-10.5) |
+| Climate-zone plausibility | within the zone's `[plausibleMin, plausibleMax]` from `07-appendices/05` §4 — **per metric**: `TempC` against the zone's air ceiling, `SurfaceTempC` against its own seeded band's `CriticalMax` | "desert" profile with `TargetMax < 20 °C` → non-blocking warning (BR-10.5) |
 
 ## 3. Worked evaluation examples
 
@@ -202,11 +202,11 @@ Each seeded profile is a small, reviewable object — not a spreadsheet dump:
 | Field | Tropical | SemiArid (demo) | Arid |
 |---|---|---|---|
 | Example keeper species | Crested gecko / mourning gecko | **Leopard gecko** | Bearded dragon |
-| Temperature day target | 24–28 °C | 26–32 °C | 30–38 °C (basking to 40) |
+| Temperature day target | 24–28 °C | 26–32 °C | 38–42 °C (basking; the surface band is 38–45 °C) |
 | Temperature night target | 20–24 °C | 22–27 °C | 24–28 °C |
-| Temperature critical | 18–31 °C | 22–34.5 °C | 20–42 °C |
+| Temperature critical | 18–31 °C | 22–34.5 °C | 30–45 °C |
 | Humidity target | 60–80 %RH | 30–40 %RH (70–80 % in the humid hide) | 30–40 %RH |
-| Humidity critical | 40–95 %RH | 20–60 %RH | 20–60 %RH |
+| Humidity critical | 40–95 %RH | 20–60 %RH | 20–55 %RH |
 | Light threshold | 500 lx, ≥ 10 h | 1 000 lx, ≥ 8 h | 2 000 lx, ≥ 10 h |
 | UVI target | 0–1.0 (optional, low) | 0–1.5 | 1.0–3.5 (with UVB lamp) |
 | Photoperiod | 12 h from 07:00 | 12 h from 07:00 | 12 h from 08:00 |
@@ -215,6 +215,12 @@ Each seeded profile is a small, reviewable object — not a spreadsheet dump:
 as a starting draft; §5 of `07-appendices/05` is the verification checklist that must be closed, with the
 citation per row, before the demo. Any row without a citation does not ship — that is a gate, not a
 preference, because the brief's requirement #4 is precisely that thresholds come from literature.
+
+**This table is a derived view, not a source.** `07-appendices/05` §3 and `ReferenceDataSeeder` are the
+authority; every cell here is a copy of a seeded band. Comparing the two on 2026-09-29 found three stale cells in
+the **Arid** column — day target, temperature critical and humidity critical had drifted from the bands the
+database actually ships — so they were corrected to the seeded values. Change a band in §3 and the seeder
+together, then update this table; a number that exists in two places only stays correct if both are edited.
 
 ## 8. Things deliberately *not* modelled in v1
 
