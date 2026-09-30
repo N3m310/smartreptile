@@ -22,6 +22,18 @@ class Env {
   /// Default sampling interval assumed when the device has not reported one yet.
   static const int defaultSamplingIntervalSec = 60;
 
+  /// Whether to run the clickable prototype instead of the real (currently empty) data path.
+  ///
+  /// Default `true`, because until the M2 endpoints exist the live path can only show empty states. Override with
+  /// `--dart-define=PROTOTYPE=false` to see the M1 screens against the real `ApiClient`.
+  ///
+  /// Both paths stay compiled on purpose: a prototype that is the only thing that still builds is a prototype nobody
+  /// notices has drifted away from the data layer it is pretending to be.
+  static const bool prototypeMode = bool.fromEnvironment(
+    'PROTOTYPE',
+    defaultValue: true,
+  );
+
   /// Number of missed intervals after which a value is considered stale (FR-07 / BR-07.2).
   static const int staleAfterIntervals = 3;
 }

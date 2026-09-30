@@ -31,6 +31,29 @@ enum MetricStatus {
     }
   }
 
+  /// The API spelling — the exact inverse of [parse].
+  ///
+  /// It lives here, next to [parse], for the same reason the colour mapping does: one file owns the vocabulary, so a
+  /// new status cannot be added to the API without the compiler forcing a decision about both directions. Anything
+  /// that needs to *produce* a status (offline caching, a client-side evaluation, a test fixture) uses this instead of
+  /// `name`, which would silently ship `inRange` where the parser expects `InRange`.
+  String toApiValue() {
+    switch (this) {
+      case MetricStatus.inRange:
+        return 'InRange';
+      case MetricStatus.outOfRange:
+        return 'OutOfRange';
+      case MetricStatus.critical:
+        return 'Critical';
+      case MetricStatus.unavailable:
+        return 'Unavailable';
+      case MetricStatus.maintenance:
+        return 'Maintenance';
+      case MetricStatus.noData:
+        return 'NoData';
+    }
+  }
+
   /// True when the keeper should look at this value now.
   bool get isProblem =>
       this == MetricStatus.outOfRange || this == MetricStatus.critical;
