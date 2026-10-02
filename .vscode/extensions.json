@@ -1,0 +1,14 @@
+{
+  "recommendations": [
+    "platformio.platformio-ide",
+    "ms-vscode.cpptools",
+    "ms-dotnettools.csharp",
+    "ms-dotnettools.csdevkit",
+    "dart-code.flutter",
+    "dart-code.dart-code",
+    "ms-mssql.mssql",
+    "humao.rest-client",
+    "ritwickdey.liveserver"
+  ]
+}
+
