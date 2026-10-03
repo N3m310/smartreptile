@@ -1,0 +1,45 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter: Run App (Debug)",
+      "type": "dart",
+      "request": "launch",
+      "program": "app/lib/main.dart",
+      "cwd": "app"
+    },
+    {
+      "name": "Flutter: Run App (Profile)",
+      "type": "dart",
+      "request": "launch",
+      "flutterMode": "profile",
+      "program": "app/lib/main.dart",
+      "cwd": "app"
+    },
+    {
+      "name": "Backend: SmartReptile.Api",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "Backend: Build API",
+      "program": "${workspaceFolder}/backend/src/SmartReptile.Api/bin/Debug/net10.0/SmartReptile.Api.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/backend/src/SmartReptile.Api",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openUrl",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)",
+        "uriFormat": "%s/swagger"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    {
+      "name": "Web: Open Chrome (Port 8081)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8081",
+      "webRoot": "${workspaceFolder}/web"
+    }
+  ]
+}

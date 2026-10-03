@@ -1,0 +1,89 @@
+{
+  // Flutter / Dart SDK config
+  "dart.flutterSdkPath": "C:\\Users\\ASUS\\Flutter SDK\\flutter-3.47.6",
+  "dart.lineLength": 100,
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "Dart-Code.dart-code",
+    "editor.selectionHighlight": false,
+    "editor.suggest.snippetsPreventQuickSuggestions": false
+  },
+
+  // .NET / C# config
+  "dotnet.defaultSolution": "backend/SmartReptile.sln",
+  "[csharp]": {
+    "editor.formatOnSave": true
+  },
+
+  // Web / Frontend / Tailwind CSS
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript",
+    "typescriptreact": "javascript",
+    "html": "html"
+  },
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+
+  // Firmware / PlatformIO / C++
+  "C_Cpp.default.configurationProvider": "platformio.platformio-ide",
+
+  // Environment file associations
+  "files.associations": {
+    ".env*": "dotenv",
+    "*.ini": "ini"
+  },
+
+  // Exclude heavy/generated folders from file watcher & search
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "firmware/.pio": true,
+    "backend/**/bin": true,
+    "backend/**/obj": true,
+    "app/.dart_tool": true,
+    "app/build": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/bower_components": true,
+    "firmware/.pio": true,
+    "backend/**/bin": true,
+    "backend/**/obj": true,
+    "app/.dart_tool": true,
+    "app/build": true,
+    "web/dist": true
+  }
+}
