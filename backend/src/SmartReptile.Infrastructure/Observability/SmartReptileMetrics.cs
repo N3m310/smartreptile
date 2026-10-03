@@ -67,5 +67,8 @@ public sealed class SmartReptileMetrics
         ["mqtt_connected_clients"] = broker.ConnectedClients,
         ["mqtt_rejected_connections_total"] = broker.RejectedConnections,
         ["mqtt_published_messages_total"] = broker.PublishedMessages,
+        ["mqtt_refused_publications_total"] = broker.RefusedPublications,
+        ["mqtt_refused_subscriptions_total"] = broker.RefusedSubscriptions,
+        ["mqtt_kicked_sessions_total"] = broker.KickedSessions,
     };
 }

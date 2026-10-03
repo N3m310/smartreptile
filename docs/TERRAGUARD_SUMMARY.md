@@ -14,7 +14,8 @@ src/
 ├── data/
 │   └── mockData.ts            # Dữ liệu giả lập (terrarium, thiết bị, cảnh báo)
 ├── components/
-│   └── Layout.tsx             # Sidebar + Header dùng chung
+│   ├── Layout.tsx             # Sidebar + Header dùng chung
+│   └── MockDataNotice.tsx     # Nhãn "Dữ liệu mô phỏng" — hiện ở trang đăng nhập và trong app shell (task 4.14)
 └── pages/
     ├── Login.tsx              # Trang đăng nhập
     ├── Dashboard.tsx          # Dashboard tổng quan
@@ -44,6 +45,11 @@ src/
 | Cảnh báo | `#e8a832` (vàng) |
 | Nguy hiểm | `#e05530` (đỏ) |
 | Ngoại tuyến | `#556055` (xám) |
+
+> **Lưu ý (2026-10-03).** Đây là **nguyên mẫu giao diện với dữ liệu mô phỏng**: không gọi API, không hiển thị số đo
+> thật, và mọi màn hình đều mang nhãn "Dữ liệu mô phỏng" (`src/components/MockDataNotice.tsx`). Bảng màu trạng thái
+> ở trên là **riêng cho nguyên mẫu** — lý do và tỉ số tương phản đo được nằm ở đầu `src/index.css`. Nguyên mẫu
+> **không phải** web dashboard của đồ án: dashboard là `web/legacy/` và chạy trên API thật (`ADR-018`).
 
 ---
 

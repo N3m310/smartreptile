@@ -111,7 +111,7 @@ per 5 min, 20 per hour globally for the demo), payload-validated, and creates de
 `Provisioning` state with zero capability. Unclaimed devices older than 24 h are swept. A flood can
 create junk rows but can never read or write other tenants' data.
 
-**Claim-code properties:** 8 chars from a 32-symbol alphabet excluding `0/O/1/I/L` (see
+**Claim-code properties:** 8 chars from a 31-symbol alphabet excluding `0/O/1/I/L` (see
 `07-appendices/03` §2.1), 15-minute TTL, regenerated while in provisioning mode, single-use, and —
 crucially — **the same error is returned for unknown, expired and consumed codes** (BR-04.3).
 

@@ -202,7 +202,7 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-I-12 | Notification integration with fakes | WireMock Telegram + fake FCM | one send, correct body/localisation, retries counted, `NotificationLog` rows per attempt, quiet-hours behaviour as in TC-U-38 | 2 | FR-13 |
 | TC-I-13 | Security/auth integration | anonymous MQTT publish, wrong secret, revoked device, expired claim code, foreign terrarium read, Viewer mutation, token reuse | each rejected with the documented status; audit rows written; revoked device blocked within 60 s | 1 | FR-01, FR-02, FR-04, FR-05, NFR-04 |
 | TC-I-14 | Retention sweep and purge | 91-day-old raw + rollups; snapshot 8 days old; export older than 24 h | raw deleted with count logged, rollups retained, snapshot deleted, export file removed and job `Expired`; a 7-day late back-fill recomputes rollups and the summary | 2 | FR-15, NFR-11 |
-| TC-I-15 | Ops endpoints and counters | scrape `/metrics` before and after 1 000 ingests; stop the broker and call `/ready` | counters increase exactly by the expected amounts; `/ready` → 503 with `broker:false` while reads still work; i18n key sets of app and dashboard are identical | 2 | FR-18, NFR-12 |
+| TC-I-15 | Ops endpoints and counters | scrape `/metrics` before and after 1 000 ingests; stop the broker and call `/ready` | counters increase exactly by the expected amounts; `/ready` → 503 with `broker:false` while reads still work; i18n key sets of the app and of the static dashboard (`web/legacy/js/i18n.js`) are identical. *(The mock-data prototype in `web/` has no ARB keys and is deliberately outside this case — ADR-017; its exclusion is written into `04-quality/01` §6 and its fate is settled by `ADR-018`.)* | 2 | FR-18, NFR-12 |
 
 ---
 

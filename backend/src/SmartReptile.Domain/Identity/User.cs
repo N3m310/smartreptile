@@ -110,4 +110,12 @@ public class RefreshToken
 
     /// <summary>Client description for the session list (device model, platform).</summary>
     public string? DeviceInfo { get; set; }
+
+    /// <summary>
+    /// True when the token may still be exchanged for a new session: unexpired, not yet consumed and not
+    /// revoked. A consumed token is not "unusable" by accident — presenting it again is evidence of theft
+    /// and revokes the family (TC-U-34), so this deliberately reports <c>false</c> for it too.
+    /// </summary>
+    public bool IsUsableAt(DateTimeOffset nowUtc) =>
+        RevokedAt is null && ConsumedAt is null && ExpiresAt > nowUtc;
 }

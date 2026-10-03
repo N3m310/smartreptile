@@ -99,6 +99,7 @@ Notes to record:
 | 5.9 | Phone offline for 10 min, then online | Live values refresh, no stale value displayed as current | | ☐ |
 | 5.10 | 24 h soak | Coverage ≥ 99%; ≤ 1 false positive; heap stable; no reset | | ☐ |
 | 5.11 | Dashboard diagnosis is not wrong | the unbuilt-endpoint case shows a *warning* that the feature is not on the server yet (`http_404`); the dead-port case shows an *error* that the server cannot be reached — never the same message | | ☐ |
+| 5.12 | Web serving layout after the prototype landed (**BUG-03**, task 4.12) | `http://127.0.0.1:8081/` serves a working page rather than the prototype's blank Vite entry, and `/legacy/wallboard.html` + `/legacy/health.html` still return `200`; whatever `/` serves, the mock-data prototype is labelled as such | | ☐ |
 
 ---
 

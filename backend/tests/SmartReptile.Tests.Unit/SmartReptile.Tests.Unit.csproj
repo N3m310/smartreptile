@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmartReptile.Domain\SmartReptile.Domain.csproj" />
+    <ProjectReference Include="..\..\src\SmartReptile.Application\SmartReptile.Application.csproj" />
+    <ProjectReference Include="..\..\src\SmartReptile.Infrastructure\SmartReptile.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

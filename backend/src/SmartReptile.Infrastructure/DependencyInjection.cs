@@ -9,6 +9,7 @@ using SmartReptile.Infrastructure.Mqtt;
 using SmartReptile.Infrastructure.Observability;
 using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
+using SmartReptile.Infrastructure.Security;
 using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Infrastructure;
@@ -64,6 +65,25 @@ public static class DependencyInjection
             }));
 
         services.AddSingleton<IClock, SystemClock>();
+
+        // Identity adapters (FR-01). The application services that use them are registered by the API's
+        // composition root, which keeps this method a set of adapters rather than a second composition root.
+        services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+        services.AddSingleton<ISecretGenerator, SecureTokenGenerator>();
+        services.AddSingleton<ILoginThrottleStore, InMemoryLoginThrottleStore>();
+        services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
+        services.AddScoped<IUserStore, EfUserStore>();
+
+        // Device onboarding adapters (FR-04, FR-05 — roadmap task 2.2).
+        services.AddSingleton<IClaimCodeGenerator, ClaimCodeGenerator>();
+        services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
+        services.AddSingleton<IOnboardingThrottleStore, InMemoryOnboardingThrottleStore>();
+        services.AddScoped<IProvisioningStore, EfProvisioningStore>();
+
+        // Broker session registry (FR-05 BR-05.4): the broker writes it, the revoke use case reads it.
+        services.AddSingleton<DeviceSessionRegistry>();
+        services.AddSingleton<IDeviceSessionRegistry>(sp => sp.GetRequiredService<DeviceSessionRegistry>());
+
         services.AddSingleton<SmartReptileMetrics>();
         services.AddSingleton<MqttBrokerStatus>();
         services.AddSingleton<IMqttBrokerStatus>(sp => sp.GetRequiredService<MqttBrokerStatus>());

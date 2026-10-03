@@ -109,10 +109,16 @@ and seeding policy.
 **R6.5 Real-time path.** SignalR setup, reconnect + re-fetch rule, degraded polling mode.
 **R6.6 UI/UX implementation.** Screenshot gallery (Home, Alerts detail, Thresholds, Claim, Report, Wallboard),
 plus the "never render a value without its timestamp" rule and how the widget signature enforces it.
-**R6.7 Web dashboard.** Structure and why no build step. The M1 evidence set is `06-report/snapshots/` — live API
-responses plus captured pages, taken from the running stack; where the Live and Wallboard pages show their empty
-state behind an `http_404` banner, that is the documented milestone boundary (the `/api/v1` routes are M2), not a
-fault, and the caption must say so.
+**R6.7 Web.** Structure, and the two decisions that produced it (`ADR-017`, `ADR-018`): the static dashboard under
+`web/legacy/` (no build step, the only web surface with a real API behind it) — **the deliverable, and the M4 web
+surface** — and the TERRAGUARD React prototype under `web/` (mock data, labelled as such in the UI,
+Vietnamese-only, no engine rules, outside CI), kept deliberately as a **UI reference instead of being promoted**.
+Say plainly which one is the deliverable, and why committing `web/dist/` was accepted as the price of keeping npm
+out of the demo path. The M1 evidence set is
+`06-report/snapshots/` — live API responses plus captured pages, taken from the running stack; where the Live and
+Wallboard pages show their empty state behind an `http_404` banner, that is the documented milestone boundary (the
+`/api/v1` routes are M2), not a fault, and the caption must say so. Quoting a prototype number as a measurement is
+the one thing this section must not do.
 **R6.8 Code quality.** Commenting convention with an annotated excerpt, analyzer/format gates, coverage gates.
 
 ## R7 — Testing and quality assurance

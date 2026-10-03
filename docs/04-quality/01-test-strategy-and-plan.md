@@ -96,6 +96,7 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 | Capacitive/wear behaviour of NVS writes | Requires a long-term hardware study | Documented as an assumption with the measured write rate |
 | Usability with a real keeper | No test participants guaranteed | Heuristic review against the UX rules + accessibility checks |
 | Load beyond 50 RPS | Out of scope for a single-host demo | Trend recorded, no claim made (NFR-01 note) |
+| The **TERRAGUARD** prototype in `web/` | It is a UI reference with mock data and no API layer (`ADR-017`, `ADR-018`), so there is no behaviour to assert; it carries no ARB keys, so even `TC-I-15`'s key-parity check cannot reach it | The UI labels itself as mock data (`web/src/components/MockDataNotice.tsx`), and `ADR-018` keeps it out of measured claims and out of the M4 DoD, which `web/legacy/` carries instead |
 
 ## 7. Test execution plan
 

@@ -40,6 +40,23 @@ semantics and status vocabulary are shared; the component implementations are no
 | W7 | Report | Daily summary table + export button (report screenshots come from here) |
 | W8 | Admin | Audit log viewer, retention status, `/metrics` snapshot |
 
+**Where the prototype sits (2026-10-03).** `web/` also contains the **TERRAGUARD** prototype: eight mock-data
+screens (login, dashboard, terrariums, terrarium detail, devices, alerts, history, settings) in React + Vite +
+Tailwind, Vietnamese-only, with no API client and no engine rules (ADR-017). It explores the subject matter of
+W1–W6 but implements none of this inventory: no wallboard, no thresholds editor, no report or admin page, and its
+alerts are `value > max` over mock bands. It is a **UI reference, not the M4 web surface** (ADR-018): the table
+above stays the target for task 4.10, and `web/legacy/` — the surface with the real API behind it — is what the
+milestone's DoD is measured on.
+
+Three things about the prototype are decided rather than open (task 4.14), and it labels itself as mock data
+wherever it renders a number:
+
+| Question | Decision |
+|---|---|
+| Status colours | A **prototype-only palette** that maps one-to-one onto §3's four roles (`--status-normal/warning/danger/offline` ↔ `color.inRange/warning/critical/unknown`). The hues differ because §3's tokens are tuned for the app's theme-based surface and fall to **3.0–3.5:1** on this prototype's `#0b1a0d` / `#112016` surfaces — under the 4.5:1 body-text budget of `04-quality/03` §4.4 — where the prototype's own hues measure **4.7–8.6:1**. The ratios are recorded at the top of `web/src/index.css`; §3 remains the token source of truth for the shipped clients |
+| Copy | **Vietnamese-only, by intent.** The prototype explores a Vietnamese-language UI and has no ARB keys, so `TC-I-15` cannot reach it and there is no translation set to drift. Localising it is worth doing only if it is ever promoted to a shipped surface, which `ADR-018` declines |
+| Coverage | Outside every `TC-*` case and outside CI (`ADR-017`). The compensating control is the mock-data notice in the UI plus `ADR-018` keeping it out of measured claims |
+
 ## 2. Navigation graph (app)
 
 ```mermaid

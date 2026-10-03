@@ -1,4 +1,4 @@
-# 01 — Architecture Decision Log (ADR-001 … ADR-016)
+# 01 — Architecture Decision Log (ADR-001 … ADR-018)
 
 Append-only. Each entry: **Context → Decision → Consequences → Rejected alternatives.** Numbers are never
 reused; a superseded ADR keeps its id and gains a "Superseded by" note.
@@ -53,7 +53,7 @@ the team's SQL Server familiarity reduces schedule risk).
 ---
 
 ## ADR-003 — Flutter app + light vanilla-JS web dashboard
-**Status:** Accepted · **Related:** rubric (state management), NFR-06
+**Status:** Accepted — **superseded in part by `ADR-017`** (the "no build step" half, for the prototype surface the team now demonstrates; the Flutter-app half and the static dashboard under `web/legacy/` stand) · **Related:** rubric (state management), NFR-06, ADR-017
 
 **Context.** The brief says "dashboard (web **or** app)". The course rubric requires a mobile app with state
 management. A web dashboard is invaluable for the demo wallboard and report screenshots.
@@ -361,3 +361,100 @@ pairing endpoint is not finished in time.
 correctly — an unacceptable demo and support risk). Proxying the secret through the backend (creates a second
 authoritative path for a secret the server already stores hashed). BLE-assisted pairing (extra stack for one flow,
 and chipset support varies across the cheap dev boards in the BOM).
+
+---
+
+## ADR-017 — The web dashboard gets a React prototype, and `web/` is split around it
+**Status:** Accepted · **Date:** 2026-10-03 · **Related:** ADR-003, ADR-005, FR-08, NFR-06, `02-design/04` §1.2, roadmap 4.10 · **Note (2026-10-03):** the BUG-03 consequence below is closed (task 4.12) and this entry's open follow-up — which web surface carries M4 — is settled by `ADR-018`
+
+**Context.** ADR-003 chose a "light vanilla-JS dashboard, no build step" and rejected React because it "needs a
+build step and adds a language to the project for no coursework benefit". On 2026-10-02 a commit
+(`5581ea1`, branch `tuanTV2`) landed a **React UI prototype of the keeper's screens** under the working title
+**TERRAGUARD**: React 19 + Vite 6 + TypeScript 5.7 + Tailwind CSS v4, eight routes (`/` login, `/dashboard`,
+`/terrariums`, `/terrariums/:id`, `/devices`, `/alerts`, `/history`, `/settings`), Vietnamese-only copy, driven
+entirely by `web/src/data/mockData.ts`. It makes **no network calls at all** (no `fetch`, no `axios`, no
+`import.meta.env`, no `SignalR`/`WebSocket`), and its build output (`web/dist/`) was committed. The commit put the
+prototype at the root of `web/` and moved the M1 static dashboard to `web/legacy/`, which left the doc set, the
+compose `web` service and `.gitignore` describing a repository that no longer existed.
+
+**Decision.** Keep both surfaces, and say which is which rather than blending them:
+
+| Path | What it is | Stack | Data |
+|---|---|---|---|
+| `web/legacy/` | The **M1 static dashboard** — `index.html` (Live), `wallboard.html`, `health.html` | HTML + CSS + vanilla-JS ES modules + Chart.js 4 | The **real API** (`<meta name="api-base">`), empty/offline states included |
+| `web/` | The **TERRAGUARD prototype** — a UI exploration of the keeper's screens | React 19 + Vite 6 + TypeScript + Tailwind v4 + `react-router-dom` + `recharts` + `lucide-react` | **Mock data only**; no request leaves the page |
+
+`web/dist/` stays committed as an **explicit exception** to the "no generated build output in git" rule, so
+`docker compose up` can serve the prototype without a Node toolchain in the image — the same reasoning ADR-003
+used to reject npm in the critical path in the first place.
+
+**Consequences.**
+- The prototype is a **UI artefact, not the dashboard**. It carries no dwell, hysteresis, phase, dedupe or
+  escalation logic — those live in the backend (ADR-005) — so its alerts are plain `value > max` comparisons
+  against mock thresholds, and no number on it may be quoted as engine behaviour. This is stated in the
+  prototype's own summary (`TERRAGUARD_SUMMARY.md`) and repeated here because that is exactly the kind of
+  confusion the "never fake a number" standing rule exists to prevent.
+- **Two web codebases exist and neither is the M4/M6 deliverable** (roadmap 4.10). The next decision is a real
+  one and is tracked as task 4.13: wire the prototype to the API and retire `web/legacy/`, or keep the prototype
+  as a mock-data reference and extend the static dashboard. Wiring it is a rewrite of its data layer, not a patch.
+- The prototype defines a **second status→colour palette** (`web/src/index.css` — `--status-{normal,warning,
+  danger,offline}`) with no mechanical link to the app's single mapping in `core/status.dart` or to `02-design/04`
+  §3. Tracked as task 4.14 alongside its localisation gap.
+- The prototype is **outside every existing gate**: not in the five CI jobs, not covered by any `TC-*` case, and
+  it escapes `TC-I-15` (i18n key parity) because it has no ARB keys to compare. This is recorded as a known hole
+  rather than papered over; 4.14 either closes the localisation half or writes the exclusion down.
+- The move broke a documented path: compose's `web` service still mounts `web/`, so `:8081/` serves the Vite dev
+  entry (`<script src="/src/main.tsx">`) as a blank page and `/wallboard.html` is a 404. Recorded as **BUG-03**
+  (`05-release/03` §4) and tracked as task 4.12.
+
+**Rejected.** Deleting `web/legacy/` (it is the only web surface that renders real data, and the M1 evidence set in
+`06-report/snapshots/` could no longer be reproduced); building the prototype at image-build time with a
+multi-stage `web/Dockerfile` (correct in general, but it re-imports exactly the npm-in-the-path risk ADR-003
+rejected, to serve a UI whose numbers are invented); editing ADR-003 in place to say React was always acceptable
+(the log is append-only, and the reversal — not its erasure — is the part worth reading).
+
+---
+
+## ADR-018 — The TERRAGUARD prototype stays a mock-data UI reference; `web/legacy/` remains the M4 web surface
+**Status:** Accepted · **Date:** 2026-10-03 · **Related:** ADR-003, ADR-005, ADR-017, FR-08, NFR-06, `02-design/04` §1.2, `05-release/01` §5, roadmap 4.13
+
+**Context.** ADR-017 absorbed the prototype and left one decision open, tracked as task 4.13: wire TERRAGUARD to
+the real API and retire `web/legacy/`, or keep it as a mock-data reference and finish the static dashboard. The two
+candidate surfaces are not equivalent:
+
+| | `web/legacy/` — static dashboard | `web/` — TERRAGUARD prototype |
+|---|---|---|
+| Data | The **real API** (`js/api.js`, `<meta name="api-base">`) | `src/data/mockData.ts`; no request leaves the page |
+| Threshold verdicts | Renders what the engine computed | Re-implements `value > max` in a screen (the ADR-005 violation) |
+| Failure behaviour | `failureKind` classifies unreachable / not-built / not-found | Nothing can fail, so nothing is exercised |
+| Evidence | `06-report/snapshots/` — the M1 screenshots were taken from it | None; no number on it may be quoted |
+| Cost to make it the deliverable | Extend toward W1–W8 as M2/M3 endpoints land | Rewrite the data layer **and** wait for the same endpoints |
+
+M2 and M3 — the endpoints any real web surface needs — are the critical path, so neither option removes the
+dependency on them. The difference is what happens to the surface that already works.
+
+**Decision.** The prototype stays a **mock-data UI reference**, and `web/legacy/` remains the M4 web surface: the
+one task 4.10 extends toward W1–W8, and the one the milestone's DoD ("every screen shows real data with a
+timestamp") is measured on.
+
+Two consequences are accepted deliberately:
+
+1. **The prototype is not promoted.** It is labelled as mock data in the UI (task 4.14) and stays outside CI and the
+   `TC-*` set (ADR-017). What the team reuses is its **screens**, not its code: the card hierarchy, the layout and
+   the Vietnamese copy are the visual reference for the same screens in the static dashboard.
+2. **M4 web effort goes into the static dashboard.** That is vanilla-JS work rather than React — the stack ADR-003
+   chose for it — and it keeps the M1 evidence reproducible.
+
+**Consequences.**
+- `02-design/04` §1.2, `05-release/01` §5 and roadmap table 4.10–4.14 now agree on which surface ships, which is
+  the acceptance condition for task 4.13.
+- React is **deferred, not rejected on merit**: if extending the static dashboard to W1–W8 becomes the bottleneck,
+  the prototype is the ready-made starting point and this decision is revisited.
+- The prototype keeps a maintenance cost — a second codebase and a second palette — that buys nothing at demo time.
+  The exit stays cheap and stated: it is one folder, reachable only through the `/` mount, and removing it would
+  touch `ADR-017`'s rejected-alternatives note and `TERRAGUARD_SUMMARY.md` only.
+
+**Rejected.** Wiring TERRAGUARD to the API now (the right call one milestone later, but it would spend the M4 web
+budget re-rendering data the static dashboard already renders, while M2/M3 remain the critical path). Deleting the
+prototype now that `web/legacy/` is confirmed as the surface (it is the team's UI reference for the W1–W8 work and
+it already exists, labelled). Editing ADR-017 in place to record this outcome (append-only log).

@@ -3,6 +3,13 @@
 Evidence for the report, taken from the running stack rather than drawn: `docker compose up -d` on the
 development machine, then headless Chromium 153 at a 1440 × 1200 viewport.
 
+> **Paths moved on 2026-10-02 (recorded 2026-10-03).** The M1 dashboard pages now live in `web/legacy/`, because
+> the TERRAGUARD React prototype took the root of `web/` (`ADR-017`). The snapshot files themselves are unchanged;
+> the paths in this file are the post-move ones. **BUG-03 is fixed** (task 4.12): compose serves the prototype
+> build at `/` and these pages at `/legacy/` from sibling mounts, so `http://127.0.0.1:8081/legacy/*.html` is the
+> same address the reproduce command below matches. `ADR-018` keeps `web/legacy/` as the M4 web surface, so these
+> pages stay the ones the report cites.
+
 | File | What it shows |
 |---|---|
 | `01-health-ready.json` | `/health/ready` — `database` and `mqtt-broker` both report Healthy |
@@ -25,7 +32,7 @@ browser → nginx → API → SQL Server + MQTT broker.
 Two things this exercise surfaced, both worth fixing rather than hiding:
 
 1. The banner text called a 404 "cannot reach the server" (Vietnamese original above it). The server *did*
-   answer; it simply has no such endpoint yet. **Fixed on 2026-09-23.** `web/js/api.js` now classifies every
+   answer; it simply has no such endpoint yet. **Fixed on 2026-09-23.** `web/legacy/js/api.js` now classifies every
    failed call in one function, `failureKind(error)`:
 
    | Kind | Trigger | Banner |
@@ -48,8 +55,9 @@ Two things this exercise surfaced, both worth fixing rather than hiding:
 
 The dashboard is static HTML, so a headless browser needs the pages *and* the API reachable:
 
-- the pages were served **unmodified from `web/`** over `http://localhost:8081` — nothing was rewritten for the
-  screenshot, so what is shown is what the container serves;
+- the pages were served **unmodified from `web/legacy/`** over `http://localhost:8081` — nothing was rewritten for
+  the screenshot, so what is shown is what the container serves (the screenshots themselves predate the move, and
+  the markup has not changed since);
 - the API was proxied into the capture container (`socat TCP-LISTEN:8080 → host.docker.internal:8080`) instead of
   editing the `api-base` meta tag, which keeps the header label honest;
 - `localhost:8081` is also one of the origins the API's CORS configuration already allows, so the browser made the
@@ -59,7 +67,7 @@ Reproduce with the stack up:
 
 ```bash
 docker run --rm \
-  -v "$PWD/docs/06-report/snapshots:/out" -v "$PWD/web:/web:ro" \
+  -v "$PWD/docs/06-report/snapshots:/out" -v "$PWD/web/legacy:/web:ro" \
   --add-host host.docker.internal:host-gateway debian:bookworm-slim bash -c '
     apt-get update -qq && apt-get install -y -qq chromium python3 socat fonts-dejavu-core >/dev/null 2>&1
     socat TCP-LISTEN:8080,fork,reuseaddr TCP:host.docker.internal:8080 &

@@ -15,14 +15,16 @@ unpinned versions are treated as a defect because "it worked last week" is not a
 | Messaging | **MQTTnet** broker hosted in-process for the demo + `MQTTnet.Client` subscriber | 4.x | No extra infrastructure; swappable for Mosquitto/HiveMQ in production |
 | Real-time | **SignalR** (`Microsoft.AspNetCore.SignalR`) | 10.x | Push to app + dashboard |
 | Push | `FirebaseAdmin` (FCM) | latest stable, pinned | Android push |
-| Auth | `Microsoft.AspNetCore.Authentication.JwtBearer`, custom PBKDF2 (`Rfc2898DeriveBytes`) | 10.x | No external identity provider needed |
+| Auth | `Microsoft.AspNetCore.Authentication.JwtBearer` 10.0.2 (validation) + `System.IdentityModel.Tokens.Jwt` 8.23.0 (issuing) + custom PBKDF2 (`Rfc2898DeriveBytes`) | 10.0.2 / 8.23.0 | No external identity provider needed; the designer of record for the token lifetime and claims is BR-01.3 |
 | Logging | `Serilog` + console/file sinks (structured JSON) | latest pinned | Correlation id propagation |
 | API docs | `Microsoft.AspNetCore.OpenApi` + `Swagger/OpenAPI` UI | 10.x | Also the contract source for the app's client code |
 | Tests (backend) | `xUnit`, `FluentAssertions`, `Testcontainers.MsSql` (integration), `WireMock.Net` (channel fakes) | pinned | Integration tests against a real SQL Server container |
 | Mobile app | **Flutter** stable + Dart | Flutter 3.47.x / Dart 3.13.x | Rubric requires a real mobile app |
 | App packages | `provider` (state), `http` (REST), `signalr_netcore` or `web_socket_channel` (live), `fl_chart` (charts), `shared_preferences` (non-secret cache), `flutter_secure_storage` (tokens), `firebase_messaging`, `intl`, `flutter_localizations`, `go_router` | pinned in `pubspec.yaml` | `provider` is explicitly on the rubric |
 | App tests | `flutter_test`, `mocktail`, `integration_test` | pinned | Widget + unit + E2E |
-| Web dashboard | Static HTML + CSS + vanilla JS + **Chart.js** | Chart.js 4.x pinned | Matches the mentor's reference ("nhẹ, có thể mở rộng lên React"); no build step to break at demo time |
+| Web dashboard (M1, `web/legacy/`) | Static HTML + CSS + vanilla JS + **Chart.js** | Chart.js 4.x pinned | Matches the mentor's reference ("nhẹ, có thể mở rộng lên React"); no build step to break at demo time. Still the only web surface that renders real API data (ADR-017) |
+| Web prototype (`web/`, TERRAGUARD) | **React 19** + **Vite 6** + **TypeScript 5.7** + **Tailwind CSS v4**, plus `react-router-dom` 7, `recharts` 2, `lucide-react` | pinned in `web/package.json` | A UI exploration of the keeper's screens over mock data, built faster than the vanilla-JS equivalent — and the reason ADR-003's "no build step" half is superseded (ADR-017) |
+| Node (prototype only) | Node.js 22 LTS + npm | 22.x | `npm run dev` / `npm run build` for `web/`; nothing else in the stack needs Node, and the committed `web/dist/` keeps the nginx demo Node-free |
 | Reverse proxy | `nginx:1.27-alpine` serving the dashboard + TLS termination for the demo host | 1.27 | Simple, well understood |
 | Orchestration | **Docker Compose** | v2 | NFR-08 |
 | CI | GitHub Actions (or local `make ci` if no CI access) | — | `dotnet test`, `flutter test`, `pio run`, `flutter analyze` |
@@ -49,10 +51,14 @@ smartreptile/
 ├── app/                          # Flutter
 │   ├── lib/{core,data,state,screens,widgets,l10n}
 │   └── test/  integration_test/
-└── web/                          # dashboard
-    ├── index.html wallboard.html alerts.html thresholds.html devices.html report.html admin.html
-    ├── css/app.css
-    └── js/{api.js, i18n.js, live.js, charts.js, pages/*.js}
+└── web/                          # two surfaces, one folder (ADR-017)
+    ├── legacy/                   # M1 static dashboard — the one that talks to the API, no build step
+    │   ├── index.html wallboard.html health.html
+    │   ├── css/app.css
+    │   └── js/{api.js, store.js, i18n.js, pages/live.js}
+    ├── index.html package.json package-lock.json vite.config.ts tsconfig.json
+    ├── src/{App.tsx, main.tsx, index.css, components/Layout.tsx, data/mockData.ts, pages/*.tsx}
+    └── dist/                     # committed Vite build of the prototype — deliberate exception (ADR-017)
 ```
 
 ## 3. Prerequisites
@@ -61,6 +67,7 @@ smartreptile/
 |---|---|---|
 | .NET SDK | 10.x | `dotnet --list-sdks` |
 | Flutter SDK | 3.47.x stable | `flutter --version` |
+| Node.js + npm | 22.x LTS (needed for `web/` only — ADR-017) | `node --version` |
 | Docker Desktop / Engine + Compose | v2 | `docker compose version` |
 | PlatformIO Core | 6.x (standalone, or the VS Code extension) | `pio --version` |
 | USB-UART driver | CP210x or CH340 (depends on the dev board) | Device appears as `COMx` |
@@ -117,12 +124,28 @@ flutter build apk --release --split-per-abi
 `app/lib/core/env.dart` holds the API base URL per build flavour (`dev` → `http://10.0.2.2:8080` for the
 Android emulator, `demo` → `https://<host>`); no secrets are compiled into the app.
 
-### 4.4 Web dashboard
+### 4.4 Web (`web/`) — two surfaces
+
+The **M1 static dashboard**, the only web surface that talks to the API:
+
+```bash
+cd web/legacy
+python -m http.server 8081           # compose serves these same files under /legacy/ (task 4.12)
+```
+
+The **TERRAGUARD prototype** — mock data, no network calls (ADR-017):
 
 ```bash
 cd web
-python -m http.server 8081           # or served by nginx in compose
+npm install
+npm run dev                          # Vite on http://127.0.0.1:8081
+npm run build                        # writes web/dist/, which is committed on purpose (ADR-017)
 ```
+
+`npm run dev` binds the same port as the compose `web` service, so run one or the other. Compose itself serves both
+surfaces from one nginx (task 4.12): `/` is the committed prototype build and `/legacy/` is the M1 dashboard, per
+`web/nginx.conf`. **BUG-03** (`05-release/03` §4) is closed, and its regression check is the `curl` pair in
+`05-release/01` §5.
 
 ## 5. Configuration reference (`.env.example`)
 
@@ -131,8 +154,11 @@ python -m http.server 8081           # or served by nginx in compose
 | `MSSQL_SA_PASSWORD` | *(blank)* | Never committed; needed by the `db` service |
 | `JWT_SIGNING_KEY` | *(blank)* | ≥ 32 bytes base64 |
 | `JWT_ACCESS_MINUTES` / `JWT_REFRESH_DAYS` | `15` / `30` | FR-01 |
-| `MQTT_BROKER_PORT_TLS` / `..._PLAINTEXT` | `8883` / `1883` (loopback only) | FR-05 |
-| `MQTT_TLS_CERT_PATH` / `..._KEY_PATH` | `/certs/server.crt` / `.key` | Mounted read-only |
+| `MQTT_PORT` / `MQTT_TLS_PORT` | `1883` / `8883` | FR-05. Devices connect on the TLS port; the plaintext port is for local debugging |
+| `MQTT_PLAINTEXT_HOST` | `127.0.0.1` | BR-05.1: plaintext is loopback-only. Compose overrides it to `0.0.0.0` because a container is not reachable on its own loopback, and restricts the port at the published mapping instead (`127.0.0.1:1883:1883`) |
+| `MQTT_ENABLE_TLS` / `MQTT_DISABLE_PLAINTEXT` | `false` / `false` | BR-05.1: the release runbook sets both to serve TLS only |
+| `MQTT_SERVER_CERT_PATH` / `MQTT_SERVER_CERT_PASSWORD` | `/certs/server.pfx` / *(blank)* | PFX (certificate **and** private key) mounted read-only — the broker loads it with `X509CertificateLoader`, so a loose `.crt`/`.key` pair is not enough |
+| `MQTT_REQUIRE_CLIENT_AUTH` | `true` | FR-05: a connection must carry a device credential |
 | `INGEST_HTTP_FALLBACK_ENABLED` | `true` | FR-06 |
 | `FCM_SERVICE_ACCOUNT_PATH` | `/secrets/fcm.json` | Optional; push disabled if absent |
 | `TELEGRAM_BOT_TOKEN` | *(blank)* | Optional channel |

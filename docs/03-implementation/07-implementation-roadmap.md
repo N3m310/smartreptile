@@ -3,6 +3,9 @@
 Six milestones. Each ends with a **demo-able increment** and an explicit definition of done, so the team
 always has something to show and always knows what "finished" means. Parallel tracks are marked.
 
+A web prototype was delivered **outside** this milestone plan on 2026-10-02; it is absorbed by the M4 table below
+and recorded in "Prototype baseline" before M2.
+
 ```mermaid
 gantt
   dateFormat  YYYY-MM-DD
@@ -53,7 +56,7 @@ dashboard pages, produced from the running stack rather than drawn. `06-dashboar
 a complete path today: browser → nginx → API → SQL Server + MQTT broker. That pass also found a genuine defect,
 now fixed: the dashboard reported *any* non-2xx as an unreachable server, so the `404` from the not-yet-built
 `/api/v1/...` routes read as "cannot reach the server" and implied the animal was unmonitored when in fact nothing
-was wrong. Failure messaging is now classified once (`web/js/api.js` → `failureKind`), with the distinction
+was wrong. Failure messaging is now classified once (`web/legacy/js/api.js` → `failureKind`), with the distinction
 recorded as a UX rule (`02-design/04` §6) and a drill that would catch its return (`04-quality/03` §5.11); the
 four cases were exercised in a browser on 2026-09-23. **The DoD verdict is unchanged** — two of three lines hold,
 and *"sensor data on serial"* is still the only missing line. What moved: 1.1 went from "decision recorded" to
@@ -76,6 +79,31 @@ against `DeviceCredential` is not written). The M2 table below is not starting f
 
 ---
 
+## Prototype baseline — the TERRAGUARD web prototype (landed 2026-10-02, recorded 2026-10-03)
+
+Not a milestone: a deliverable that arrived **outside** the plan, recorded here so the M4 tables below are read
+against reality rather than against the plan as it was written in September. The decision is `ADR-017`.
+
+| What exists | Where | State |
+|---|---|---|
+| **TERRAGUARD** prototype — 8 screens (login, dashboard, terrariums, detail, devices, alerts, history, settings) | `web/` — React 19 + Vite + TypeScript + Tailwind v4 | Built; **mock data only**, Vietnamese only, outside CI, covered by no test case |
+| M1 static dashboard — Live / Wallboard / Health | `web/legacy/` | Unchanged, and still the only web surface with a real API behind it |
+| Committed Vite build (3 files) | `web/dist/` | Deliberate (`ADR-017`): keeps npm out of the demo path |
+
+**What it is not.** It is not task 4.10, and no number on it is a measurement: its alerts are `value > max` over
+mock bands, and it contains no dwell, hysteresis, phase or dedupe (`ADR-005`). M4's DoD — every screen showing real
+data with a timestamp — is therefore still entirely ahead of it, and a rehearsal must not be run from it.
+
+**What it changed.** The dashboard pages moved path (`web/` → `web/legacy/`), the compose `web` mount broke
+(**BUG-03**), and `web/dist/` entered the repository against the standing "no build output" rule. The three tasks
+4.12–4.14 are the cost of absorbing it. They were added to M4 rather than given a milestone of their own because
+**4.13 decides what M4's web surface actually is — answered on 2026-10-03 as `ADR-018`: `web/legacy/`**.
+
+**Ownership.** `DOC` — the same track that owns 4.10 — because the alternative is a prototype nobody owns and a
+dashboard nobody reconciles it with, which is how one repository ends up documenting two contradictory UIs.
+
+---
+
 ## M2 — Data pipeline (8 days)
 
 **Goal:** a real sample walks from the terrarium into SQL Server and back out through the API.
@@ -95,6 +123,97 @@ against `DeviceCredential` is not written). The M2 table below is not starting f
 
 **DoD:** the chain works with the real device, and the pipeline survives a broker restart without losing a
 sample. This is the milestone where the design either holds or is corrected — expect ADR updates.
+
+**Progress so far (measured 2026-10-03).** M1 is closed except its hardware line and 2.1 is complete, so M2 starts
+from a schema-current database rather than from scratch. **Task 2.2 needed a prerequisite: user authentication
+(FR-01) is implemented**, because `POST /devices/claim` is `Owner`-gated and there was nothing to be `Owner` with.
+What exists in `src/`:
+
+| Piece | Where | Verified by |
+|---|---|---|
+| Registrations, sessions, profile, change-password | `Application/Identity/AuthService.cs`, `Api/Endpoints/AuthEndpoints.cs` | 67 new unit tests; live HTTP run below |
+| PBKDF2-HMAC-SHA256, 210 000 iterations, **stored per user** so a stale hash is upgraded on the next login | `Infrastructure/Security/Pbkdf2PasswordHasher.cs` | `TC-U-32` |
+| HS256 access tokens, 15 min, `sub`/`role`/`iat`/`exp`/`jti`/`ver` | `Infrastructure/Security/JwtAccessTokenService.cs` | `TC-U-33` |
+| Single-use refresh rotation; reuse of a consumed token revokes the whole family | `AuthService.RefreshAsync` | `TC-U-34` |
+| Failed-login throttling, 5 per identifier / 20 per address per 15 min | `Domain/Identity/LoginThrottlePolicy.cs`, `Infrastructure/Security/InMemoryLoginThrottleStore.cs` | `TC-U-35` |
+| 10 requests per minute per address on the whole `/api/v1/auth` group | `Program.cs` rate-limit policy | live 429 below |
+
+Run end to end against a real SQL Server and a real HTTP surface: register `202`, login `200` (role `Owner`),
+`/me` `200`, refresh `200`, reuse of the consumed token `401 token_reused`, the rotated token afterwards
+`401 refresh_token_invalid`, wrong password `401 invalid_credentials`, no token `401 unauthenticated`, and the
+11th auth call inside a minute `429 rate_limited` — all as RFC 7807 with a stable `code`. **121 backend unit tests
+pass** (was 54).
+
+**What is deliberately still open in FR-01.** `register` answers identically whether or not the identifiers were
+free, so there is no email-confirmation flow at all (limitation L-02 — there is no email infrastructure).
+The common-password deny-list carries the highest-frequency subset of the documented top 1 000, to be completed in
+M5's hardening pass. The `Technician`/`Viewer` half of `TC-U-36` is no longer waiting on anything: 2.2's endpoints
+carry the policies, and both refusals were seen in the live run below.
+
+**Task 2.2 — self-register, claim, credentials, rotate, revoke.** Complete on the HTTP surface. The rules are
+`02-design/06` §5 and the contract is `07-appendices/03` §2:
+
+| Piece | Where | Verified by |
+|---|---|---|
+| Claim code: 31-symbol alphabet, 8 characters, 15-minute TTL, single use, normalised so `k7m2-qp4t` = `K7M2QP4T` | `Domain/Devices/{ClaimCode,DeviceProvisioningRules}.cs` | 27 new unit tests |
+| Anonymous self-register throttled 1 per address per 5 min, 20 per hour globally | `Domain/Devices/OnboardingThrottlePolicy.cs`, `Infrastructure/Security/InMemoryOnboardingThrottleStore.cs` | unit tests + live `429` |
+| Secret: 256-bit CSPRNG, base32 (52 chars), stored as `SHA-256(secret ‖ 16-byte salt)`, compared with `FixedTimeEquals` | `Infrastructure/Security/{Base32,DeviceCredentials,ClaimCodeGenerator}.cs` | unit tests + the stored row shape |
+| Use cases: self-register, claim, rotate (10-minute grace), revoke, `VerifyCredentialAsync` for the telemetry path | `Application/Devices/DeviceProvisioningService.cs` | unit tests + live run below |
+| Routes, `Owner`-gated except self-register, policies from the role matrix | `Api/Endpoints/DeviceEndpoints.cs`, `Api/Security/AuthorizationPolicies.cs` | live `403 insufficient_role` |
+
+Run end to end against a real SQL Server and the real HTTP surface — 50 assertions, all green: `self-register`
+`201` with an 8-character code from the documented alphabet and a ~15-minute expiry, a second attempt from the same
+address `429 rate_limited`, a malformed body `400 registration_invalid`; `claim` anonymous `401 unauthenticated`,
+unknown / malformed / consumed / superseded codes all `404 claim_code_invalid`, a **foreign** terrarium
+`404 not_found` (not `403`, so ids cannot be probed), the right code `200` with a 52-character base32 secret, and a
+claim into a terrarium whose live device is bound `409 terrarium_already_bound`; `rotate-secret` `200` with a fresh
+secret and a 10-minute `previousUsableUntilUtc`; `revoke` `204` and idempotent, after which `rotate-secret` is `404`
+and both credential rows read `32/16/revoked`; re-registering a **claimed** chip `409 device_already_registered`
+with the `deviceId` and no code, re-registering an **unclaimed** chip `409` with the same `deviceId` and a **fresh**
+code; `Technician` `403 insufficient_role` on claim and rotate. **186 backend unit tests pass** (was 121).
+
+**What is deliberately still open in 2.2.** Four caveats, three of which a later task has to clear:
+
+- **Revoking does not disconnect a live MQTT session.** A revoked board is refused on its next connect or publish
+  rather than mid-session, because the kick needs the broker that task 2.3 owns.
+- **No audit rows are written** for claim, rotate or revoke. `BR-18.4` asks for them and `02-design/02` §3.18
+  specifies an `AuditLog` table, but that table is not in `InitialSchema` — it was never created in M1, so the
+  acceptance line "audit rows written" in `TC-I-13` cannot pass yet. Task 2.3 inherits this directly, because its
+  own acceptance line is "bad credentials refused **+ audited**".
+- **The last write is not guarded against a race.** Two simultaneous claims of one terrarium can both pass the
+  pre-check; the filtered unique index `IX_Device_TerrariumId` then refuses the second insert and the caller sees a
+  `500` instead of `409 terrarium_already_bound`. Correct, but unpolished until exception translation lands.
+- **One address buys one registration per five minutes**, so every board behind one NAT shares the budget — on a
+  home network a second board waits out the window. That is what `07-appendices/03` §2.2 specifies (a demo
+  setting), but it is worth knowing before a demo with two boards.
+
+**Task 2.3 — broker authentication, TLS, topic ACL, session kick.** Complete. The broker now does everything
+`02-design/06` §4 and `07-appendices/03` §3.1 require of it:
+
+| Piece | Where | Verified by |
+|---|---|---|
+| A connection needs `username = deviceId` and a password matching a usable `DeviceCredential`; everything else gets the identical refusal (BR-05.1/BR-05.3) | `Infrastructure/Mqtt/MqttBrokerHostedService.OnValidatingConnectionAsync` | 3 live refusals + `mqtt_rejected_connections_total` |
+| Two listeners: TLS on `8883` for devices, plaintext on `1883` bound to **loopback only** and switchable off entirely (`Mqtt:DisablePlaintextEndpoint`) | `MqttBrokerHostedService.BuildOptions` | `netstat` in both shapes, live `1883`/`8883` runs |
+| Own-prefix-only ACL: publish on `telemetry`/`health`/`status`/`events`/`ack`, subscribe on `cmd`, nothing else, no wildcards, no other device's id | `Domain/Devices/MqttTopicScheme.cs`, used by both interceptors | 20 new unit tests + live refusals |
+| Revoke closes the live session (BR-05.4) | `Application/Abstractions/IDeviceSessionRegistry.cs`, `Infrastructure/Mqtt/DeviceSessionRegistry.cs`, called from `DeviceProvisioningService.RevokeAsync` | live: closed in **0.0 s**, and the device cannot reconnect |
+| Refused publications are refused *and* drop the client, so a session held by a since-revoked device dies on its next publish | `OnInterceptingPublishAsync` | live |
+
+Run against a real TLS listener with a self-signed certificate, and checked with `paho-mqtt` (30 assertions, all
+green): anonymous, wrong-secret and unknown-device connects all answered `Bad user name or password`; a claimed
+device connected over TLS and over plaintext; wildcard and cross-device subscriptions refused; a publish under
+another device's prefix refused and the session dropped while a fresh connection still worked; `POST
+/devices/{id}/revoke` closed the live session immediately and the same credential could not reconnect; and in the
+release shape (`DisablePlaintextEndpoint=true`) `1883` was not listening at all while TLS kept working.
+**226 backend unit tests pass** (was 186).
+
+**What is deliberately still open in 2.3.** Two things:
+
+- **No audit rows.** `BR-18.4` wants `device.secret_rotated`, `device.revoked` and the rejected-connection cases
+  in an `AuditLog`, and that table is still not in the schema (see 2.2 above), so this acceptance line reads
+  "rejected and counted, not yet audited". The counters and the structured warnings are what exists today.
+- **The ingest subscriber is 2.4.** A message that passes the ACL is counted and allowed through the broker, but
+  nothing consumes `sr/v1/d/+/telemetry` yet, so a published batch goes nowhere — `IngestWorker` and
+  `IngestPipeline` are the next task, and this one stopped at the transport boundary on purpose.
 
 ---
 
@@ -122,6 +241,11 @@ and a 4-minute disturbance produces nothing. **This is the milestone to demo to 
 
 **Goal:** everything the backend knows is visible in a way a keeper would accept using.
 
+**Two web surfaces, one deliverable.** M4 opens with `web/legacy/` (static, real API) *and* the mock-data
+TERRAGUARD prototype in `web/` (ADR-017). Task 4.13 named the milestone's web surface on 2026-10-03: `web/legacy/`
+carries it (`ADR-018`) and the prototype stays a reference — so the prototype may appear in a screenshot only with
+its mock-data notice visible, and never as a measurement.
+
 | # | Task | Track | Acceptance |
 |---|---|---|---|
 | 4.1 | Auth flow in app (login/register/refresh/logout, secure storage) | app | `TC-W-01…03` |
@@ -135,9 +259,22 @@ and a 4-minute disturbance produces nothing. **This is the milestone to demo to 
 | 4.9 | Settings: language, theme, notification prefs, quiet hours; Diagnostics screen | app | `TC-W-16/17` |
 | 4.10 | Web dashboard: wallboard + live + history + alerts + thresholds + devices + report | web | Manual checklist `04-quality/03` §5 |
 | 4.11 | Localisation pass (vi default, en), formatting, accessibility labels | app | `TC-W-18`; contrast check recorded |
+| 4.12 | Fix the web serving layout: point compose's `web` service at the prototype build and keep the M1 pages reachable at `/legacy/*` | web | `:8081/` serves a working page; `/legacy/wallboard.html` + `/legacy/health.html` still `200`; **BUG-03** closed, with that `curl` pair written down as its regression check |
+| 4.13 | Decide the prototype's fate in an ADR: wire TERRAGUARD to the real API and retire `web/legacy/`, or keep it as a mock-data reference and finish the static dashboard | web/doc | ADR appended; `02-design/04` §1.2, `05-release/01` §5 and this table agree with the decision |
+| 4.14 | Prototype honesty and single-source pass: mark the UI as mock data, reconcile `web/src/index.css`'s status→colour palette with `02-design/04` §3 (or state why it differs), and decide the Vietnamese-only copy | web | `TC-I-15` either covers the prototype or its exclusion is written into `04-quality/01`; no second palette is left undocumented |
 
 **DoD:** the demo can be given entirely from the phone, with the wallboard on a second screen; every screen
-shows real data; no screen renders a value without a timestamp.
+shows real data; no screen renders a value without a timestamp. 4.12–4.14 must be closed in the same milestone:
+4.13 decides which web surface carries the DoD, and the prototype cannot be it while its numbers are invented.
+
+**Prototype absorption status — measured 2026-10-03.** All three follow-on tasks are closed, so the M4 web
+surface is now named and no prototype caveat is left floating:
+
+| # | Result |
+|---|---|
+| 4.12 | **Done.** `web/nginx.conf` plus sibling compose mounts (`/srv/prototype`, `/srv/legacy`): `:8081/` serves the committed prototype build, `/legacy/wallboard.html` and `/legacy/health.html` return `200`, and `/dashboard` returns `200` through the SPA fallback (a `/legacy/` miss still `404`s). **BUG-03 closed**, with the `curl` pair in `05-release/01` §5 as its regression check |
+| 4.13 | **Decided — `ADR-018`.** The prototype stays a mock-data UI reference; `web/legacy/` remains the M4 web surface, so task 4.10 extends the static dashboard toward W1–W8 and the prototype supplies the visual reference |
+| 4.14 | **Done.** The UI carries a mock-data notice (`src/components/MockDataNotice.tsx`, rendered on the login page and in the app shell); the status palette is documented as prototype-only with measured contrast ratios (`web/src/index.css`, `02-design/04` §1.2); the Vietnamese-only copy is decided, not pending, and the prototype's exclusion is written into `04-quality/01` §6 |
 
 ---
 
@@ -205,7 +342,7 @@ stable summary of who owns what.
 | `BE-1` | Backend ingest + API surface + device credentials | M2 | `BE-2` |
 | `BE-2` | Threshold engine, alerts, notifications, rollups, hardening | M3, M5 | `BE-1` |
 | `APP` | Flutter app (screens, state, widget tests) + release APK | M4 | `DOC` |
-| `DOC` | Web dashboard + doc set + report + submission + demo | M6 | `APP` |
+| `DOC` | Web dashboard (incl. the TERRAGUARD prototype and tasks 4.12–4.14) + doc set + report + submission + demo | M6 | `APP` |
 
 The **backend is deliberately split across two owners** — `BE-1` for ingest and the API surface, `BE-2` for the
 evaluation engine — because it is the largest workstream (70 h in `06-report/02` §3) and one owner would sit on

@@ -67,7 +67,7 @@ Rules:
 | Backend (API, EF Core, ingest, engine, notifications) | 70 | | | | | |
 | DB schema, migrations, seeding | 15 | | | | | |
 | Flutter app (screens, state, tests) | 55 | | | | | |
-| Web dashboard | 20 | | | | | |
+| Web dashboard (M1 static pages + the React prototype around them) | 20 | | | | | |
 | Testing (unit/integration/widget/E2E) | 40 | | | | | |
 | Docs (this doc set) | 30 | | | | | |
 | Report writing + figures + formatting | 35 | | | | | |
@@ -97,10 +97,11 @@ to copy the Friday effort entries into.
 | 12 | Hardware BOM + wiring + accuracy log | `07-appendices/04`, QA §2 | |
 | 13 | Threshold literature verification | `07-appendices/05` §5 checklist | |
 | 14 | Mechanical/3D enclosure parts (if any) | photos + files | |
-| 15 | This doc set (34 files) | commit range | |
+| 15 | This doc set (36 files) | commit range | |
 | 16 | Report PDF + evidence folder | `report/` | |
 | 17 | Release APK/AAB + signature proof | `05-release/01` §4 | |
 | 18 | Demo script + rehearsal recording | `05-release/01` §6 | |
+| 19 | TERRAGUARD web prototype (8 mock-data screens, React/Vite/TS/Tailwind) | `web/` + `docs/TERRAGUARD_SUMMARY.md` | |
 
 ## 5. Honesty statement
 

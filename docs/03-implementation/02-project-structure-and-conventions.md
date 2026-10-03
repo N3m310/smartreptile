@@ -155,15 +155,44 @@ Rules:
 - Naming: files `snake_case.dart`, classes `PascalCase`, providers `XxxProvider`, private widgets
   prefixed `_`.
 
-## 4. Web dashboard conventions (`web/`)
+## 4. Web conventions (`web/`)
+
+The folder holds **two surfaces that follow different rules on purpose** (ADR-017). The first is the shippable
+dashboard — and the M4 web surface (ADR-018); the second is a prototype, allowed to break the first's rules only
+because it never ships.
+
+### 4.1 The static dashboard (`web/legacy/`) — the shippable one
 
 - Vanilla ES modules; **no build step** — a demo must not depend on `npm install` succeeding.
+- Served by nginx under `/legacy/`, next to the prototype build at `/`; the two mounts and the prototype-only SPA
+  fallback live in `web/nginx.conf` (task 4.12).
 - `js/api.js` is the only place that knows the API base URL and attaches the bearer token
   (token kept in memory + `sessionStorage`, never `localStorage`, because it is a shared demo machine).
 - `js/i18n.js` mirrors the ARB keys; `TC-I-15` compares key sets so translations cannot drift.
 - One file per page in `js/pages/`; `wallboard.html` has no navigation chrome.
 - Chart.js instance per chart, disposed on page unload; no chart re-creates on every push (only
   `chart.data` is appended, capped at 720 points client-side).
+
+### 4.2 The prototype (`web/`) — mock data, never shipped
+
+- React 19 + Vite + TypeScript + Tailwind v4 (ADR-017). `src/pages/*.tsx` is one screen per route,
+  `src/components/Layout.tsx` is the shared shell; `npm run dev` to work on it, `npm run build` to refresh the
+  committed `web/dist/`.
+- **No API layer exists.** Every value comes from `src/data/mockData.ts`. A `fetch`, a SignalR client or a token
+  in `localStorage` must not appear in this folder while it is a prototype — the demo depends on a reviewer
+  telling the two surfaces apart at a glance.
+- Threshold logic is `value > max` over mock bands. Dwell, hysteresis, phase and dedupe (ADR-005) are **absent by
+  construction**: a rule belongs in the engine, not in a screen.
+- **Labelled as mock data.** `src/components/MockDataNotice.tsx` renders on the login page — which is what
+  `http://127.0.0.1:8081/` serves — and in the app shell, so no screenshot can pass these numbers off as
+  measurements (task 4.14).
+- **Vietnamese-only, by intent** (task 4.14): the copy is inline Vietnamese and stays that way. `TC-I-15` does not
+  reach this folder, so there is no translation set to drift; localising it is worth doing only if the prototype is
+  ever promoted to a shipped surface, which `ADR-018` declines.
+- `src/index.css` carries a prototype-only status→colour palette that maps one-to-one onto `02-design/04` §3's four
+  roles; the hues differ so the statuses stay legible on this dark surface, and the measured contrast ratios that
+  justify it sit at the top of that file (task 4.14). §3 and `app/lib/core/status.dart` remain the source of truth
+  for the shipped clients.
 
 ## 5. Cross-cutting conventions
 

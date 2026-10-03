@@ -168,13 +168,46 @@ keytool -genkey -v -keystore ~/smartreptile-release.jks -keyalg RSA -keysize 204
 Per-ABI sizes (`arm64-v8a`, `armeabi-v7a`) are recorded for the report; the universal APK is only used as a
 demo fallback.
 
-## 5. Web dashboard release
+## 5. Web release (`web/`)
 
-- No build step. Files are served by nginx from `web/` inside the compose stack.
+Two surfaces live in this folder and only one of them is a deliverable (`ADR-017`, `ADR-018`).
+
+**The static dashboard (`web/legacy/`) — the one that ships, and the M4 web surface.**
+
+- No build step. Files are served by nginx from `web/legacy/` under `/legacy/` inside the compose stack
+  (`web/nginx.conf`, task 4.12).
 - `js/api.js` takes the API base URL from a `<meta name="api-base">` tag injected at container start, so the
   same static files work on `localhost` and on the demo host.
 - Cache-busting by query string (`app.css?v=1.0.0`) so a stale browser cache cannot show old UI during the
   demo — a small thing that has ruined demos before.
+- **How it is served.** Compose mounts the prototype build at `/srv/prototype` and these files at `/srv/legacy`;
+  nginx sends `/` to the prototype and `/legacy/` to the dashboard, and only the prototype gets a SPA fallback, so
+  a missing dashboard page stays a `404` instead of silently rendering the wrong surface. The two mounts are
+  **siblings, not nested** — a nested bind mount needs its mountpoint created inside the read-only parent mount
+  and fails with `mkdirat ... read-only file system` (defect 13 in the repository `README`).
+- **BUG-03 regression check** (`05-release/03` §4) — run whenever the `web` service or its mounts change:
+
+  ```bash
+  docker compose up -d web
+  curl -sI http://127.0.0.1:8081/ | head -1                       # HTTP/1.1 200 OK
+  curl -sI http://127.0.0.1:8081/legacy/wallboard.html | head -1  # HTTP/1.1 200 OK
+  curl -sI http://127.0.0.1:8081/legacy/health.html | head -1     # HTTP/1.1 200 OK
+  curl -s  http://127.0.0.1:8081/ | grep -o 'assets/index-[^"]*\.js'   # the hashed bundle, never /src/main.tsx
+  ```
+
+  The last line is the one that would have caught BUG-03: the old mount answered `200` on `/` while serving the
+  prototype's Vite dev entry, so a status code alone was never enough.
+
+**The prototype (`web/`, TERRAGUARD) — not a deliverable, and not a measure of anything.**
+
+- `npm run build` writes `web/dist/`, which is **committed on purpose** so nginx can serve the prototype without a
+  Node toolchain. Rebuild it whenever `src/` changes: a stale `dist/` is invisible until someone demos from it,
+  because the entry page then points at asset names that no longer exist.
+- Rebuilt on 2026-10-03 after the mock-data notice landed — `tsc && vite build` on a clean `npm ci` produced
+  `index-hjjUIssv.js` (766 kB / 214 kB gzip) and `index-DAQDTjmL.css` (40 kB), replacing the
+  `index-C7gXR99i.js` / `index-CUm0g7Lt.css` pair.
+- It renders invented values and says so in the UI. It is never the source of a number in the report, and
+  `ADR-018` settles its fate: it stays a reference while `web/legacy/` carries the M4 DoD.
 
 ## 6. Release runbook (the order that actually works)
 
@@ -183,6 +216,7 @@ demo fallback.
 | 1 | `docker compose up -d db` | SQL Server healthy | ~40 s |
 | 2 | `docker compose up -d api` (migrations + reference seed run on start-up; set `STARTUP_APPLY_MIGRATIONS=false` and use the §3 `dotnet ef` command for an explicit release step) | logs show `Applying migration '…_InitialSchema'. Done.` | ~30 s |
 | 3 | `docker compose up -d web` | `/health/ready` → `{"status":"Healthy","checks":[database Healthy, mqtt-broker Healthy]}`; dashboard on `:8081` | ~5 s |
+| 3a | Confirm the broker is TLS-only: `MQTT_DISABLE_PLAINTEXT=true` in `.env`, then `netstat -ano \| findstr :1883` → **nothing listening**, and `curl`/`paho` over TLS on `:8883` still authenticates a claimed device | BR-05.1: plaintext gone, TLS the only way in. The dev default keeps `1883` reachable **on the host's loopback only** (`127.0.0.1:1883:1883`), never on the LAN | — |
 | 4 | Verify reference data | `SELECT COUNT(*) FROM SpeciesProfile` → 3 profiles, 17 bands in `Threshold`, and the count of `SourceRef LIKE '%PENDING VERIFICATION%'` equal to `ReferenceDataSeeder.BandsAwaitingVerification` (14 on 2026-09-23) | — |
 | 5 | Power the node | OLED shows values; status `online` in the fleet view within 90 s | — |
 | 6 | Install/open the release APK | Logged in, live cards populated | — |

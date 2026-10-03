@@ -22,9 +22,9 @@ Broker (dev): `mqtts://localhost:8883` · plaintext `1883` bound to loopback onl
 ## 2. Provisioning endpoints
 
 ### 2.1 Claim-code alphabet
-32 symbols, excluding `0 O 1 I L` to avoid transcription errors:
+31 symbols, excluding `0 O 1 I L` to avoid transcription errors:
 `23456789ABCDEFGHJKMNPQRSTUVWXYZ` → codes are 8 chars, typically displayed as `XXXX-XXXX`.
-Entropy ≈ 32⁸ ≈ 1.1 × 10¹²; TTL 15 min; single-use; regenerated while the device stays in provisioning mode.
+Entropy ≈ 31⁸ ≈ 8.5 × 10¹¹ (≈ 39.6 bits); TTL 15 min; single-use; regenerated while the device stays in provisioning mode.
 
 ### 2.2 `POST /api/v1/devices/self-register`
 Anonymous. Rate limit: 1 per IP per 5 min, 20 per hour globally (demo setting).
@@ -39,8 +39,8 @@ Content-Type: application/json
 201 Created
 { "deviceId": "sr-3f9a2c", "claimCode": "K7M2QP4T", "expiresAtUtc": "2026-09-21T08:30:00Z" }
 ```
-Errors: `429 rate_limited`, `409 device_already_registered` (returns the existing `deviceId` and a fresh code
-only if the device is still unclaimed).
+Errors: `400 registration_invalid` (a missing or malformed `chipId`/`macAddress`), `409 device_already_registered`
+(returns the existing `deviceId` and a fresh code only if the device is still unclaimed), `429 rate_limited`.
 
 ### 2.3 `POST /api/v1/devices/claim`
 Requires `Owner`.
@@ -55,8 +55,13 @@ Authorization: Bearer <jwt>
 200 OK
 { "deviceId": "sr-3f9a2c", "secret": "MFRGGZDFMZTWQ2LK…", "terrariumId": "6f1c…", "boundAtUtc": "…" }
 ```
-`secret` is returned **once**; it is never retrievable again. Errors: `404 claim_code_invalid` (unknown,
-expired, or consumed — deliberately indistinguishable), `409 terrarium_already_bound`, `403 insufficient_role`.
+`secret` is returned **once**; it is never retrievable again. Errors: `401 unauthenticated`,
+`403 insufficient_role`, `404 claim_code_invalid` (unknown, expired, consumed or superseded — deliberately
+indistinguishable), `404 not_found` (unknown **or foreign** terrarium, also indistinguishable so ids cannot be
+probed — `BR-02.2`), `409 terrarium_already_bound`.
+
+A revoked device stops occupying its terrarium — `IX_Device_TerrariumId` is filtered to `Status <> 3` — so its
+replacement is claimed into the same terrarium without a rebind step.
 
 ---
 
@@ -75,6 +80,13 @@ expired, or consumed — deliberately indistinguishable), `409 terrarium_already
 
 `{deviceId}` is the short id (`sr-xxxxxx`). Subscriptions use wildcards server-side (`sr/v1/d/+/telemetry`);
 the client is never allowed to subscribe to another device's topics (broker ACL = own prefix only).
+
+The ACL is enforced at the broker, before a message is stored: a device publishes only on
+`telemetry`/`health`/`status`/`events`/`ack` and subscribes only to its own `cmd`, with no wildcard. A refused
+**subscription** is answered with a failure code and simply not applied; a refused **publication** is dropped and
+that client's session is closed, because a device reaching outside its own prefix is either broken or hostile.
+Refusals are counted (`mqtt_refused_subscriptions_total`, `mqtt_refused_publications_total`) and logged with the
+reason.
 
 ### 3.2 Telemetry batch (device → broker)
 
