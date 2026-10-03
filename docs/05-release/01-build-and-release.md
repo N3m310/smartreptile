@@ -76,7 +76,8 @@ fast refusal — which reads like a down database when the database is fine.
 Deployment rules:
 - Migrations are applied as an **explicit step** in the release runbook, not on API start-up in release config, so a
   broken migration cannot silently take the host down (`03-implementation/03` §2).
-- Seeding runs once after migration (`ReferenceDataSeeder`), idempotent by `Code`/`Name`.
+- Seeding runs once after migration (`ReferenceDataSeeder`), idempotent **by presence, not by content**: it creates
+  what is missing and never rewrites a row that already exists, so changed seed data needs a volume reset (§3.1).
 - `backend/.dockerignore` is **required**, not an optimisation: without it `COPY src/ src/` overwrites the
   container's Linux restore output with the developer's `obj/project.assets.json`, whose `packageFolders` hard-code
   `C:\Users\<user>\.nuget\packages\`, and the build dies with `NETSDK1064` for a package that is present.
@@ -100,6 +101,38 @@ docker compose cp db:/var/opt/mssql/backup/demo.bak ./backup/demo-$(date +%F).ba
 
 Rollback: `docker compose down && cp ./backup/demo.bak ... && docker compose up -d`, documented in the
 runbook with a one-line command so it can be executed under pressure.
+
+### 3.1 Changed seed data needs a volume reset, not an update
+
+Because seeding is idempotent by presence rather than by content, editing the seeded profiles or bands does
+**not** reach a database that was seeded before the change — not even with a rebuilt image. The stamp, the
+source reference and the numbers stay as they were on first seed. This is not hypothetical: the reference
+provenance was fixed in the seeder on 2026-09-23, and the running stack went on serving
+`PENDING VERIFICATION` with a placeholder source link because its rows already existed.
+
+The supported way to get new reference data is to drop the volume:
+
+```bash
+docker compose down -v          # -v deletes the named volume: readings, alerts and audit rows on this host go
+                               # with it. Acceptable here because the host holds seeded demo data.
+docker compose up -d --build
+```
+
+Then prove it landed rather than assuming it did:
+
+```bash
+docker compose exec db /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" \
+  -d SmartReptile -h -1 -W \
+  -Q "SELECT COUNT(*) AS bands, SUM(CASE WHEN SourceRef LIKE '%PENDING VERIFICATION%' THEN 1 ELSE 0 END) AS pending FROM dbo.Threshold"
+```
+
+`pending` must equal `ReferenceDataSeeder.BandsAwaitingVerification` (14 of 17 bands on 2026-09-23, and it is
+meant to fall as checklist rows are signed — compare against the constant, do not copy the number). The same
+comparison runs in CI, which is why drift is a local-only surprise: CI always starts from an empty database.
+
+There is **no in-place upgrade path** for seeded content today. On a host whose data is worth keeping, the
+change has to be a data migration — an `UPDATE` with a stated reason and an audit entry — rather than a volume
+reset. That path does not exist yet, and the demo host does not need it.
 
 ## 4. Android release build
 
@@ -150,7 +183,7 @@ demo fallback.
 | 1 | `docker compose up -d db` | SQL Server healthy | ~40 s |
 | 2 | `docker compose up -d api` (migrations + reference seed run on start-up; set `STARTUP_APPLY_MIGRATIONS=false` and use the §3 `dotnet ef` command for an explicit release step) | logs show `Applying migration '…_InitialSchema'. Done.` | ~30 s |
 | 3 | `docker compose up -d web` | `/health/ready` → `{"status":"Healthy","checks":[database Healthy, mqtt-broker Healthy]}`; dashboard on `:8081` | ~5 s |
-| 4 | Verify reference data | `SELECT COUNT(*) FROM SpeciesProfile` → 3 profiles; 17 bands in `Threshold` | — |
+| 4 | Verify reference data | `SELECT COUNT(*) FROM SpeciesProfile` → 3 profiles, 17 bands in `Threshold`, and the count of `SourceRef LIKE '%PENDING VERIFICATION%'` equal to `ReferenceDataSeeder.BandsAwaitingVerification` (14 on 2026-09-23) | — |
 | 5 | Power the node | OLED shows values; status `online` in the fleet view within 90 s | — |
 | 6 | Install/open the release APK | Logged in, live cards populated | — |
 | 7 | Open the wallboard on the demo display | Values update silently | — |
@@ -158,6 +191,10 @@ demo fallback.
 
 Total cold start ≈ 3 minutes; step 8 accounts for the dwell time and is the reason the demo script budgets
 6 minutes for it. A rehearsal must confirm the whole sequence twice.
+
+**If the reference data changed since the volume was created, step 1 must be preceded by
+`docker compose down -v`** — the sequence above is a cold start, not an upgrade. Rebuilding the image is not
+enough, because the seeder never rewrites existing rows (§3.1).
 
 ## 7. Packaging and submission
 

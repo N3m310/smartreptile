@@ -6,7 +6,7 @@ always has something to show and always knows what "finished" means. Parallel tr
 ```mermaid
 gantt
   dateFormat  YYYY-MM-DD
-  title SmartReptile v1 (indicative, 6 weeks, 3 parallel tracks)
+  title SmartReptile v1 (6 weeks, indicative — W5-W10 re-baseline: 03-implementation/08)
   section M1 Foundations
   Specs frozen, env works, bench sensor  :a1, 2026-09-22, 5d
   section M2 Pipeline
@@ -192,14 +192,25 @@ a file, a test, or a screenshot.
 
 ---
 
-## Team allocation (3 people, indicative)
+## Team allocation (5 people, re-baselined 2026-09-29)
 
-| Track | Primary | Backup |
-|---|---|---|
-| Firmware + hardware + bench tests | member A | member C |
-| Backend + DB + engine + ops | member B | member A |
-| Flutter app + web dashboard + UX | member C | member B |
-| Report + doc set + demo script | rotating, one owner per milestone | — |
+The original three-person allocation is **superseded**: the group has five members, and the project entered
+**week 4 of a 10-week semester** with M1's hardware half still unstarted. The week-by-week schedule for
+**W5–W10 (2026-10-05 … 11-15)** lives in `03-implementation/08-work-distribution-w5-w10.md`; this table is the
+stable summary of who owns what.
+
+| Code | Track | Accountable for | Backup |
+|---|---|---|---|
+| `FW` | Firmware + hardware + bench/accuracy tests + calibration | M1 close-out, firmware half of M2, task 6.1 | `BE-1` |
+| `BE-1` | Backend ingest + API surface + device credentials | M2 | `BE-2` |
+| `BE-2` | Threshold engine, alerts, notifications, rollups, hardening | M3, M5 | `BE-1` |
+| `APP` | Flutter app (screens, state, widget tests) + release APK | M4 | `DOC` |
+| `DOC` | Web dashboard + doc set + report + submission + demo | M6 | `APP` |
+
+The **backend is deliberately split across two owners** — `BE-1` for ingest and the API surface, `BE-2` for the
+evaluation engine — because it is the largest workstream (70 h in `06-report/02` §3) and one owner would sit on
+the critical path for the whole project. Report sections are written by whoever owns the evidence for them and
+coordinated by `DOC` (`06-report/01` → "Writing order and owners").
 
 Every milestone has exactly **one accountable owner**. Parallel work is safe because the three interfaces
 (MQTT payload, REST contract, UI states) are frozen in `07-appendices/03` and `02-design/04` §5 at M1.

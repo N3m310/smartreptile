@@ -82,6 +82,7 @@ regression test exists and fails on the pre-fix commit (`04-quality/01` §8).
 |---|---|---|
 | 2026-09-21 | Doc set v1 created (34 files: 33 documents + this index) | Initial design from the SmartReptile project description (v1, no AI) |
 | 2026-09-29 | `07-appendices/05`: the seeded `Arid` surface band (38–45 °C) documented in §3 and added as verification-checklist row 14; the "two coverage gaps" note narrowed to the one that is still open. §4's climate-zone ceiling relabelled as an **air** ceiling and `SurfaceTempC` given its own per-metric ceiling. `03-implementation/06` §7's Arid column corrected to the seeded bands | The database shipped a band that neither §3 nor the checklist mentioned, so the literature pass could not have covered it; and once that band was documented, the zone's 44 °C air ceiling would have flagged a 45 °C surface band as implausible — the last M1 gap closable without hardware, a mentor or the books |
+| 2026-09-29 | Added `03-implementation/08-work-distribution-w5-w10.md` (doc set is now 35 files: 34 documents + this index); team allocation re-baselined from 3 to 5 members in `03-implementation/07` and `06-report/02` | The group has five members, and the project entered week 4 of a 10-week semester with M1's hardware half unstarted — the remaining six weeks needed an owned, dated plan instead of an indicative gantt |
 | | | |
 
 ## 6. Open questions to close with the mentor

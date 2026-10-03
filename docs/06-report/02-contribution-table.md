@@ -41,24 +41,43 @@ Rules:
 | Report | | | |
 | **Subtotal** | | | **__%** |
 
+### Member 4 — *[Full name, student id]*
+| Track | Contribution | Artefacts | Effort |
+|---|---|---|---|
+| App/web | | | |
+| QA | | | |
+| **Subtotal** | | | **__%** |
+
+### Member 5 — *[Full name, student id]*
+| Track | Contribution | Artefacts | Effort |
+|---|---|---|---|
+| Web/docs/report | | | |
+| Demo preparation | | | |
+| **Subtotal** | | | **__%** |
+
 **Total = 100%.**
 
 ## 3. Track-level allocation summary
 
-| Workstream | Hours (est.) | Member 1 | Member 2 | Member 3 |
-|---|---|---|---|---|
-| Requirements + literature (thresholds) | 20 | | | |
-| Hardware bench + wiring + accuracy checks | 25 | | | |
-| Firmware (sampling, transport, provisioning, buffer) | 45 | | | |
-| Backend (API, EF Core, ingest, engine, notifications) | 70 | | | |
-| DB schema, migrations, seeding | 15 | | | |
-| Flutter app (screens, state, tests) | 55 | | | |
-| Web dashboard | 20 | | | |
-| Testing (unit/integration/widget/E2E) | 40 | | | |
-| Docs (this doc set) | 30 | | | |
-| Report writing + figures + formatting | 35 | | | |
-| Demo preparation + rehearsal | 15 | | | |
-| **Total** | **370** | | | |
+| Workstream | Hours (est.) | Member 1 | Member 2 | Member 3 | Member 4 | Member 5 |
+|---|---|---|---|---|---|---|
+| Requirements + literature (thresholds) | 20 | | | | | |
+| Hardware bench + wiring + accuracy checks | 25 | | | | | |
+| Firmware (sampling, transport, provisioning, buffer) | 45 | | | | | |
+| Backend (API, EF Core, ingest, engine, notifications) | 70 | | | | | |
+| DB schema, migrations, seeding | 15 | | | | | |
+| Flutter app (screens, state, tests) | 55 | | | | | |
+| Web dashboard | 20 | | | | | |
+| Testing (unit/integration/widget/E2E) | 40 | | | | | |
+| Docs (this doc set) | 30 | | | | | |
+| Report writing + figures + formatting | 35 | | | | | |
+| Demo preparation + rehearsal | 15 | | | | | |
+| **Total** | **370** | | | | | |
+
+The 370 h above is the **whole project**. Roughly 70 h of it is already delivered by M1 (monorepo + CI, the
+`InitialSchema` migration and seeders, the test suites, this doc set), leaving ≈ 300 h for weeks 5–10 — the
+per-role split for that remainder is `03-implementation/08-work-distribution-w5-w10.md` §6, and it is the table
+to copy the Friday effort entries into.
 
 ## 4. Artifact index (links/commits for verification)
 

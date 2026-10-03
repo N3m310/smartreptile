@@ -89,7 +89,8 @@ flowchart LR
 | `03-implementation/04-firmware-sensor-sampling-and-transport.md` | ESP32 tasks, sensor drivers, filtering, ring buffer, MQTT/HTTPS transport, provisioning UX |
 | `03-implementation/05-app-state-management-and-realtime.md` | Flutter provider graph, REST + SignalR clients, offline cache, web dashboard JS structure |
 | `03-implementation/06-threshold-and-species-profile-logic.md` | Threshold resolution, phase/day-night logic, exposure index, summary rollups, worked examples |
-| `03-implementation/07-implementation-roadmap.md` | 6 milestones, task breakdown, definition of done, FR coverage order |
+| `03-implementation/07-implementation-roadmap.md` | 6 milestones, task breakdown, definition of done, FR coverage order, team allocation |
+| `03-implementation/08-work-distribution-w5-w10.md` | Who does what in weeks 5–10: app-first schedule with an end-of-W8 app freeze, Friday gates, workload, cut list |
 
 ### 04 — Quality
 | File | Purpose |
