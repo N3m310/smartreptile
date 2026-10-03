@@ -38,4 +38,3 @@ void main() {
   // Fire-and-forget
   unawaited(settings.load());
 }
-
