@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+
 import '../models/terrarium_models.dart';
 
 class AppDataProvider extends ChangeNotifier {
@@ -26,11 +27,9 @@ class AppDataProvider extends ChangeNotifier {
     );
   }
 
-  int get pendingAlertsCount =>
-      _alerts.where((a) => !a.isResolved).length;
+  int get pendingAlertsCount => _alerts.where((a) => !a.isResolved).length;
 
-  int get onlineDevicesCount =>
-      _devices.where((d) => d.isOnline).length;
+  int get onlineDevicesCount => _devices.where((d) => d.isOnline).length;
 
   List<HistoryPoint> get currentHistory =>
       generateMockHistory(_selectedTerrariumId);
@@ -72,8 +71,7 @@ class AppDataProvider extends ChangeNotifier {
       id: newId,
       name: name,
       species: species,
-      image:
-          'https://images.unsplash.com/photo-1548767797-d8c844163c4c?auto=format&fit=crop&w=800&q=80',
+      image: 'https://images.unsplash.com/photo-1548767797-d8c844163c4c?auto=format&fit=crop&w=800&q=80',
       status: 'normal',
       currentTemp: 28.5,
       currentHumidity: 50.0,
@@ -96,4 +94,3 @@ class AppDataProvider extends ChangeNotifier {
     notifyListeners();
   }
 }
-

@@ -68,8 +68,11 @@ class _RootShellState extends State<_RootShell> {
                 color: AppColors.primary,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.shield_outlined,
-                  size: 20, color: Colors.white),
+              child: const Icon(
+                Icons.shield_outlined,
+                size: 20,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(width: 10),
             RichText(
@@ -178,4 +181,3 @@ class _RootShellState extends State<_RootShell> {
     );
   }
 }
-

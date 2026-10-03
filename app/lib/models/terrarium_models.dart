@@ -136,8 +136,7 @@ final List<TerrariumModel> mockTerrariums = [
     id: 'T01',
     name: 'Terrarium #01',
     species: 'Rồng Úc (Bearded Dragon)',
-    image:
-        'https://images.unsplash.com/photo-1574063413132-355dbfd83e25?auto=format&fit=crop&w=800&q=80',
+    image: 'https://images.unsplash.com/photo-1574063413132-355dbfd83e25?auto=format&fit=crop&w=800&q=80',
     status: 'normal',
     currentTemp: 34.5,
     currentHumidity: 38.0,
@@ -150,15 +149,15 @@ final List<TerrariumModel> mockTerrariums = [
       lightMin: 500,
       lightMax: 1200,
     ),
-    description: 'Khu vực sa mạc khô nóng, cần nhiệt độ sưởi ấm cao vào ban ngày.',
+    description:
+        'Khu vực sa mạc khô nóng, cần nhiệt độ sưởi ấm cao vào ban ngày.',
     deviceCount: 3,
   ),
   TerrariumModel(
     id: 'T02',
     name: 'Terrarium #02',
     species: 'Tắc kè Leopard (Leopard Gecko)',
-    image:
-        'https://images.unsplash.com/photo-1508817628294-5a453fa0b8fb?auto=format&fit=crop&w=800&q=80',
+    image: 'https://images.unsplash.com/photo-1508817628294-5a453fa0b8fb?auto=format&fit=crop&w=800&q=80',
     status: 'warning',
     currentTemp: 29.8,
     currentHumidity: 42.0,
@@ -178,8 +177,7 @@ final List<TerrariumModel> mockTerrariums = [
     id: 'T03',
     name: 'Terrarium #03',
     species: 'Rắn Ngô (Corn Snake)',
-    image:
-        'https://images.unsplash.com/photo-1531386151447-fd76ad50012f?auto=format&fit=crop&w=800&q=80',
+    image: 'https://images.unsplash.com/photo-1531386151447-fd76ad50012f?auto=format&fit=crop&w=800&q=80',
     status: 'danger',
     currentTemp: 33.2,
     currentHumidity: 32.0,
@@ -338,7 +336,8 @@ final List<AlertModel> mockAlerts = [
   AlertModel(
     id: 'ALT-104',
     title: 'Nhiệt độ ban đêm hạ thấp (Đã xử lý)',
-    message: 'Nhiệt độ giảm xuống 26.5°C tại Terrarium #01. Đã bật sưởi dự phòng.',
+    message:
+        'Nhiệt độ giảm xuống 26.5°C tại Terrarium #01. Đã bật sưởi dự phòng.',
     terrariumId: 'T01',
     terrariumName: 'Terrarium #01 (Rồng Úc)',
     type: 'temp_low',
@@ -351,9 +350,21 @@ final List<AlertModel> mockAlerts = [
 
 List<HistoryPoint> generateMockHistory(String terrariumId) {
   final points = <HistoryPoint>[];
-  final baseTemp = terrariumId == 'T01' ? 34.0 : terrariumId == 'T02' ? 29.0 : 27.0;
-  final baseHum = terrariumId == 'T01' ? 38.0 : terrariumId == 'T02' ? 38.0 : 55.0;
-  final baseLight = terrariumId == 'T01' ? 800 : terrariumId == 'T02' ? 150 : 300;
+  final baseTemp = terrariumId == 'T01'
+      ? 34.0
+      : terrariumId == 'T02'
+      ? 29.0
+      : 27.0;
+  final baseHum = terrariumId == 'T01'
+      ? 38.0
+      : terrariumId == 'T02'
+      ? 38.0
+      : 55.0;
+  final baseLight = terrariumId == 'T01'
+      ? 800
+      : terrariumId == 'T02'
+      ? 150
+      : 300;
 
   for (int i = 23; i >= 0; i--) {
     final hour = '${(24 - i).toString().padLeft(2, '0')}:00';
@@ -372,14 +383,15 @@ List<HistoryPoint> generateMockHistory(String terrariumId) {
       status = 'warning';
     }
 
-    points.add(HistoryPoint(
-      time: hour,
-      temperature: temp,
-      humidity: hum,
-      light: light,
-      status: status,
-    ));
+    points.add(
+      HistoryPoint(
+        time: hour,
+        temperature: temp,
+        humidity: hum,
+        light: light,
+        status: status,
+      ),
+    );
   }
   return points;
 }
-
