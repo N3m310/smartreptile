@@ -3,13 +3,16 @@ import 'package:provider/provider.dart';
 
 import 'core/env.dart';
 import 'l10n/generated/app_localizations.dart';
-import 'screens/home_screen.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/terrariums_screen.dart';
+import 'screens/alerts_screen.dart';
+import 'screens/history_screen.dart';
+import 'screens/settings_screen.dart';
+import 'state/app_data_provider.dart';
 import 'state/settings_provider.dart';
+import 'theme/app_theme.dart';
 
-/// Root widget: theme, localisation and the navigation shell (§02-design/04 §2).
-///
-/// M1 keeps the shell to the four tabs the design specifies, with Home implemented and the others showing an
-/// explicit "arrives in M2/M4" state rather than an empty screen that looks broken.
+/// Root widget: theme, localisation and the navigation shell.
 class SmartReptileApp extends StatelessWidget {
   const SmartReptileApp({super.key});
 
@@ -18,29 +21,15 @@ class SmartReptileApp extends StatelessWidget {
     final settings = context.watch<SettingsProvider>();
 
     return MaterialApp(
-      title: 'SmartReptile',
+      title: 'TERRAGUARD',
       debugShowCheckedModeBanner: false,
       locale: settings.locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
-      themeMode: settings.themeMode,
+      theme: AppTheme.darkTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.dark,
       home: const _RootShell(),
-    );
-  }
-
-  ThemeData _theme(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF2E7D32),
-      brightness: brightness,
-    );
-
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: scheme,
-      cardTheme: const CardThemeData(elevation: 0),
-      visualDensity: VisualDensity.standard,
     );
   }
 }
@@ -55,79 +44,140 @@ class _RootShell extends StatefulWidget {
 class _RootShellState extends State<_RootShell> {
   int _index = 0;
 
+  final List<Widget> _screens = const [
+    DashboardScreen(),
+    TerrariumsScreen(),
+    AlertsScreen(),
+    HistoryScreen(),
+    SettingsScreen(),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final tabs = [
-      _Tab(l10n.tabHome, Icons.home_outlined, const HomeScreen()),
-      _Tab(
-        l10n.tabHistory,
-        Icons.show_chart,
-        const _ComingSoon(feature: 'History (M4)'),
-      ),
-      _Tab(
-        l10n.tabAlerts,
-        Icons.notifications_none,
-        const _ComingSoon(feature: 'Alerts (M3)'),
-      ),
-      _Tab(
-        l10n.tabMore,
-        Icons.more_horiz,
-        const _ComingSoon(feature: 'Terrariums, devices, settings (M2/M4)'),
-      ),
-    ];
+    final appData = context.watch<AppDataProvider>();
+    final pendingCount = appData.pendingAlertsCount;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(l10n.appTitle),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                'v${Env.appVersion}',
-                style: Theme.of(context).textTheme.labelSmall,
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(10),
               ),
+              child: const Icon(
+                Icons.shield_outlined,
+                size: 20,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 10),
+            RichText(
+              text: const TextSpan(
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                  color: AppColors.textMain,
+                ),
+                children: [
+                  TextSpan(text: 'TERRA'),
+                  TextSpan(
+                    text: 'GUARD',
+                    style: TextStyle(color: AppColors.primary),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.bgMain,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                const Text(
+                  'v${Env.appVersion}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
-      body: tabs[_index].screen,
+      body: _screens[_index],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: [
-          for (final tab in tabs)
-            NavigationDestination(icon: Icon(tab.icon), label: tab.label),
+          const NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'Tổng quan',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.pets_outlined),
+            selectedIcon: Icon(Icons.pets),
+            label: 'Terrarium',
+          ),
+          NavigationDestination(
+            icon: pendingCount > 0
+                ? Badge(
+                    label: Text(
+                      '$pendingCount',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    backgroundColor: AppColors.statusDanger,
+                    child: const Icon(Icons.warning_amber_rounded),
+                  )
+                : const Icon(Icons.warning_amber_rounded),
+            selectedIcon: pendingCount > 0
+                ? Badge(
+                    label: Text(
+                      '$pendingCount',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    backgroundColor: AppColors.statusDanger,
+                    child: const Icon(Icons.warning_rounded),
+                  )
+                : const Icon(Icons.warning_rounded),
+            label: 'Cảnh báo',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.show_chart_outlined),
+            selectedIcon: Icon(Icons.show_chart),
+            label: 'Lịch sử',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Cài đặt',
+          ),
         ],
       ),
     );
   }
-}
-
-class _Tab {
-  const _Tab(this.label, this.icon, this.screen);
-
-  final String label;
-  final IconData icon;
-  final Widget screen;
-}
-
-class _ComingSoon extends StatelessWidget {
-  const _ComingSoon({required this.feature});
-
-  final String feature;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Text(
-        '$feature — scaffolded, not implemented yet.\n'
-        'See docs/03-implementation/07-implementation-roadmap.md for the milestone plan.',
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-    ),
-  );
 }

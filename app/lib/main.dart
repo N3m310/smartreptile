@@ -9,6 +9,7 @@ import 'core/env.dart';
 import 'data/api_client.dart';
 import 'prototype/prototype_shell.dart';
 import 'prototype/prototype_state.dart';
+import 'state/app_data_provider.dart';
 import 'state/settings_provider.dart';
 import 'state/telemetry_provider.dart';
 
@@ -30,6 +31,7 @@ void main() {
   final clock = Clock.system();
   final api = ApiClient(baseUrl: Env.apiBase);
   final settings = SettingsProvider();
+  final appData = AppDataProvider();
 
   runApp(
     MultiProvider(
@@ -37,6 +39,7 @@ void main() {
         Provider<Clock>.value(value: clock),
         Provider<ApiClient>.value(value: api),
         ChangeNotifierProvider<SettingsProvider>.value(value: settings),
+        ChangeNotifierProvider<AppDataProvider>.value(value: appData),
         ChangeNotifierProvider<TelemetryProvider>(
           create: (_) => TelemetryProvider(api: api, clock: clock),
         ),
