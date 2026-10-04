@@ -212,5 +212,7 @@ metric's firmware `payloadKey`; the broker's publish interceptor now feeds the i
 `03-implementation/07` (M2 progress, the 2.4 block and what is still open), `04-quality/02` (`TC-I-01`'s counter
 unit, `TC-I-04` split against 3.3, `TC-U-05`'s constant-time assertion), `01-product/05` (the calibration quality
 bit was written as 16; it is 32), `05-release/03` §5 and the repository `README`. No document was added or
-removed, so the doc set is still **36 files** (35 documents + this index).
+removed, so the doc set is still **36 files** (35 documents + this index). The branch's implementation record
+beside the set, `IMPLEMENTATION_SUMMARY_2026-10-03.md`, now carries this session as well: it covers 2026-10-03 and
+2026-10-04 in one file, because the second continues the first.
 
