@@ -73,9 +73,9 @@ counts quoted in `README`, here and `05-release/01`. So of the three M1 tasks st
 person with the books open**. The DoD verdict stays 2 of 3.
 
 Beyond M1: task **2.1** (domain entities, EF Core model, `InitialSchema` migration, seeders for the metric
-dictionary, three profiles and their bands) is also complete and enforced by the `integration` CI job, and 2.3 is
-partly in place (the broker is hosted in-process and refuses anonymous connections, but credential verification
-against `DeviceCredential` is not written). The M2 table below is not starting from zero.
+dictionary, three profiles and their bands) is also complete and enforced by the `integration` CI job. The M2
+table below is not starting from zero, and as of 2026-10-04 its backend half — FR-01, 2.2, 2.3 and 2.4 — is done,
+with the per-task evidence in the progress blocks that follow the table.
 
 ---
 
@@ -113,7 +113,7 @@ dashboard nobody reconciles it with, which is how one repository ends up documen
 | 2.1 | Domain entities + EF Core model + `InitialSchema` migration + seeders (metrics, 3 profiles, thresholds) | backend | `TC-I-01/02`; DB has seeded profiles with sources |
 | 2.2 | Device self-register + claim + credentials (hash, rotate, revoke) | backend | `TC-I-05/13`; UC-01 walkthrough on paper |
 | 2.3 | MQTT broker hosted in API; subscriber; auth against credentials; TLS on 8883 | backend | Bad credentials refused + audited; `1883` loopback-only |
-| 2.4 | `IngestWorker` + `IngestPipeline` stages + counters | backend | `TC-U-01…09`, `TC-I-03/04` green |
+| 2.4 | `IngestWorker` + `IngestPipeline` stages + counters | backend | `TC-U-01…09`, `TC-I-01/02/03` green (TC-I-04's health half green; its `sensor_fault` half is 3.3, see the 2.4 block below) |
 | 2.5 | Firmware: sampler task, filters, ring buffer, MQTT publish, LWT, health | firmware | 60 s samples visible in DB; `TC-U-FW-*` (native tests) green |
 | 2.6 | Firmware: HTTPS fallback + back-fill after outage | firmware | `TC-I-08` passes with a 30-minute broker stop |
 | 2.7 | Provisioning: SoftAP portal + self-register + claim code on OLED | firmware | Code appears within 60 s of boot; `TC-I-05` |
@@ -124,7 +124,7 @@ dashboard nobody reconciles it with, which is how one repository ends up documen
 **DoD:** the chain works with the real device, and the pipeline survives a broker restart without losing a
 sample. This is the milestone where the design either holds or is corrected — expect ADR updates.
 
-**Progress so far (measured 2026-10-03).** M1 is closed except its hardware line and 2.1 is complete, so M2 starts
+**Progress so far (measured 2026-10-03, extended 2026-10-04).** M1 is closed except its hardware line and 2.1 is complete, so M2 starts
 from a schema-current database rather than from scratch. **Task 2.2 needed a prerequisite: user authentication
 (FR-01) is implemented**, because `POST /devices/claim` is `Owner`-gated and there was nothing to be `Owner` with.
 What exists in `src/`:
@@ -206,14 +206,70 @@ another device's prefix refused and the session dropped while a fresh connection
 release shape (`DisablePlaintextEndpoint=true`) `1883` was not listening at all while TLS kept working.
 **226 backend unit tests pass** (was 186).
 
-**What is deliberately still open in 2.3.** Two things:
+**What is deliberately still open in 2.3.** One thing, now that 2.4 has landed:
 
 - **No audit rows.** `BR-18.4` wants `device.secret_rotated`, `device.revoked` and the rejected-connection cases
   in an `AuditLog`, and that table is still not in the schema (see 2.2 above), so this acceptance line reads
   "rejected and counted, not yet audited". The counters and the structured warnings are what exists today.
-- **The ingest subscriber is 2.4.** A message that passes the ACL is counted and allowed through the broker, but
-  nothing consumes `sr/v1/d/+/telemetry` yet, so a published batch goes nowhere — `IngestWorker` and
-  `IngestPipeline` are the next task, and this one stopped at the transport boundary on purpose.
+
+The other half of that acceptance — "nothing consumes the accepted publish" — is closed by the block below.
+
+**Task 2.4 — `IngestWorker` and the ingest pipeline.** Complete, with two placeholders declared at the fan-out
+boundary rather than left implicit. Each stage is a separate type so each rule has one implementation and one
+test, and the pure ones have no database in front of them at all:
+
+| Stage | Where | Verified by |
+|---|---|---|
+| Bytes → document | `Infrastructure/Ingest/JsonTelemetryPayloadParser.cs` | adapter tests: tolerance, unknown keys kept for the validator to judge, the 32 KB limit |
+| Schema, shape, timing (V-01…V-03, V-07…V-09, V-10) | `Application/Ingest/TelemetryPayloadValidator.cs`, `Domain/Readings/TelemetryIngestRules.cs` | `TC-U-01…04` plus the timing rules |
+| Device: match, lifecycle, credential (V-04/V-05) | `Application/Ingest/DeviceAuthenticator.cs` | `TC-U-05` |
+| Plausibility, never a refusal (V-06) | `Application/Ingest/PlausibilityGuard.cs` | `TC-U-06…08` |
+| Calibration on `Value`, never on `RawValue` (BR-07.4) | `Application/Ingest/{DeviceCalibration,CalibrationApplier}.cs` | `TC-U-09` |
+| Dedupe + stage the rows (DI-02/DI-03) | `Application/Ingest/TelemetryWriter.cs` + `Infrastructure/Ingest/EfTelemetryStore.cs` | `TC-I-01…03` |
+| Device state: `LastSeenAt`, status, firmware, health denorms | `Application/Ingest/DeviceStateUpdater.cs` | `TC-I-01`, and `TC-I-04`'s health half |
+| Transport, back-pressure, counters | `Infrastructure/Ingest/{InProcessTelemetryBus,IngestWorker,IngestOutcomeRecorder}.cs`, broker `OnInterceptingPublishAsync` | the live run below |
+| Fan-out after the commit | `Infrastructure/Ingest/PendingFanOut.cs` (**placeholder**) | the recorder tests assert a failed push cannot fail a stored batch |
+
+Two decisions worth reading back. **The transport hop carries raw envelopes, not batches**: the design's sketch
+deserialises in the reader and queues the batch, but a payload that is not JSON has to be *counted* under
+`schema_invalid`, and the writer loop is the one place that can count anything — so the queue holds bytes and the
+parse is the writer's first stage. **Back-pressure is the write itself**: the broker is in-process (ADR-012), so
+MQTTnet sends the QoS 1 PUBACK only after `InterceptingPublishAsync` returns. Awaiting the bounded channel write is
+therefore the "stop acking so the broker holds the messages" rule of §02-design/03 §1, with no timeout on purpose —
+a timeout would have to choose between losing the batch and failing the broker, and "the device retries" is already
+the right answer.
+
+Run against a real SQL Server and a real MQTT listener (`paho-mqtt` over loopback, 2026-10-04): a batch of two
+samples published twice produced **2** `TelemetrySample` rows with contiguous sequences `1, 2`, **8**
+`MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, the device's `LastSeenAt`,
+`FirmwareVersion = 1.2.0`, `SignalStrengthDbm = -63` and `FreeHeapKb = 142` from the batch's health block, and a
+`DeviceHealthSample` row; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`,
+`ingest_rejected_total=0`. A sample of `tf = 85` was **stored** with `QualityFlags = 2` (the row exists, the flag
+is what will exclude it), and a 121-sample batch and a malformed body were refused as `payload_too_large` and
+`schema_invalid`, taking `ingest_rejected_total` to **2**. **325 backend unit tests pass** (was 226) and the
+integration project passes **15 of 15** against a fresh database, `TC-I-01…03` among them.
+
+**What is deliberately still open in 2.4.**
+
+- **The fan-out has no consumer.** `PendingTelemetryBroadcaster` (2.9) and `PendingEvaluationQueue` (3.2/3.3) are
+  wired into the worker and do nothing, so a stored sample is broadcast to nobody and evaluated by nobody. That is
+  why `TC-I-03`'s "zero alerts created" holds *trivially* rather than because the evaluator skipped the flagged
+  row — the flag is on the row, which is what the evaluator will read.
+- **`TC-I-04`'s `sensor_fault` half moved to 3.3.** The task's acceptance named it, but a `sensor_fault` arrives on
+  `sr/v1/d/{id}/events`, and "humidity is `Unavailable`" needs the `SensorFault` derived signal — which is 3.3, and
+  which has no table to record it in today (`InitialSchema` has no device-event storage, the same class of gap as
+  the missing `AuditLog`). The health half of the test is green; the fault half is recorded against 3.3 where the
+  signal lives, rather than half-built here.
+- **Only the `telemetry` channel is forwarded.** `health`, `status` and `events` are part of the topic scheme but
+  have no consumer yet. The broker leaves them unforwarded on purpose: accepting a status payload and then ignoring
+  it would look like it worked.
+- **The HTTPS fallback endpoint is not built.** `ITelemetryPayloadParser`, `DeviceAuthenticator` (presented secret)
+  and the `IngestSource` column are all in place for `POST /api/v1/ingest/http`; the endpoint itself belongs with
+  2.6's firmware work.
+- **`ClockSkewSeconds` is the observed skew, not the stored difference.** Rule V-07 clamps a future timestamp to
+  `ReceivedAt`, and storing the clamped difference would read as zero and hide the fault the column exists to
+  surface. A sample from the future is therefore stored with a clamped timestamp *and* its real skew, flagged
+  `ClockUnsynced` (16). `QualityFlags` has no `clock_ahead` bit, so that is where the condition lands.
 
 ---
 

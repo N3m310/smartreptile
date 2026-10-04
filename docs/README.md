@@ -200,3 +200,17 @@ check as step 3a of `05-release/01` §6. Touched `03-implementation/07` (M2 prog
 **36 files** (35 documents + this index). The session's own implementation record sits beside the set as
 `IMPLEMENTATION_SUMMARY_2026-10-03.md` — like `DOC_CHANGES_2026-10-03.md` and `TERRAGUARD_SUMMARY.md`, it is not
 counted in the 36.
+
+**Revised 2026-10-04 (sixth pass) — task 2.4 walks a real sample into SQL Server.** `IngestWorker` and the
+pipeline stages of `03-implementation/03` §3 now exist: bytes → schema/shape/timing (rules V-01…V-03, V-07…V-09,
+V-10) → device authentication → plausibility (V-06, stored and flagged, never refused) → calibration on `Value`
+with `RawValue` preserved → dedupe and persist in one transaction (DI-02/DI-03) → device state and health
+denorms. New code in `Application/Ingest`, `Domain/Readings/TelemetryIngestRules.cs`,
+`Infrastructure/Ingest` and `Infrastructure/Persistence/EfTelemetryStore.cs`; `MetricDictionary` gained each
+metric's firmware `payloadKey`; the broker's publish interceptor now feeds the in-process bus. Touched
+`03-implementation/03` §3 (an "as built" note on the two places the sketch and the code differ),
+`03-implementation/07` (M2 progress, the 2.4 block and what is still open), `04-quality/02` (`TC-I-01`'s counter
+unit, `TC-I-04` split against 3.3, `TC-U-05`'s constant-time assertion), `01-product/05` (the calibration quality
+bit was written as 16; it is 32), `05-release/03` §5 and the repository `README`. No document was added or
+removed, so the doc set is still **36 files** (35 documents + this index).
+

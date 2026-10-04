@@ -4,7 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Ingest;
+using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Health;
+using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Infrastructure.Mqtt;
 using SmartReptile.Infrastructure.Observability;
 using SmartReptile.Infrastructure.Options;
@@ -83,6 +86,35 @@ public static class DependencyInjection
         // Broker session registry (FR-05 BR-05.4): the broker writes it, the revoke use case reads it.
         services.AddSingleton<DeviceSessionRegistry>();
         services.AddSingleton<IDeviceSessionRegistry>(sp => sp.GetRequiredService<DeviceSessionRegistry>());
+
+        // Ingest pipeline (FR-06, roadmap task 2.4). The bus is the in-process hop from the broker; the stages are
+        // scoped because the two that touch the database share one context and therefore one transaction.
+        services.AddSingleton<InProcessTelemetryBus>();
+        services.AddSingleton<ITelemetryPayloadParser, JsonTelemetryPayloadParser>();
+        services.AddSingleton(sp =>
+        {
+            var ingest = sp.GetRequiredService<IOptions<IngestOptions>>().Value;
+
+            return new TelemetryValidationLimits(
+                ingest.MaxSamplesPerBatch,
+                TelemetryIngestRules.MaxSampleOffsetSeconds,
+                ingest.MaxPayloadKb);
+        });
+
+        services.AddSingleton<TelemetryPayloadValidator>();
+        services.AddScoped<ITelemetryStore, EfTelemetryStore>();
+        services.AddScoped<DeviceAuthenticator>();
+        services.AddScoped<PlausibilityGuard>();
+        services.AddScoped<CalibrationApplier>();
+        services.AddScoped<TelemetryWriter>();
+        services.AddScoped<DeviceStateUpdater>();
+        services.AddScoped<IngestPipeline>();
+
+        // Placeholders with a real boundary: 2.9 replaces the broadcaster, 3.2/3.3 replace the queue.
+        services.AddSingleton<ITelemetryBroadcaster, PendingTelemetryBroadcaster>();
+        services.AddSingleton<IEvaluationQueue, PendingEvaluationQueue>();
+        services.AddSingleton<IngestOutcomeRecorder>();
+        services.AddHostedService<IngestWorker>();
 
         services.AddSingleton<SmartReptileMetrics>();
         services.AddSingleton<MqttBrokerStatus>();

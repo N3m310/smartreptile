@@ -7,7 +7,10 @@ using MQTTnet.Protocol;
 using MQTTnet.Server;
 using MQTTnet.Server.Disconnecting;
 using SmartReptile.Application.Devices;
+using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Devices;
+using SmartReptile.Domain.Readings;
+using SmartReptile.Infrastructure.Ingest;
 
 namespace SmartReptile.Infrastructure.Mqtt;
 
@@ -153,14 +156,26 @@ public sealed class MqttBrokerHostedService(
     MqttBrokerOptions options,
     MqttBrokerStatus status,
     DeviceSessionRegistry sessions,
+    InProcessTelemetryBus ingestBus,
     IServiceScopeFactory scopes,
     ILogger<MqttBrokerHostedService> logger) : BackgroundService
 {
     private MqttServer? _server;
 
+    /// <summary>The one channel the broker forwards to the ingest worker (roadmap task 2.4).</summary>
+    private const string TelemetryChannel = "telemetry";
+
+    /// <summary>
+    /// The host's shutdown token, kept so a publish that is waiting on a full ingest queue releases when the
+    /// process is asked to stop. Read from the publish interceptor, which has no token of its own.
+    /// </summary>
+    private CancellationToken _stopping = CancellationToken.None;
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stopping = stoppingToken;
+
         try
         {
             _server = new MqttFactory().CreateMqttServer(BuildOptions());
@@ -387,6 +402,39 @@ public sealed class MqttBrokerHostedService(
         }
 
         status.MessagePublished();
+
+        await ForwardToIngestAsync(args, deviceId).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Hands an accepted telemetry publication to the ingest worker.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>telemetry</c> is forwarded today: the health, status and events channels are part of the topic
+    /// scheme but their consumers are later tasks (§02-design/02 §4.1 lifts a device out of <c>Offline</c> on a
+    /// sample, and the <c>DeviceSilent</c>/<c>SensorFault</c> signals are 3.3). Leaving them unforwarded rather
+    /// than half-handled is deliberate — a status payload accepted and then ignored would look like it worked.
+    /// <para>
+    /// The batch is awaited, not fired and forgotten: see <see cref="InProcessTelemetryBus"/> for why the
+    /// acknowledgement has to wait behind the queue.
+    /// </para>
+    /// </remarks>
+    private async Task ForwardToIngestAsync(InterceptingPublishEventArgs args, string? deviceId)
+    {
+        if (deviceId is null
+            || !MqttTopicScheme.TryParse(args.ApplicationMessage.Topic, options.DeviceTopicPrefix, out var topic)
+            || !string.Equals(topic.Channel, TelemetryChannel, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await ingestBus.PublishAsync(
+            new TelemetryEnvelope(
+                topic.DeviceId,
+                args.ApplicationMessage.PayloadSegment.ToArray(),
+                DateTimeOffset.UtcNow,
+                IngestSource.Mqtt),
+            _stopping).ConfigureAwait(false);
     }
 
     /// <summary>The subscribe half of the ACL: a device subscribes to its own <c>cmd</c> topic and nothing else.</summary>

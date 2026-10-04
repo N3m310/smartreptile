@@ -102,7 +102,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Gate | Command / method | Result |
 |---|---|---|
 | Backend builds, warnings as errors | `dotnet build backend/SmartReptile.sln -c Release` | ✅ Build succeeded, 0 warnings |
-| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **226 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL) |
+| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **325 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline) |
 | Formatting gate (CI parity) | `dotnet format SmartReptile.sln --verify-no-changes --severity error` | ✅ clean (generated migrations excluded via `.editorconfig`) |
 | Schema created by migrations only | `dotnet ef migrations add InitialSchema` | ✅ one migration; `(DeviceId, Sequence)` unique, filtered open-alert unique, one-device-per-terrarium unique, band CHECK constraints all present |
 | Docker image builds | `docker compose build api` | ✅ builds from a clean context (needed `backend/.dockerignore` — defect 8 below) |
@@ -121,6 +121,8 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | MQTT verifies the device secret | `paho-mqtt` over TLS with a real credential, a wrong one and none | ✅ **2.3 done 2026-10-03**: anonymous, wrong-secret and unknown-device connects all answered `Bad user name or password`; a claimed device connected over TLS *and* over plaintext; wildcard and cross-device subscriptions refused; a publish under another device's prefix refused and that session dropped; `POST /devices/{id}/revoke` closed the live session in **0.0 s** and the credential could not reconnect |
 | MQTT topic ACL | `paho-mqtt` subscribe/publish attempts outside the device's own prefix | ✅ **2.3**: own `cmd` granted; `sr/v1/d/+/telemetry` and another device's `cmd` refused; counters `mqtt_refused_subscriptions_total` / `mqtt_refused_publications_total` on `/metrics` |
 | MQTT plaintext is loopback-only | `netstat -ano` with TLS on, then again with `Mqtt:DisablePlaintextEndpoint=true` | ✅ **2.3**: `127.0.0.1:1883` **and** `[::1]:1883` only (no wildcard bind — binding the IPv4 address alone leaves the IPv6 socket open); in the release shape nothing listens on `1883` at all and TLS kept authenticating devices |
+| Ingest: broker → bus → worker → SQL Server | `paho-mqtt` publish over a real MQTT listener against a live API + SQL Server, then `curl /metrics` and read the rows back | ✅ **2.4 done 2026-10-04**: a two-sample batch published twice stored **2** `TelemetrySample` rows (sequences `1, 2`), **8** `MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, set `LastSeenAt` / `FirmwareVersion` / `SignalStrengthDbm` / `FreeHeapKb` and wrote a `DeviceHealthSample`; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`, `ingest_rejected_total=0`. A `tf = 85` sample was stored with `QualityFlags = 2`; a 121-sample batch was `payload_too_large` and a malformed body `schema_invalid`, taking `ingest_rejected_total` to **2** |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **15 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`) |
 | Device provisioning over HTTP | `curl` against a live API + SQL Server (50 assertions) | ✅ **2.2 done 2026-10-03**: self-register `201`/`429`/`400`, claim `200`/`404 claim_code_invalid`/`404 not_found`/`409 terrarium_already_bound`, rotate `200` with a 10-minute grace, revoke `204` and idempotent — with `Owner`-only gating (`Technician` → `403 insufficient_role`) |
 | Firmware builds for the target | `pio run -e esp32dev` | ✅ RAM 13.6% (44 536 B), Flash 20.7% (270 673 B) |
 | Firmware host unit tests | `docker run --rm -v "$PWD/firmware:/firmware" smartreptile-fw-test` (image from `firmware/Dockerfile.host-tests`; plain `pio test -e native` wherever a host compiler exists) | ✅ **22/22 passed** — 8 filters + 8 payload + 6 ring buffer, ~18 s. First ever execution, and it caught defect 11 |
@@ -128,7 +130,6 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
 | No committed secrets or build output | `git ls-files` audit | ✅ at M1: 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores. **Re-audited 2026-10-03:** 247 files and still no secrets — the increase is the TERRAGUARD prototype, including the three `web/dist/` build artefacts that `ADR-017` accepts deliberately |
 | **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
-| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **8 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, and the SQL-level invariants reject what they should |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
@@ -143,14 +144,16 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   so the dashboard's live view still requests `/api/v1/terrariums`, receives `404`, and degrades to its empty
   state showing `(http_404)` — by design, not by accident. A device can only be claimed into a terrarium that
   exists, and terrariums CRUD is task 2.8, so today that row has to be created through SQL.
-  The terrarium, reading, threshold and alert endpoints are M2/M3 work.
+  The terrarium, reading, threshold and alert endpoints are M2/M3 work. Samples *are* being stored as of task
+  2.4, but nothing serves them yet — `readings/latest` and the range endpoint are 2.8.
 - **No sensor hardware is connected**: `main.cpp` runs with bench mode off and reports placeholder values until
   M2, and no board has ever been flashed from this repository.
 - **The MQTT broker verifies device credentials** (task 2.3, 2026-10-03): `username = deviceId`, `password =
   secret`, validated against the current `DeviceCredential` with the rotation grace window applied, plus a
-  per-device topic ACL and a revoke-time session kick. What is still missing is the *consumer*: nothing reads
-  `sr/v1/d/+/telemetry` yet, so a published batch is accepted and counted but not stored — `IngestWorker` is
-  task 2.4.
+  per-device topic ACL and a revoke-time session kick. The consumer landed with task 2.4 on 2026-10-04: a
+  telemetry publication now becomes a `TelemetrySample`, its `MetricReading` rows and a device state update, and
+  the counters move. `health`, `status` and `events` are still forwarded to nobody, and the HTTPS fallback
+  endpoint arrives with the firmware work of 2.6.
 - **No load, soak, or backup testing**, and the retention/rollup jobs have never run against real data.
 - **Nothing is deployed**: this is a local Compose stack, not a host with TLS, backups, or monitoring (M6).
 
@@ -260,7 +263,18 @@ separate listeners with the plaintext one switchable off entirely, a device may 
 and, for a publish, the session is dropped — and revoking a device closes its live session so BR-05.4's
 60-second budget is met in about zero. Checked with `paho-mqtt` against the real TLS listener (30 assertions, all
 green) and by `netstat` in both shapes; **226 backend unit tests pass** (was 186). The consumer of what the broker
-accepts arrives with task 2.4.
+accepts arrived with task 2.4, recorded just above.
+
+**Added 2026-10-04 (backend, M2, task 2.4).** A published batch is no longer counted and dropped: the broker's
+publish interceptor hands accepted telemetry to an in-process bounded queue, and `IngestWorker` runs each batch
+through the design's stages — schema/shape/timing (rules V-01…V-03, V-07…V-09, V-10), device authentication,
+plausibility (flag and store, never refuse), calibration (`Value` corrected, `RawValue` untouched), dedupe on
+`(DeviceId, Sequence)` and persistence in one transaction with the device's `LastSeenAt`, status, firmware and
+health denorms. Checked by publishing over a real MQTT listener with `paho-mqtt` and reading the rows back
+(see the gate table above); **325 backend unit tests pass** (was 226) and the integration project passes 15 of
+15 against a fresh database. Two things are wired but deliberately empty — the SignalR broadcast (2.9) and the
+evaluation queue (3.2/3.3) — so `TC-I-03`'s "zero alerts" holds because nothing evaluates yet, not because the
+evaluator skipped the flagged row.
 
 The whole session — the TERRAGUARD re-base and its three follow-ups, FR-01, and tasks 2.2 and 2.3 — is recorded
 build by build in [`IMPLEMENTATION_SUMMARY_2026-10-03.md`](IMPLEMENTATION_SUMMARY_2026-10-03.md), including the

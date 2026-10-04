@@ -56,7 +56,7 @@ void test_median_rejects_single_glitch(void) {
 | TC-U-02 | Schema rejects an unparseable timestamp | `ts = "yesterday"` | failure `schema_invalid` | 1 | FR-06 |
 | TC-U-03 | Sample count limits enforced | 121 samples in one batch | failure `payload_too_large` | 2 | FR-06 |
 | TC-U-04 | Unknown metric code is dropped, batch survives | sample with `zz: 1.0` plus valid metrics | valid metrics persisted, `unknown_metric` logged, no failure | 2 | FR-06 |
-| TC-U-05 | Device authenticator is constant-time and rejects a wrong secret | correct secret, then a secret differing in one char | true then false; comparison uses `FixedTimeEquals` (asserted by no early-exit surrogate: timing variance test with 1 000 iterations under 10% spread) | 1 | FR-05 |
+| TC-U-05 | Device authenticator is constant-time and rejects a wrong secret | correct secret, then a secret differing in one char | true then false; comparison uses `FixedTimeEquals` (constant time asserted at the one line that implements it, in `DeviceCredentials.VerifySecret`; the test asserts the half a timing test cannot — 1 000 differently-shaped wrong secrets all refused — because a wall-clock spread assertion measures the CI scheduler, not the code) | 1 | FR-05 |
 | TC-U-06 | Plausibility flags, never rejects | `TempC = 85` | accepted with quality bit 2, `IsEvaluable = false` | 1 | FR-06 |
 | TC-U-07 | Plausibility boundaries per metric | `HumidityPct = 0`, `100`, `100.1` | first two clean, third flagged | 1 | FR-06 |
 | TC-U-08 | Negative lux rejected as implausible | `LightLux = -5` | flagged | 2 | FR-06 |
@@ -188,10 +188,10 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 
 | Id | Case | Setup | Expected | P | FR |
 |---|---|---|---|---|---|
-| TC-I-01 | Ingest persists sample + readings + updates last seen | 1 valid batch over MQTT | 1 sample, N readings, `LastSeenAt` set, status `online`, `ingest_samples_total` = N | 1 | FR-06 |
+| TC-I-01 | Ingest persists sample + readings + updates last seen | 1 valid batch over MQTT | 1 sample, N readings, `LastSeenAt` set, status `online`, `ingest_samples_total` up by 1 per persisted sample (FR-18's "1 000 samples → +1 000" fixes the unit: the counter counts `TelemetrySample` rows, not readings and not batches) | 1 | FR-06 |
 | TC-I-02 | Duplicate `(deviceId, seq)` is idempotent | publish the same batch 5× | exactly 1 sample, duplicate counter = 4, second and later responses reported as duplicates (no 5xx) | 1 | FR-06 |
 | TC-I-03 | Implausible sample stored but not evaluated | `TempC = 85` | row exists with quality bit 2, zero alerts created | 1 | FR-06 |
-| TC-I-04 | Device health + fault events update state | health + `sensor_fault` event | health denorms updated; humidity `Unavailable`; no humidity alert | 1 | FR-07 |
+| TC-I-04 | Device health + fault events update state | health + `sensor_fault` event | health denorms updated (task 2.4); humidity `Unavailable` and no humidity alert (the `SensorFault` signal, task 3.3 — the event arrives on `events`, which ingest does not consume yet) | 1 | FR-07 |
 | TC-I-05 | Provisioning end to end | self-register → claim → connect with secret → publish | device bound, status `online`, first sample stored; a second claim of the same code → `404 claim_code_invalid`; a claim for an already-bound terrarium → `409` | 1 | FR-04, FR-05 |
 | TC-I-06 | Evaluation through the pipeline | `daily` fixture played back with a fake clock | exactly one alert, correct `TriggeredAt`, correct `PeakValue`; rollups and the daily summary agree with the fixture's hand-computed values | 1 | FR-11, FR-14 |
 | TC-I-07 | Alert lifecycle through the API | open → ack (Technician) → resolve (`FalsePositive`) | states and actors stored; a Viewer ack → `403`; a second ack → `409 alert_not_open` | 1 | FR-12, FR-02 |

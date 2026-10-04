@@ -157,6 +157,21 @@ separate class so it can be unit-tested without a broker:
 
 Fan-out happens **after** the commit; a SignalR failure must never roll back a stored sample.
 
+**As built (2026-10-04, task 2.4).** Two of the details above differ from this sketch, and the differences are
+deliberate:
+
+- **The channel carries raw envelopes, not batches.** An unparseable payload has to be counted under
+  `schema_invalid`, and the writer loop is the only place that can count; deserialising in the reader would either
+  lose that diagnostic or duplicate the counting. So `IngestWorker`'s reader enqueues the topic's device id, the
+  bytes and the arrival time, and the parse is the writer's first stage.
+- **Fan-out is done by the worker after `IngestPipeline` returns, not inside it.** `IngestOutcome.Stored` carries
+  the committed samples, so the push cannot be mistaken for part of the transaction it follows: a failed broadcast
+  is logged as a lost push by `IngestOutcomeRecorder`, never as a refused batch.
+
+The stage classes below are the ones that exist; `TelemetryPayloadValidator` and `PlausibilityGuard` live in the
+Application layer and `TelemetryWriter`/`DeviceStateUpdater` are application stages over an `ITelemetryStore` port,
+which is what keeps them unit-testable without a broker or a database.
+
 ## 4. Threshold evaluation implementation
 
 ```csharp
