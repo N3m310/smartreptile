@@ -191,6 +191,7 @@ this summary is an extra implementation record rather than a new design document
 | `docs/03-implementation/01` §5 | Environment-key table aligned with `.env.example` |
 | Repository `README.md` | Verification table gained the provisioning, broker-auth, ACL and plaintext rows, and on 2026-10-04 the ingest row; the integration row now reads 15; test counts updated; the "nothing consumes the telemetry" limitation replaced by what is actually missing (the two fan-out consumers) |
 | `docs/04-quality/*`, `docs/06-report/*`, `docs/02-design/*`, `docs/03-implementation/08`, `docs/07-appendices/01` | The TERRAGUARD re-base and `ADR-017`/`ADR-018` reconciliation carried in this branch |
+| `docs/05-release/03` itself | Its whole body had been **double-encoded** by the tooling that wrote commit `1b59da4` — 426 characters across 34 lines (em and en dashes, `§`, `°`, `×`, `→`, `≥`, `…`, `’`, and the `‖` in `SHA-256(secret ‖ salt)`). Repaired by learning the corruption's exact sequence → character mapping from `641c345`, the revision just before it appeared, and replaying it; the ASCII skeleton of every line is byte-identical to `HEAD` afterwards, so no word, number, path or fact moved. A repository-wide scan for the ten sequences finds nothing else affected |
 
 ---
 
