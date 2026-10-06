@@ -16,6 +16,7 @@ using SmartReptile.Api.Middleware;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
+using SmartReptile.Application.Ingest;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure;
@@ -205,6 +206,36 @@ builder.Services.AddRateLimiter(options =>
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
+
+    // The ingest fallback is limited per device (6/min, `07-appendices/03` §3.6) rather than per address, because
+    // two boards behind one home router are two budgets - which is the point of the fallback: a device that has
+    // been offline is the one that needs to back-fill, and it must not be starved by the other one.
+    //
+    // The key comes from a header the caller supplies, so this is a *fairness* limit and not a security control:
+    // a hostile caller can mint a fresh partition per request by varying the id. What bounds that caller is the
+    // authentication that follows - every forged id costs a parse and a failed device lookup - plus the
+    // address-keyed policy above on the auth group. Stated here because a limit that reads like a defence and is
+    // not one is worse than a documented fairness rule.
+    options.AddPolicy("ingest", context =>
+    {
+        // The same parse the endpoint uses, deliberately: a limit keyed on a different reading of the header than
+        // the one that authorises the request is a limit that can be pointed at someone else's budget.
+        var key = DeviceCredentialHeader.TryParse(
+                context.Request.Headers.Authorization.ToString(),
+                out var devicePublicId,
+                out _)
+            ? devicePublicId
+            : context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: key,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 6,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            });
+    });
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -324,6 +355,7 @@ app.MapOpsEndpoints(applicationVersion);
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
 app.MapTerrariumEndpoints();
+app.MapIngestEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
 app.MapGet("/", () => Results.Ok(new

@@ -287,7 +287,7 @@ Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of de
   holding a live credential is a leak, so the default is off and the release note says so (limitation L-02).
 | `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage` · **planned:** `PATCH/DELETE {id}`, `GET/PUT {id}/thresholds`, `POST {id}/silences`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` + `ITerrariumStore`), not a filter applied afterwards |
 | `/api/v1/devices` | `GET`, `GET {id}`, `POST self-register`, `POST claim`, `PATCH {id}`, `POST {id}/rebind`, `POST {id}/rotate-secret`, `POST {id}/revoke`, `POST {id}/calibration`, `POST {id}/commands`, `POST {id}/snapshots` | `self-register` anonymous + rate-limited |
-| `/api/v1/ingest` | `POST http` | Device-auth header; the HTTP fallback path |
+| `/api/v1/ingest` | **built:** `POST http` | Device-auth header (`Device {id}.{secret}`); the HTTP fallback path, 6 requests/min/device |
 | `/api/v1/alerts` | `GET`, `GET {id}`, `POST {id}/ack`, `POST {id}/resolve` | Role-gated ack/resolve |
 | `/api/v1/species-profiles` | `GET`, `POST`, `PATCH {id}`, `DELETE {id}`, `POST {id}/duplicate` | Built-ins immutable |
 | `/api/v1/notifications` | `GET`, `POST {id}/read`, `POST read-all` | In-app inbox |

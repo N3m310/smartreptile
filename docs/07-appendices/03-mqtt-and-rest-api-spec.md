@@ -173,6 +173,27 @@ Content-Type: application/json
 Rate limit 6 requests/min/device. Same `IngestPipeline` as MQTT, so the only difference observable in the data
 is `TelemetrySample.Source`.
 
+**Built 2026-10-06** (`Api/Endpoints/IngestEndpoints.cs`). Three things about it are worth knowing before writing
+a device against it:
+
+| Situation | Answer | Why that answer |
+|---|---|---|
+| Batch stored | `202 {accepted, duplicates, rejected: 0, reasons: []}` | The counts are the pipeline's own outcome, not a guess, which is what lets a device **clear its ring buffer** after an outage instead of re-sending until someone looks. The status stays `202` because this contract says so and the firmware is written against it |
+| Same batch again | `202 {accepted: 0, duplicates: N}` | Idempotency is `(DeviceId, Sequence)` in the database, not the `Idempotency-Key` header — so a re-delivery is a success and the header is optional. A device that lost the response can simply send the batch again |
+| Credential missing, malformed, wrong, or naming a device the payload does not | `401 auth_failed`, **one** body for all four | Two distinguishable answers would tell a caller which public ids exist (BR-02.2). The specific reason (revoked, unbound, secret mismatch) reaches the operator through the log, never the device |
+| Payload unparseable, or over the 32 KB limit | `400 schema_invalid` / `400 payload_too_large`, message describing the payload | These describe data the caller sent, so echoing them leaks nothing. A 4xx is the contract with a back-filling device: **do not re-send this payload**, it will fail identically |
+
+`rejected` and `reasons` are always `0` and `[]` today, and not because nothing is ever refused: the validator
+decides a batch all-or-nothing, so a refusal leaves through the `4xx` rows above and the `202` body only ever
+describes a batch that was stored. The fields stay because the contract has them; a partial-acceptance path is the
+only thing that could fill them.
+
+**The per-device rate limit is a fairness rule, not a defence.** Its partition key is the device id from a
+caller-supplied header, so a hostile caller can mint a fresh budget per request by varying it. What actually bounds
+that caller is that every forged id still costs a parse and a failed device lookup, plus the address-keyed policy
+on the auth group. It is per device rather than per address on purpose: two boards behind one home router are two
+budgets, and a device coming back from an outage is the one that needs to back-fill.
+
 ---
 
 ## 4. REST API reference
@@ -404,6 +425,7 @@ be probed (BR-02.2).
 | 400 | `registration_invalid` | Username, email or password failed validation (see `errors`) |
 | 400 | `malformed_request` | The body could not be read as JSON for this endpoint — nothing was processed |
 | 401 | `invalid_credentials` | Wrong username/password |
+| 401 | `auth_failed` | Device credential missing, malformed, wrong, revoked, unbound, or naming a different device than the payload — **one** answer for all of them, on `/ingest/http` only |
 | 401 | `invalid_recovery_code` | Wrong, spent, malformed or account-less backup recovery code — one answer for all of them |
 | 401 | `invalid_reset_code` | Wrong, spent, expired, foreign or account-less reset code — one answer for all of them |
 | 401 | `token_invalid` / `token_reused` | Expired, consumed, or replayed refresh token (family revoked) |

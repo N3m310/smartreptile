@@ -267,9 +267,14 @@ integration project passes **15 of 15** against a fresh database, `TC-I-01…03`
 - **Only the `telemetry` channel is forwarded.** `health`, `status` and `events` are part of the topic scheme but
   have no consumer yet. The broker leaves them unforwarded on purpose: accepting a status payload and then ignoring
   it would look like it worked.
-- **The HTTPS fallback endpoint is not built.** `ITelemetryPayloadParser`, `DeviceAuthenticator` (presented secret)
-  and the `IngestSource` column are all in place for `POST /api/v1/ingest/http`; the endpoint itself belongs with
-  2.6's firmware work.
+- **The HTTPS fallback endpoint shipped 2026-10-06** (`POST /api/v1/ingest/http`,
+  `Api/Endpoints/IngestEndpoints.cs`); what is still open is the *firmware* half of 2.6 — the device-side switch to
+  HTTPS and its back-fill loop. `ITelemetryPayloadParser`, `DeviceAuthenticator` (presented secret) and the
+  `IngestSource` column were already in place for it, so the endpoint is composition: the same `IngestPipeline` as
+  MQTT, summoned synchronously so the `202` can carry real counts, which is what lets a device clear its ring buffer
+  after an outage. The credential header's parse lives in `Application/Ingest/DeviceCredentialHeader.cs` as a pure
+  function, because a value that parsed to an empty secret would be refused exactly like a wrong one and the bug
+  would look like an authentication problem forever.
 - **`ClockSkewSeconds` is the observed skew, not the stored difference.** Rule V-07 clamps a future timestamp to
   `ReceivedAt`, and storing the clamped difference would read as zero and hide the fault the column exists to
   surface. A sample from the future is therefore stored with a clamped timestamp *and* its real skew, flagged
