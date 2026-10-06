@@ -28,6 +28,33 @@ public class TerrariumServiceTests
     public TerrariumServiceTests() =>
         _service = new TerrariumService(_store, _clock, new TerrariumSettings("Asia/Ho_Chi_Minh", 3));
 
+    // ---- live-update membership (FR-08, roadmap task 2.9) -------------------------------------------
+
+    [Fact]
+    public async Task IsMemberAsync_answers_true_for_the_owner_only()
+    {
+        var profile = _store.AddProfile();
+        var mine = _store.AddTerrarium(_owner, "Alpha", profile);
+        var someoneElses = _store.AddTerrarium(Guid.NewGuid(), "Someone else's", profile);
+
+        (await _service.IsMemberAsync(mine.Id, _owner)).Should().BeTrue();
+
+        // This is what keeps the realtime hub from becoming a cross-tenant leak: the group name is derived from
+        // the terrarium id, so joining one is asking to receive its data.
+        (await _service.IsMemberAsync(someoneElses.Id, _owner)).Should().BeFalse();
+        (await _service.IsMemberAsync(Guid.NewGuid(), _owner)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsMemberAsync_refuses_a_deleted_terrarium()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        terrarium.DeletedAt = Now;
+
+        (await _service.IsMemberAsync(terrarium.Id, _owner)).Should().BeFalse();
+    }
+
     // ---- list and detail ----------------------------------------------------------------------------
 
     [Fact]

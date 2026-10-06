@@ -76,6 +76,21 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     }
 
     /// <summary>
+    /// Whether the caller may receive this terrarium's live updates (FR-08). Ownership is the only membership the
+    /// model has, so this is the same query as <see cref="GetAsync"/> without the summarising — and a foreign
+    /// terrarium answers <c>false</c> exactly like a missing one, so the realtime hub cannot be used to probe for
+    /// ids either (BR-02.2).
+    /// </summary>
+    /// <param name="terrariumId">Terrarium the caller wants updates for.</param>
+    /// <param name="userId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<bool> IsMemberAsync(
+        Guid terrariumId,
+        Guid userId,
+        CancellationToken cancellationToken = default) =>
+        await store.FindOwnedAsync(terrariumId, userId, cancellationToken) is not null;
+
+    /// <summary>
     /// Creates a terrarium. Exists in this milestone because every other route needs one to point at: a device
     /// cannot be claimed without a terrarium to bind it to, and a read surface with no way to create its subject
     /// would only ever answer with an empty list.
