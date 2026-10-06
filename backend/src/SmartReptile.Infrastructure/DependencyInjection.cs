@@ -129,7 +129,6 @@ public static class DependencyInjection
         services.AddScoped<IngestPipeline>();
 
         // Placeholders with a real boundary: 2.9 replaces the broadcaster, 3.2/3.3 replace the queue.
-        services.AddSingleton<ITelemetryBroadcaster, PendingTelemetryBroadcaster>();
         services.AddSingleton<IEvaluationQueue, PendingEvaluationQueue>();
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();

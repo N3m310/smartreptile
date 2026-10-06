@@ -39,6 +39,10 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddProblemDetails();
 builder.Services.AddSignalR();
 
+// The live push of FR-09: an Application port implemented here, because the hub it broadcasts through belongs to
+// this project. A singleton like the hub context it holds, and resolved by the ingest pipeline's fan-out.
+builder.Services.AddSingleton<ITelemetryBroadcaster, SignalRTelemetryBroadcaster>();
+
 builder.Services.AddSmartReptileInfrastructure(builder.Configuration);
 
 // CORS allowlist: explicit origins only. An empty list means "no cross-origin access" outside Development.
@@ -119,6 +123,23 @@ builder.Services
             },
             OnForbidden = async context =>
                 await WriteProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden, forbiddenBody),
+
+            // A browser cannot put a header on the WebSocket handshake, so SignalR's own convention is to pass the
+            // token in the query string. Accepted on the hub path only: a token in a URL reaches logs, proxies and
+            // referrer headers, which is a cost worth paying for the one route that cannot avoid it and nowhere
+            // else.
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            },
         };
     });
 
