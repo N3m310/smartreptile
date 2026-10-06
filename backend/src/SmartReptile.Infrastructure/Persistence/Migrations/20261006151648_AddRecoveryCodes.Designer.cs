@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SmartReptile.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using SmartReptile.Infrastructure.Persistence;
 namespace SmartReptile.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SmartReptileDbContext))]
-    partial class SmartReptileDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261006151648_AddRecoveryCodes")]
+    partial class AddRecoveryCodes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -305,43 +308,6 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.HasIndex("DeviceId", "RecordedAt");
 
                     b.ToTable("DeviceHealthSample", (string)null);
-                });
-
-            modelBuilder.Entity("SmartReptile.Domain.Identity.PasswordResetCode", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<byte[]>("CodeHash")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("varbinary(32)");
-
-                    b.Property<DateTimeOffset?>("ConsumedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("RequestedFromAddress")
-                        .HasMaxLength(45)
-                        .HasColumnType("nvarchar(45)");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CodeHash")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "ExpiresAt");
-
-                    b.ToTable("PasswordResetCode", (string)null);
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Identity.RefreshToken", b =>
@@ -864,15 +830,6 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.HasOne("SmartReptile.Domain.Devices.Device", null)
                         .WithMany()
                         .HasForeignKey("DeviceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("SmartReptile.Domain.Identity.PasswordResetCode", b =>
-                {
-                    b.HasOne("SmartReptile.Domain.Identity.User", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

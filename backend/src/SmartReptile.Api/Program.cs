@@ -15,6 +15,7 @@ using SmartReptile.Api.Middleware;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
+using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure;
 using SmartReptile.Domain.Devices;
@@ -142,7 +143,8 @@ static Task WriteProblemAsync(HttpContext httpContext, int statusCode, object bo
 // The application services, wired where both Application and Infrastructure are visible.
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddSingleton(sp => new AuthSettings(
-    sp.GetRequiredService<IOptions<JwtOptions>>().Value.RefreshTokenDays));
+    sp.GetRequiredService<IOptions<JwtOptions>>().Value.RefreshTokenDays,
+    sp.GetRequiredService<IOptions<PasswordResetOptions>>().Value.CodeMinutes));
 
 builder.Services.AddScoped<DeviceProvisioningService>();
 builder.Services.AddSingleton(sp =>
@@ -158,6 +160,16 @@ builder.Services.AddSingleton(sp =>
             protection.MaxAttemptsPerIp,
             protection.WindowMinutes,
             protection.MaxAttemptsPerHourGlobal));
+});
+
+// The terrarium read surface (FR-03, FR-08, FR-09 — roadmap task 2.8). Its settings are mapped from the
+// Defaults section for the same reason as ProvisioningSettings: Application does not read configuration.
+builder.Services.AddScoped<TerrariumService>();
+builder.Services.AddSingleton(sp =>
+{
+    var defaults = sp.GetRequiredService<IOptions<DefaultsOptions>>().Value;
+
+    return new TerrariumSettings(defaults.TimeZoneId, defaults.SilentAfterIntervals);
 });
 
 // ---- rate limiting (§07-appendices/03 §5) ------------------------------------------------------------
@@ -265,6 +277,7 @@ var applicationVersion = app.Configuration["Version"]
 app.MapOpsEndpoints(applicationVersion);
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
+app.MapTerrariumEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
 app.MapGet("/", () => Results.Ok(new
@@ -278,6 +291,9 @@ app.MapGet("/", () => Results.Ok(new
         "/api/v1/auth/me", "/api/v1/auth/change-password",
         "/api/v1/devices/self-register", "/api/v1/devices/claim",
         "/api/v1/devices/{deviceId}/rotate-secret", "/api/v1/devices/{deviceId}/revoke",
+        "/api/v1/terrariums", "/api/v1/terrariums/{terrariumId}",
+        "/api/v1/terrariums/{terrariumId}/readings/latest", "/api/v1/terrariums/{terrariumId}/readings",
+        "/api/v1/terrariums/{terrariumId}/coverage",
     },
     docs = "docs/README.md",
 })).WithTags("ops");

@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using SmartReptile.Application.Abstractions;
 
 namespace SmartReptile.Infrastructure.Security;
@@ -8,12 +7,17 @@ namespace SmartReptile.Infrastructure.Security;
 /// Device credential material (§02-design/06 §4.1, ADR-006): a 256-bit secret that only the device and the claim
 /// response ever see, stored as <c>SHA-256(secret ‖ salt)</c> and compared in constant time.
 /// </summary>
+/// <remarks>
+/// The hashing itself is <see cref="Sha256SecretHasher"/>, composed rather than injected so this class is still
+/// constructible without a container and so <c>SHA-256(secret ‖ salt)</c> has exactly one implementation in the
+/// codebase — the recovery-code and password-reset paths use the same one.
+/// </remarks>
 public sealed class DeviceCredentials : IDeviceCredentials
 {
     private const int SecretBytes = 32;
-    private const int SaltBytes = 16;
-    private const int HashBytes = 32;
     private const int PublicIdLength = 6;
+
+    private static readonly Sha256SecretHasher Hasher = new();
 
     /// <summary>
     /// Public-id alphabet: lower-case, no <c>0/1/l/i/o</c>, because the id is read off a serial log or a fleet
@@ -40,23 +44,11 @@ public sealed class DeviceCredentials : IDeviceCredentials
     /// <inheritdoc />
     public DeviceSecretHash HashSecret(string secret)
     {
-        var salt = RandomNumberGenerator.GetBytes(SaltBytes);
+        var hashed = Hasher.Hash(secret);
 
-        return new DeviceSecretHash(ComputeHash(secret, salt), salt);
+        return new DeviceSecretHash(hashed.Hash, hashed.Salt);
     }
 
     /// <inheritdoc />
-    public bool VerifySecret(string secret, byte[] hash, byte[] salt)
-    {
-        // A row with no usable digest must fail closed rather than match anything.
-        if (hash.Length != HashBytes || salt.Length == 0)
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(ComputeHash(secret, salt), hash);
-    }
-
-    private static byte[] ComputeHash(string secret, byte[] salt) =>
-        SHA256.HashData([.. Encoding.UTF8.GetBytes(secret), .. salt]);
+    public bool VerifySecret(string secret, byte[] hash, byte[] salt) => Hasher.Verify(secret, hash, salt);
 }

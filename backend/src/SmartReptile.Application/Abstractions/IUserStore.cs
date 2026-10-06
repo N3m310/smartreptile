@@ -36,6 +36,22 @@ public interface IUserStore
     /// <summary>Revokes every session of one account — used by a password change (§02-design/06 §2).</summary>
     Task RevokeAllUserTokensAsync(Guid userId, DateTimeOffset nowUtc, CancellationToken cancellationToken);
 
+    /// <summary>Stages a password-reset code.</summary>
+    void AddPasswordResetCode(PasswordResetCode code);
+
+    /// <summary>
+    /// Finds a reset code by the SHA-256 of the presented value. Unsalted by design, which is what makes this a
+    /// lookup rather than a scan of every outstanding code (see <see cref="PasswordResetCode"/>).
+    /// </summary>
+    Task<PasswordResetCode?> FindPasswordResetCodeAsync(byte[] codeHash, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Consumes every outstanding reset code of an account. Called when a new code is issued and when one is
+    /// spent, so at most one code is ever live for an account — a second request replaces the first rather than
+    /// leaving two working ways in.
+    /// </summary>
+    Task InvalidateOutstandingResetCodesAsync(Guid userId, DateTimeOffset nowUtc, CancellationToken cancellationToken);
+
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

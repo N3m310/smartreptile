@@ -57,6 +57,9 @@ public static class MetricDictionary
     private static readonly Dictionary<string, MetricCode> ByPayloadKey =
         Definitions.Values.ToDictionary(definition => definition.PayloadKey, definition => definition.Code, StringComparer.Ordinal);
 
+    private static readonly Dictionary<string, MetricCode> ByApiKey =
+        Definitions.Values.ToDictionary(definition => definition.ApiKey, definition => definition.Code, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>All metric definitions.</summary>
     public static IReadOnlyCollection<MetricDefinition> All => Definitions.Values;
 
@@ -65,6 +68,17 @@ public static class MetricDictionary
         Definitions.TryGetValue(code, out var definition)
             ? definition
             : throw new Common.DomainValidationException("unknown_metric", $"Metric {code} is not in the dictionary.");
+
+    /// <summary>
+    /// Resolves a REST key (for example <c>tempC</c> from <c>?metric=tempC</c>) to its metric code.
+    /// Case-insensitive because the key travels in a query string a human may have typed.
+    /// </summary>
+    public static bool TryParseApiKey(string? apiKey, out MetricCode code)
+    {
+        code = default;
+
+        return apiKey is not null && ByApiKey.TryGetValue(apiKey, out code);
+    }
 
     /// <summary>
     /// Resolves a firmware payload key from <c>samples[]</c>. False means the firmware is newer than this build:

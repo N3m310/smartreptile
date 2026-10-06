@@ -37,6 +37,23 @@ public sealed class DefaultsOptions
     public int SilentAfterIntervals { get; set; } = 3;
 }
 
+/// <summary>Password-reset delivery (BR-01.5).</summary>
+public sealed class PasswordResetOptions
+{
+    /// <summary>Configuration section name.</summary>
+    public const string SectionName = "PasswordReset";
+
+    /// <summary>How long an issued reset code stays usable.</summary>
+    public int CodeMinutes { get; set; } = 30;
+
+    /// <summary>
+    /// Write the generated code to the log. Off by default, and that default is the point: a live reset credential
+    /// in a production log is a credential leak with extra steps. It is turned on for the development environment,
+    /// which has no mail server, so the flow can be completed at all — a real channel (SMTP) is what replaces it.
+    /// </summary>
+    public bool LogCode { get; set; }
+}
+
 /// <summary>Startup behaviour switches (§03-implementation/03 §2).</summary>
 public sealed class StartupOptions
 {

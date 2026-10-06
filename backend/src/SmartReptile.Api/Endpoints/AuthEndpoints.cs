@@ -22,13 +22,70 @@ public static class AuthEndpoints
             var outcome = await auth.RegisterAsync(request, ct);
 
             // A free identifier and a taken one answer identically, so registration cannot be used to test
-            // whether an address has an account (§02-design/06 §2). The client proceeds to log in.
+            // whether an address has an account (§02-design/06 §2). That includes the recovery code: on both
+            // paths one is returned, and only the one issued for an account that was actually created can ever
+            // verify. The client proceeds to log in.
             return outcome.Succeeded
-                ? Results.Json(new { status = "accepted" }, statusCode: StatusCodes.Status202Accepted)
+                ? Results.Json(
+                    new { status = "accepted", recoveryCode = outcome.RecoveryCode },
+                    statusCode: StatusCodes.Status202Accepted)
                 : Problem(outcome.Problem!);
         })
         .WithSummary("Create an account")
-        .WithDescription("Anonymous. Answers identically whether or not the identifiers were free.");
+        .WithDescription("Anonymous. Answers identically whether or not the identifiers were free, and returns a "
+                       + "backup recovery code to store.");
+
+        group.MapPost("/recover", async (
+            RecoverRequest request,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            var outcome = await auth.RecoverAsync(request, ClientAddress(context), ct);
+
+            // 200 with the replacement code rather than 204: the consumed code is single-use, so the caller has to
+            // leave with a new one or it has spent its only means of recovery.
+            return outcome.Succeeded
+                ? Results.Ok(new { recoveryCode = outcome.RecoveryCode })
+                : Problem(outcome.Problem!);
+        })
+        .WithSummary("Replace a forgotten password with the backup recovery code")
+        .WithDescription("Anonymous and rate-limited. Consumes the stored code, issues a replacement and ends every "
+                       + "existing session. A wrong code and an unknown identifier answer identically.");
+
+        group.MapPost("/forgot-password", async (
+            ForgotPasswordRequest request,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            await auth.ForgotPasswordAsync(request, ClientAddress(context), ct);
+
+            // Always 202 with no body. The use case cannot fail in a reportable way, and that is the point: any
+            // difference between a known and an unknown identifier would make this an account-existence oracle.
+            return Results.Accepted();
+        })
+        .WithSummary("Request a password-reset code")
+        .WithDescription("Anonymous and rate-limited. Always answers 202; whether the identifier has an account is "
+                       + "told only to the account's owner, through the delivery channel.");
+
+        group.MapPost("/reset-password", async (
+            ResetPasswordRequest request,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            var outcome = await auth.ResetPasswordAsync(request, ClientAddress(context), ct);
+
+            // 200 with a replacement backup code, like /recover: the reset rotates the stored backup code, and a
+            // silent rotation would leave the keeper holding one that no longer works.
+            return outcome.Succeeded
+                ? Results.Ok(new { recoveryCode = outcome.RecoveryCode })
+                : Problem(outcome.Problem!);
+        })
+        .WithSummary("Set a new password with a server-issued reset code")
+        .WithDescription("Anonymous and rate-limited. Consumes the code, issues a new backup recovery code and ends "
+                       + "every existing session.");
 
         group.MapPost("/login", async (LoginRequest request, HttpContext context, AuthService auth, CancellationToken ct) =>
         {

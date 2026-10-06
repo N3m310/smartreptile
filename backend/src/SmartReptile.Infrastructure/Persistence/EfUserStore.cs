@@ -64,5 +64,30 @@ public sealed class EfUserStore(SmartReptileDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public void AddPasswordResetCode(PasswordResetCode code) => db.PasswordResetCodes.Add(code);
+
+    /// <inheritdoc />
+    public Task<PasswordResetCode?> FindPasswordResetCodeAsync(
+        byte[] codeHash,
+        CancellationToken cancellationToken) =>
+        db.PasswordResetCodes.FirstOrDefaultAsync(code => code.CodeHash == codeHash, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task InvalidateOutstandingResetCodesAsync(
+        Guid userId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var outstanding = await db.PasswordResetCodes
+            .Where(code => code.UserId == userId && code.ConsumedAt == null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var code in outstanding)
+        {
+            code.ConsumedAt = nowUtc;
+        }
+    }
+
+    /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
 }

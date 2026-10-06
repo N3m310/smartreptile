@@ -6,4 +6,5 @@ namespace SmartReptile.Application.Identity;
 /// maps it across so Application never depends on a configuration section.
 /// </summary>
 /// <param name="RefreshTokenDays">Refresh-token lifetime (BR-01.3).</param>
-public sealed record AuthSettings(int RefreshTokenDays = 30);
+/// <param name="PasswordResetCodeMinutes">How long an issued password-reset code stays usable (BR-01.5).</param>
+public sealed record AuthSettings(int RefreshTokenDays = 30, int PasswordResetCodeMinutes = 30);

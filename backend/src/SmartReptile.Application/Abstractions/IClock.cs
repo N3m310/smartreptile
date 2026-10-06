@@ -10,6 +10,13 @@ public interface IClock
     /// <summary>Current instant in UTC.</summary>
     DateTimeOffset UtcNow { get; }
 
+    /// <summary>
+    /// Converts an arbitrary instant to the supplied IANA time zone, falling back to UTC when the id is unknown.
+    /// Separate from <see cref="NowIn"/> because phase selection (BR-11.2) needs the local time of a
+    /// <em>sample</em>, which is not the current instant.
+    /// </summary>
+    DateTimeOffset InZone(DateTimeOffset instantUtc, string timeZoneId);
+
     /// <summary>Current instant converted to the supplied IANA time zone (falls back to UTC if unknown).</summary>
     DateTimeOffset NowIn(string timeZoneId);
 }

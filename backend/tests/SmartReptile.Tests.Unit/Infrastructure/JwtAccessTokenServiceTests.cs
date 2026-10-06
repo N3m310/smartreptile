@@ -132,6 +132,8 @@ public class JwtAccessTokenServiceTests
     {
         public DateTimeOffset UtcNow { get; } = new(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
 
+        public DateTimeOffset InZone(DateTimeOffset instantUtc, string timeZoneId) => instantUtc;
+
         public DateTimeOffset NowIn(string timeZoneId) => UtcNow;
     }
 
@@ -139,6 +141,8 @@ public class JwtAccessTokenServiceTests
     private sealed class WallClock : IClock
     {
         public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+
+        public DateTimeOffset InZone(DateTimeOffset instantUtc, string timeZoneId) => instantUtc;
 
         public DateTimeOffset NowIn(string timeZoneId) => UtcNow;
     }

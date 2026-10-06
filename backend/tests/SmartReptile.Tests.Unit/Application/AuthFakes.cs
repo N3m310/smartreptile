@@ -14,6 +14,8 @@ internal sealed class TestClock : IClock
     /// <summary>A fixed instant, so nothing in these tests depends on when the suite runs.</summary>
     public DateTimeOffset UtcNow { get; set; } = new(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
 
+    public DateTimeOffset InZone(DateTimeOffset instantUtc, string timeZoneId) => instantUtc;
+
     public DateTimeOffset NowIn(string timeZoneId) => UtcNow;
 
     public void Advance(TimeSpan by) => UtcNow = UtcNow.Add(by);
@@ -57,6 +59,51 @@ internal sealed class FakeSecretGenerator : ISecretGenerator
     public byte[] Sha256(string value) => SHA256.HashData(Encoding.UTF8.GetBytes(value));
 }
 
+/// <summary>Deterministic recovery codes, so a test can name the code it expects to present.</summary>
+internal sealed class FakeRecoveryCodeGenerator : IRecoveryCodeGenerator
+{
+    private int _issued;
+
+    public string Generate()
+    {
+        var sequence = Interlocked.Increment(ref _issued);
+        var code = new char[RecoveryCode.DefaultLength];
+
+        for (var index = 0; index < code.Length; index++)
+        {
+            code[index] = RecoveryCode.DefaultAlphabet[(sequence + index) % RecoveryCode.DefaultAlphabet.Length];
+        }
+
+        return new string(code);
+    }
+}
+
+/// <summary>
+/// Captures what the delivery channel was handed. <see cref="FailNextSend"/> makes the notifier throw, which is how
+/// the tests prove a delivery failure cannot change the answer the caller gets.
+/// </summary>
+internal sealed class FakePasswordResetNotifier : IPasswordResetNotifier
+{
+    private readonly List<PasswordResetDelivery> _deliveries = [];
+
+    public IReadOnlyList<PasswordResetDelivery> Deliveries => _deliveries;
+
+    public PasswordResetDelivery? Last => _deliveries.Count == 0 ? null : _deliveries[^1];
+
+    public bool FailNextSend { get; set; }
+
+    public Task NotifyAsync(PasswordResetDelivery delivery, CancellationToken cancellationToken)
+    {
+        if (FailNextSend)
+        {
+            throw new InvalidOperationException("delivery channel unavailable");
+        }
+
+        _deliveries.Add(delivery);
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>In-memory failed-login counters with the same window semantics as the real store.</summary>
 internal sealed class FakeLoginThrottleStore : ILoginThrottleStore
 {
@@ -88,10 +135,13 @@ internal sealed class FakeUserStore : IUserStore
 {
     private readonly List<User> _users = [];
     private readonly List<RefreshToken> _tokens = [];
+    private readonly List<PasswordResetCode> _resetCodes = [];
 
     public IReadOnlyList<User> Users => _users;
 
     public IReadOnlyList<RefreshToken> Tokens => _tokens;
+
+    public IReadOnlyList<PasswordResetCode> ResetCodes => _resetCodes;
 
     public int SaveCount { get; private set; }
 
@@ -135,6 +185,26 @@ internal sealed class FakeUserStore : IUserStore
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveCount++;
+        return Task.CompletedTask;
+    }
+
+    public void AddPasswordResetCode(PasswordResetCode code) => _resetCodes.Add(code);
+
+    public Task<PasswordResetCode?> FindPasswordResetCodeAsync(
+        byte[] codeHash,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(_resetCodes.FirstOrDefault(code => code.CodeHash.SequenceEqual(codeHash)));
+
+    public Task InvalidateOutstandingResetCodesAsync(
+        Guid userId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        foreach (var code in _resetCodes.Where(code => code.UserId == userId && code.ConsumedAt is null))
+        {
+            code.ConsumedAt = nowUtc;
+        }
+
         return Task.CompletedTask;
     }
 }

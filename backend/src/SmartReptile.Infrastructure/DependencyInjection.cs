@@ -56,6 +56,10 @@ public static class DependencyInjection
         services.AddOptions<OnboardingProtectionOptions>()
             .Bind(configuration.GetSection(OnboardingProtectionOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<PasswordResetOptions>()
+            .Bind(configuration.GetSection(PasswordResetOptions.SectionName))
+            .Validate(o => o.CodeMinutes is > 0 and <= 1440, "PasswordReset:CodeMinutes must be between 1 and 1440")
+            .ValidateOnStart();
 
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is required (see .env.example).");
@@ -77,11 +81,25 @@ public static class DependencyInjection
         services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
         services.AddScoped<IUserStore, EfUserStore>();
 
+        // Account recovery (BR-01.5). The hash primitive is shared with device credentials — one implementation
+        // of SHA-256(secret ‖ salt) for every high-entropy secret the system issues.
+        services.AddSingleton<ISecretHasher, Sha256SecretHasher>();
+        services.AddSingleton<IRecoveryCodeGenerator, RecoveryCodeGenerator>();
+
+        // Where a server-issued reset code goes. The log sender is the default because the default environment has
+        // no mail server: it writes the code when PasswordReset:LogCode is on, and otherwise says plainly that the
+        // code reached nobody. A real SMTP channel replaces this registration (03-implementation/07, the
+        // password-recovery block) and changes nothing else.
+        services.AddSingleton<IPasswordResetNotifier, LogPasswordResetNotifier>();
+
         // Device onboarding adapters (FR-04, FR-05 — roadmap task 2.2).
         services.AddSingleton<IClaimCodeGenerator, ClaimCodeGenerator>();
         services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
         services.AddSingleton<IOnboardingThrottleStore, InMemoryOnboardingThrottleStore>();
         services.AddScoped<IProvisioningStore, EfProvisioningStore>();
+
+        // Terrarium read surface (FR-03, FR-08, FR-09 — roadmap task 2.8).
+        services.AddScoped<ITerrariumStore, EfTerrariumStore>();
 
         // Broker session registry (FR-05 BR-05.4): the broker writes it, the revoke use case reads it.
         services.AddSingleton<DeviceSessionRegistry>();
