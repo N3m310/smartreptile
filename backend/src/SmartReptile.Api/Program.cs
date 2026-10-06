@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -243,19 +244,64 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler(handler => handler.Run(async context =>
 {
     // RFC 7807 for unexpected failures; expected failures return Result-based problems from the endpoints.
-    var problem = new ProblemDetails
-    {
-        Title = "An unexpected error occurred",
-        Status = StatusCodes.Status500InternalServerError,
-        Type = "https://smartreptile.example/problems/internal_error",
-        Detail = "The request could not be completed. Quote the traceId when reporting this.",
-    };
+    //
+    // A body the framework could not bind is the caller's mistake, not the server's. Answering 500 would send
+    // someone hunting a server fault for a malformed payload, and a client that *can* fix its request cannot tell
+    // that apart from one that should stop retrying. BadHttpRequestException carries the status the framework
+    // chose: 400 for a body that will not parse, 413 for one over the endpoint's limit.
+    var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    var status = StatusCodes.Status500InternalServerError;
+    ProblemDetails problem;
 
-    problem.Extensions["code"] = "internal_error";
+    if (error is BadHttpRequestException badRequest && badRequest.StatusCode is >= 400 and < 500)
+    {
+        status = badRequest.StatusCode;
+
+        // 413 is deliberately *not* called `payload_too_large`: that code is documented as a 400 raised by the
+        // ingest endpoint for a batch over its own 32 KB limit (`07-appendices/03` §5), and giving the same name
+        // two different statuses would make the code useless to a client. This is the transport refusing to read
+        // the body at all. Kestrel answers its own request-size limit before the application sees the request, so
+        // in practice this branch only fires for an in-app limit such as [RequestSizeLimit].
+        var tooLarge = status == StatusCodes.Status413PayloadTooLarge;
+        var code = tooLarge ? "request_too_large" : "malformed_request";
+
+        problem = new ProblemDetails
+        {
+            Title = tooLarge ? "The request body is too large" : "The request body could not be read",
+            Status = status,
+            Type = $"https://smartreptile.example/problems/{code}",
+            Detail = tooLarge
+                ? "The request body is larger than this endpoint accepts. Nothing was processed."
+                : "The request body was not valid JSON for this endpoint. Nothing was processed.",
+        };
+
+        problem.Extensions["code"] = code;
+    }
+    else
+    {
+        problem = new ProblemDetails
+        {
+            Title = "An unexpected error occurred",
+            Status = status,
+            Type = "https://smartreptile.example/problems/internal_error",
+            Detail = "The request could not be completed. Quote the traceId when reporting this.",
+        };
+
+        problem.Extensions["code"] = "internal_error";
+    }
+
     problem.Extensions["traceId"] = context.TraceIdentifier;
 
-    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-    await context.Response.WriteAsJsonAsync(problem);
+    context.Response.StatusCode = status;
+
+    // `application/problem+json` is what RFC 7807 specifies and what `07-appendices/03` §5 documents. Passing it
+    // to the writer rather than assigning `ContentType` first is deliberate: WriteAsJsonAsync sets the header
+    // itself when the parameter is null, and assigning beforehand is silently overwritten (verified: the response
+    // came back as application/json until this overload was used).
+    await context.Response.WriteAsJsonAsync(
+        problem,
+        options: null,
+        contentType: "application/problem+json");
 }));
 
 if (app.Environment.IsDevelopment())

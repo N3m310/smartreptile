@@ -402,6 +402,7 @@ be probed (BR-02.2).
 | 400 | `payload_too_large` | > 32 KB batch or > 120 samples |
 | 400 | `password_policy_violation` | New password failed the policy (see `errors`) |
 | 400 | `registration_invalid` | Username, email or password failed validation (see `errors`) |
+| 400 | `malformed_request` | The body could not be read as JSON for this endpoint — nothing was processed |
 | 401 | `invalid_credentials` | Wrong username/password |
 | 401 | `invalid_recovery_code` | Wrong, spent, malformed or account-less backup recovery code — one answer for all of them |
 | 401 | `invalid_reset_code` | Wrong, spent, expired, foreign or account-less reset code — one answer for all of them |
@@ -414,6 +415,7 @@ be probed (BR-02.2).
 | 409 | `alert_not_open` | Ack/resolve on a resolved alert |
 | 409 | `version_conflict` | Optimistic concurrency (`rowversion` mismatch) |
 | 409 | `profile_in_use` | Deleting an assigned profile |
+| 413 | `request_too_large` | The transport refused to read the body (an in-app limit such as `[RequestSizeLimit]`). Kestrel answers its own 30 MB default itself, before the application sees the request, so this row is defensive. **Not** the same as `400 payload_too_large`, which is the ingest endpoint's own batch limit |
 | 422 | `quality_rejected` | Sample accepted but excluded from evaluation (informational) |
 | 423 | `account_locked` | Login throttle active |
 | 429 | `rate_limited` (+ `Retry-After`) | Per-endpoint limits (§6) |
