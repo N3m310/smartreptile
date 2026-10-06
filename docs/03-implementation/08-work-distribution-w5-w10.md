@@ -13,12 +13,21 @@ neither the app nor the dashboard any extra time.
   *who, when, and what must be true on Friday*.
 
 **Brought forward (2026-10-03, W4).** The prototype's three follow-ups are already closed: **4.12** fixed
-**BUG-03**, **4.13** is decided as **`ADR-018`** (the prototype stays a mock-data reference; `web/legacy/` is the
+**BUG-03**, **4.13** was decided as **`ADR-018`** (the prototype stays a mock-data reference; `web/legacy/` is the
 M4 web surface) and **4.14** labelled the prototype and settled its palette and copy (`05-release/03` §5). They
 were budgeted at 3 h + 3 h + 4 h for W5–W7; those hours are spent, so the `DOC` total in §4 is unchanged, but the
 weekly `DOC` figures for W5–W7 overstate what is left by 3, 3 and 4 h (W4 is not in that table). The rest of the
 plan — W8's freeze and every Friday gate — is untouched, and the W5/W6/W7 `DOC` bullets below are now 4.10 and
 report time rather than prototype time.
+
+**Reopened 2026-10-06 (`ADR-019`) — the `DOC` track's web work changed shape, and its owner has not been
+re-assigned.** `ADR-019` promotes TERRAGUARD to the M4 web surface and retires `web/legacy/`, so 4.13's decision
+above no longer holds and the four hours 4.12–4.14 spent are not the end of it: `DOC` now owns roadmap 4.15–4.20 —
+an API client, four screens, a server-verdict pass, a localisation/CI pass, the surface switch and the wallboard
+rebuild. That is **React and TypeScript work**, not the vanilla-JS dashboard `DOC` was scoped for, and it overlaps
+M2/M3 by construction (4.20 is gated on their endpoints). Two consequences to settle before W8: **who owns `DOC`**
+now that the work is React, and **whether 3.1–3.7's endpoints can land early enough** for 4.20 to be more than a stub
+at the freeze. Until both are answered, treat the W8 web gate as at risk rather than scheduled.
 
 ## 1. Roles — fill in the names
 
@@ -28,7 +37,7 @@ report time rather than prototype time.
 | `BE-1` | backend — ingest + API surface | **M2** (2.2, 2.3, 2.4, 2.8, 2.9), 5.2, 5.7 | `BE-2` |
 | `BE-2` | backend — engine + alerts | **M3** (3.1–3.7), **M5** (5.1, 5.3–5.5) | `BE-1` |
 | `APP` | Flutter app | **M4** (4.1–4.9, 4.11), 6.3 | `DOC` |
-| `DOC` | web dashboard + TERRAGUARD prototype + docs/report + submission | **M6** (4.10, 1.8, report, 6.5–6.8) | `APP` |
+| `DOC` | web client (TERRAGUARD) + docs/report + submission | **M6** (1.8, report, 6.5–6.8) and the M4 web track (4.10, **4.15–4.20** per `ADR-019`; `web/legacy/` retired by 4.19) | `APP` |
 
 | Code | Full name | Student id |
 |---|---|---|
@@ -55,7 +64,8 @@ report time rather than prototype time.
 - `BE-2` finish 2.4 (`TC-I-03/04`); start 3.1 threshold resolution
 - `APP` 4.3 live subscription + polling fallback; 4.4 history chart
 - `DOC` 4.10 live page on real data; report R1 + R2 — take the enclosure photos this week
-  (**4.13 was decided early**, 2026-10-03, as `ADR-018`: `web/legacy/` stays the web surface)
+  (**4.13 was decided early**, 2026-10-03, as `ADR-018`: `web/legacy/` stays the web surface — **`ADR-018` revoked
+  2026-10-06 by `ADR-019`**, so this week's `DOC` work is now the first stage of 4.15; see the note under §1)
 - **Gate: 2.10 first E2E** — node → broker → SQL Server → `/readings/latest`, screenshot saved
 
 ### W7 · 10-19 … 10-25 — the engine can tell the keeper something
@@ -163,9 +173,15 @@ remaining `DOC` load is unrealistic, move 4.8/4.9 to `DOC` or the web pages to t
 
 1. FR-17 camera snapshot · 2. web pages beyond wallboard + live · 3. 5.7 k6 → a measured single-client sample
 4. 24 h soak → 8 h with the same instrumentation · 5. 4.8 report screen (the API export stays)
-6. SMTP email channel (keep FCM + Telegram) · 7. promoting the prototype past a mock-data reference (`ADR-018`
-declines this) — the prototype is already-built spare time, not a deliverable. **4.12 was never on this list**: it
+6. SMTP email channel (keep FCM + Telegram) · 7. ~~promoting the prototype past a mock-data reference (`ADR-018`
+declines this)~~ — **no longer available as a cut: `ADR-019` makes the promotion the plan** (4.15–4.20), so cutting
+it now means cutting the M4 web surface itself. **4.12 was never on this list**: it
 repaired a broken demo path (BUG-03) and was closed on 2026-10-03, together with 4.13 and 4.14.
+
+> **Note (2026-10-06).** Item 2 ("web pages beyond wallboard + live") also needs reading against `ADR-019`: with
+> TERRAGUARD as the surface, the wallboard is new work (4.19) rather than something already standing in
+> `web/legacy/`, so the cut still works but it cuts more than it used to — and 4.19 has to happen before any page
+> beyond it, or the DoD's second screen has nothing to show.
 
 **Never cut:** the report, the rehearsals, the release-mode proof, the rubric's unit + widget tests, the
 alert-correctness tests, and the **W8 app freeze**.

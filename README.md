@@ -11,8 +11,8 @@ No AI, no actuation** (see `docs/07-appendices/06-v2-ai-roadmap.md` for what com
 | Firmware (sensor node) | `firmware/` | ESP32 / Arduino via PlatformIO (`esp32dev` + `native` for host tests) |
 | Backend | `backend/` | ASP.NET Core 10, EF Core 10, SQL Server 2022, in-process MQTT broker (MQTTnet), SignalR |
 | Mobile app | `app/` | Flutter (Android primary), `provider` |
-| Web dashboard | `web/legacy/` | Static HTML/CSS/JS + Chart.js (no build step) — the only web surface with a real API behind it, and the M4 web surface (`ADR-018`) |
-| Web UI prototype | `web/` | React 19 + Vite + TypeScript + Tailwind CSS v4 — mock data, labelled as such, Vietnamese only, **not** the deliverable (`ADR-017`, `ADR-018`) |
+| Web dashboard | `web/legacy/` | Static HTML/CSS/JS + Chart.js (no build step) — the only web surface with a real API behind it today; **retired by task 4.19** (`ADR-019`) |
+| Web client | `web/` | React 19 + Vite + TypeScript + Tailwind CSS v4 — the M4 web surface from `ADR-019`. Still mock data until 4.15–4.20 wire it screen by screen; a screen that still renders `mockData.ts` keeps its mock-data notice |
 
 ## Quick start
 
@@ -74,19 +74,20 @@ flutter run -d android     # or: flutter run -d emulator-5554
 flutter test
 ```
 
-### 5. Web (`web/` — two surfaces, see `ADR-017` and `ADR-018`)
+### 5. Web (`web/` — two surfaces during the transition, see `ADR-017`, `ADR-018` and `ADR-019`)
 
 Compose serves both surfaces from one nginx (`web/nginx.conf`, task 4.12): `http://127.0.0.1:8081/` is the
 committed prototype build, and `http://127.0.0.1:8081/legacy/` is the dashboard that talks to the API.
 
-The dashboard — the surface that ships (no build step):
+The dashboard — the surface that still ships today, retired by task 4.19 (`ADR-019`) — no build step:
 
 ```bash
 cd web/legacy
 python -m http.server 8081     # the same files compose serves under /legacy/
 ```
 
-The TERRAGUARD UI prototype (mock data, no network calls, **not** the deliverable):
+The TERRAGUARD client — the M4 web surface from `ADR-019`, still mock data with no network calls until
+4.15–4.20 wire it screen by screen:
 
 ```bash
 cd web
@@ -102,7 +103,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Gate | Command / method | Result |
 |---|---|---|
 | Backend builds, warnings as errors | `dotnet build backend/SmartReptile.sln -c Release` | ✅ Build succeeded, 0 warnings |
-| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **325 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline) |
+| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **422 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery) |
 | Formatting gate (CI parity) | `dotnet format SmartReptile.sln --verify-no-changes --severity error` | ✅ clean (generated migrations excluded via `.editorconfig`) |
 | Schema created by migrations only | `dotnet ef migrations add InitialSchema` | ✅ one migration; `(DeviceId, Sequence)` unique, filtered open-alert unique, one-device-per-terrarium unique, band CHECK constraints all present |
 | Docker image builds | `docker compose build api` | ✅ builds from a clean context (needed `backend/.dockerignore` — defect 8 below) |
@@ -140,12 +141,12 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   mid-run.
 - **The domain REST surface is partly there.** The API serves the ops endpoints (`/health`, `/version`,
   `/metrics`, the SignalR hub), `/api/v1/auth` (register, login, refresh, logout, me, change-password — added
-  2026-10-03) and `/api/v1/devices` (self-register, claim, rotate-secret, revoke — added the same day, task 2.2),
-  so the dashboard's live view still requests `/api/v1/terrariums`, receives `404`, and degrades to its empty
-  state showing `(http_404)` — by design, not by accident. A device can only be claimed into a terrarium that
-  exists, and terrariums CRUD is task 2.8, so today that row has to be created through SQL.
-  The terrarium, reading, threshold and alert endpoints are M2/M3 work. Samples *are* being stored as of task
-  2.4, but nothing serves them yet — `readings/latest` and the range endpoint are 2.8.
+  2026-10-03 — plus recover, forgot-password and reset-password, added 2026-10-06), `/api/v1/devices`
+  (self-register, claim, rotate-secret, revoke — added the same day, task 2.2) and `/api/v1/terrariums` (list,
+  create, detail, `readings/latest`, `readings`, `coverage` — added 2026-10-06, task 2.8), so the dashboard's
+  live view signs in and renders measured values rather than degrading to its empty state; the empty state now
+  means an account with no terrarium, and one can be created over HTTP. Terrarium update/delete, thresholds,
+  silences, summaries, exports and alerts are still M2/M3 work.
 - **No sensor hardware is connected**: `main.cpp` runs with bench mode off and reports placeholder values until
   M2, and no board has ever been flashed from this repository.
 - **The MQTT broker verifies device credentials** (task 2.3, 2026-10-03): `username = deviceId`, `password =
@@ -280,14 +281,73 @@ The whole session — the TERRAGUARD re-base and its three follow-ups, FR-01, an
 build by build in [`IMPLEMENTATION_SUMMARY_2026-10-03.md`](IMPLEMENTATION_SUMMARY_2026-10-03.md), including the
 nine defects that only showed up once the code and its gates were run.
 
+**Added 2026-10-06 (backend, M2 task 2.8 — the terrarium read surface).** Six routes both clients were already
+written against: `GET`/`POST /api/v1/terrariums`, `GET /{id}`, `GET /{id}/readings/latest`,
+`GET /{id}/readings` (raw and bucketed, gap-aware, with the 720-point ceiling enforced) and `GET /{id}/coverage`,
+taking the backend from 16 to 22 routes. Ownership is a query parameter on every store call rather than a filter
+applied afterwards, so a foreign terrarium is never materialised (BR-02.2), and `readings/latest` walks back at
+most 50 samples per metric rather than issuing one query per metric. `web/legacy` gained sign-in, a session that
+rotates once on a `401`, and the calls above. Checked over real HTTP against a real SQL Server (register `202`,
+login `200`, terrarium created `201`, a foreign id `404 not_found`, an unaligned 30-day window exactly 720 points,
+`coverage` reporting `expected=60, received=3`) and in a browser, which rendered the real values; **386 backend
+unit tests pass** (was 325) and the integration project passes 15 of 15 against a fresh database. One defect came
+out of the live run rather than the tests — an unaligned `from` produced 721 hourly points, breaking the
+documented budget, so the bucket loop is now clamped to it.
+
+**Added 2026-10-06 (backend, FR-01 — password recovery).** A forgotten password no longer means recreating the
+account. Registration returns a 20-character **backup recovery code** from the claim-code alphabet (≈ 99 bits),
+stored as `SHA-256(code ‖ 16-byte salt)` and shown once; `POST /api/v1/auth/recover` spends it, rotates it and ends
+every session. A keeper who no longer has it can ask for a **server-issued code** instead:
+`POST /api/v1/auth/forgot-password` mints a single-use, 30-minute code and `POST /api/v1/auth/reset-password`
+spends it, rotates the backup code and ends every session. The issued code is stored as an **unsalted** SHA-256 —
+like a refresh token, and unlike the backup code — because the row has to be found *by* the value presented. Both
+paths answer identically for an unknown identifier, a spent code and another account's code, which is the point:
+`forgot-password` returns `202` with an empty body on every path, including when it issued nothing, and the failure
+code on both reset paths is one opaque `401`. Delivery is the `IPasswordResetNotifier` port; the implementation
+this deployment ships writes the code to the server log when `PasswordReset:LogCode` is true (false in
+`appsettings.json`, true in `appsettings.Development.json` only) and otherwise says plainly that it reached nobody,
+which is all that is left of limitation **L-02** — the transport, not the flow. Checked over real HTTP (the
+lower-case, separator-laden code accepted once and refused after rotation, the old password `401` and the new one
+`200`, a pre-reset refresh token `401` afterwards, the rotated backup code working through `/recover`) and in the
+browser, where the recovery form now offers both paths; **422 backend unit tests pass** (was 386).
+
+**Decided 2026-10-06 — `ADR-019` promotes TERRAGUARD to the M4 web surface and retires `web/legacy/`, revoking
+`ADR-018` in full.** The move is `ADR-018`'s own escape clause being invoked: it said the decision would be revisited if
+extending the static dashboard to W1–W8 became the bottleneck, and it has — the endpoints the wiring needs now exist
+(FR-01 and task 2.8), while extending `web/legacy/` means re-deciding eight screens' visual design in vanilla JS that
+the TERRAGUARD client already carries. It is a superseding ADR rather than an edit, because `ADR-018`'s surface
+analysis is what the revocation was decided *on*. Promotion carries the obligations the prototype was excused from,
+which is the substance of the decision rather than a footnote: real API data (4.15, 4.16), verdicts from the server
+instead of `value > max` in a screen (4.17 — the ADR-005 rule), vi+en with a key set shared with the app (4.18),
+`02-design/04` §3 tokens at ≥ 4.5:1 (4.18), CI coverage (4.18), and the wallboard rebuilt in React (4.19), because
+the M4 DoD names a wallboard on a second screen and the wallboard is a legacy page. The remaining screens are wired
+as their endpoints land (4.20), and it is staged by the backend rather than by preference: **only three of the eight
+screens have endpoints today** (`Login`, `Dashboard`, `History`), which is why 4.15–4.17 can start now and 4.20
+cannot. Until a screen is wired it keeps its mock-data notice, and the notice goes when the mock data does. See
+[docs/03-implementation/07-implementation-roadmap.md](docs/03-implementation/07-implementation-roadmap.md).
+
 ```bash
-# The password below is a throwaway value for a local demo account. Keep it obviously synthetic: CI's secret
-# scanner rejects realistic-looking credentials wherever they appear, test fixtures and documentation included,
-# and allow-listing those paths is exactly how a real key gets committed unnoticed.
+# The password below is a throwaway value for a local demo account, and the recovery codes are alphabet
+# patterns rather than captured values, for the same reason: CI's secret scanner rejects realistic-looking
+# credentials wherever they appear, test fixtures and documentation included, and allow-listing those paths is
+# exactly how a real key gets committed unnoticed. A real code from a live run is a credential until it expires.
 curl -s -X POST http://localhost:8080/api/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"username":"keeper","email":"keeper@example.com","password":"local-demo-1"}'
+# -> 202 {"status":"accepted","recoveryCode":"DEM2DEM2DEM2DEM2DEM2"}   # store it: shown once, never retrievable
 curl -s -X POST http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"usernameOrEmail":"keeper","password":"local-demo-1"}'
+# Forgot it instead? Ask for a code; the answer is the same whether or not the account exists, and in a
+# development environment the code itself is in the API log (PasswordReset:LogCode).
+curl -s -X POST http://localhost:8080/api/v1/auth/forgot-password \
+  -H 'Content-Type: application/json' -d '{"usernameOrEmail":"keeper"}'
+curl -s -X POST http://localhost:8080/api/v1/auth/reset-password \
+  -H 'Content-Type: application/json' \
+  -d '{"usernameOrEmail":"keeper","resetCode":"DEM3DEM3DEM3DEM3DEM3","newPassword":"local-demo-2"}'
+# -> 200 {"recoveryCode":"DEM4DEM4DEM4DEM4DEM4"}   # the backup code rotated too, so take the new one
+
+# With a terrarium and a sample in place, the read surface the dashboard uses:
+curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings/latest"
+curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings?metric=tempC&from=2026-10-06T00:00:00Z&to=2026-10-07T00:00:00Z"
 ```

@@ -151,9 +151,12 @@ web/legacy/js/
 - The dashboard has no build step on purpose (NFR-08): a `git clone` + `docker compose up` must be enough. Today it
   is not quite there — compose mounts all of `web/`, so it serves the prototype at `/` and these pages under
   `/legacy/` (BUG-03, task 4.12).
-- **What exists on disk today (2026-10-03)** is the M1 shell — `index.html` (Live), `wallboard.html`,
-  `health.html` and `js/{api,store,i18n}.js` + `js/pages/live.js`. The other page files and `charts.js` are the M4
-  work in task 4.10, which is why the tree above is a target and not a description.
+- **What exists on disk today (2026-10-06)** is the M1 shell plus the M2 data path — `index.html` (Live, with the
+  sign-in form), `wallboard.html`, `health.html` and `js/{api,store,i18n}.js` + `js/pages/live.js`. Every terrarium
+  route is authenticated, so `api.js` owns the session: it keeps the access and refresh tokens in `localStorage`,
+  rotates once when a call answers `401`, and `live.js` puts the sign-in form back when the refresh token is spent.
+  The other page files and `charts.js` are still the M4 work in task 4.10, which is why the tree above is a target
+  and not a description.
 
 ### 6.2 The prototype (`web/`) — mock data, and no store to mirror
 

@@ -7,8 +7,14 @@ development machine, then headless Chromium 153 at a 1440 × 1200 viewport.
 > the TERRAGUARD React prototype took the root of `web/` (`ADR-017`). The snapshot files themselves are unchanged;
 > the paths in this file are the post-move ones. **BUG-03 is fixed** (task 4.12): compose serves the prototype
 > build at `/` and these pages at `/legacy/` from sibling mounts, so `http://127.0.0.1:8081/legacy/*.html` is the
-> same address the reproduce command below matches. `ADR-018` keeps `web/legacy/` as the M4 web surface, so these
-> pages stay the ones the report cites.
+> same address the reproduce command below matches.
+
+> **`ADR-018` revoked, 2026-10-06 (`ADR-019`).** `ADR-018` kept `web/legacy/` as the M4 web surface; `ADR-019`
+> revokes it in full, promotes TERRAGUARD instead and retires `web/legacy/` by task 4.19. **These snapshots are
+> unaffected and are not re-taken.** They are evidence of the M1 surface *at the time it existed*, and re-shooting
+> them from a different client would misrepresent what was measured in M1 — so read them as M1 evidence, not as a
+> current picture of the web client. The reproduce command below keeps working until 4.19 deletes the pages it
+> points at, after which it documents a surface that no longer exists rather than failing silently.
 
 | File | What it shows |
 |---|---|

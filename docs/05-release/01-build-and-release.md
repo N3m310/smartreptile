@@ -170,44 +170,58 @@ demo fallback.
 
 ## 5. Web release (`web/`)
 
-Two surfaces live in this folder and only one of them is a deliverable (`ADR-017`, `ADR-018`).
+The folder holds two surfaces, and **`ADR-019` (2026-10-06) changes which one ships**: the **TERRAGUARD** client
+(`web/src` → `web/dist`) is the M4 web surface, and `web/legacy/` — the M1 static dashboard that carried it under
+`ADR-018` — is retired by task 4.19. This section therefore describes the layout **in place today** (two mounts,
+task 4.12) and what the switch changes; a release cut before 4.19 still ships the old shape.
 
-**The static dashboard (`web/legacy/`) — the one that ships, and the M4 web surface.**
+**Today's serving layout (task 4.12).** Compose mounts the prototype build at `/srv/prototype` and the static
+dashboard at `/srv/legacy`; nginx sends `/` to the prototype and `/legacy/` to the dashboard, and only the
+prototype gets a SPA fallback. The two mounts are **siblings, not nested** — a nested bind mount needs its
+mountpoint created inside the read-only parent mount and fails with `mkdirat ... read-only file system`
+(defect 13 in the repository `README`).
 
-- No build step. Files are served by nginx from `web/legacy/` under `/legacy/` inside the compose stack
-  (`web/nginx.conf`, task 4.12).
-- `js/api.js` takes the API base URL from a `<meta name="api-base">` tag injected at container start, so the
-  same static files work on `localhost` and on the demo host.
-- Cache-busting by query string (`app.css?v=1.0.0`) so a stale browser cache cannot show old UI during the
-  demo — a small thing that has ruined demos before.
-- **How it is served.** Compose mounts the prototype build at `/srv/prototype` and these files at `/srv/legacy`;
-  nginx sends `/` to the prototype and `/legacy/` to the dashboard, and only the prototype gets a SPA fallback, so
-  a missing dashboard page stays a `404` instead of silently rendering the wrong surface. The two mounts are
-  **siblings, not nested** — a nested bind mount needs its mountpoint created inside the read-only parent mount
-  and fails with `mkdirat ... read-only file system` (defect 13 in the repository `README`).
-- **BUG-03 regression check** (`05-release/03` §4) — run whenever the `web` service or its mounts change:
+**BUG-03 regression check** (`05-release/03` §4) — run whenever the `web` service or its mounts change:
 
-  ```bash
-  docker compose up -d web
-  curl -sI http://127.0.0.1:8081/ | head -1                       # HTTP/1.1 200 OK
-  curl -sI http://127.0.0.1:8081/legacy/wallboard.html | head -1  # HTTP/1.1 200 OK
-  curl -sI http://127.0.0.1:8081/legacy/health.html | head -1     # HTTP/1.1 200 OK
-  curl -s  http://127.0.0.1:8081/ | grep -o 'assets/index-[^"]*\.js'   # the hashed bundle, never /src/main.tsx
-  ```
+```bash
+docker compose up -d web
+curl -sI http://127.0.0.1:8081/ | head -1                       # HTTP/1.1 200 OK
+curl -sI http://127.0.0.1:8081/legacy/wallboard.html | head -1  # HTTP/1.1 200 OK
+curl -sI http://127.0.0.1:8081/legacy/health.html | head -1     # HTTP/1.1 200 OK
+curl -s  http://127.0.0.1:8081/ | grep -o 'assets/index-[^"]*\.js'   # the hashed bundle, never /src/main.tsx
+```
 
-  The last line is the one that would have caught BUG-03: the old mount answered `200` on `/` while serving the
-  prototype's Vite dev entry, so a status code alone was never enough.
+The last line is the one that would have caught BUG-03: the old mount answered `200` on `/` while serving the
+prototype's Vite dev entry, so a status code alone was never enough. **The pair changes with 4.19** — `/legacy/*`
+stops being checked because the files stop existing, and the SPA fallback becomes the routing rule that needs the
+proxy instead (`04-quality/03` §5.12 carries both forms).
 
-**The prototype (`web/`, TERRAGUARD) — not a deliverable, and not a measure of anything.**
+**The TERRAGUARD client (`web/`) — the M4 web surface from `ADR-019`.**
 
-- `npm run build` writes `web/dist/`, which is **committed on purpose** so nginx can serve the prototype without a
-  Node toolchain. Rebuild it whenever `src/` changes: a stale `dist/` is invisible until someone demos from it,
-  because the entry page then points at asset names that no longer exist.
-- Rebuilt on 2026-10-03 after the mock-data notice landed — `tsc && vite build` on a clean `npm ci` produced
-  `index-hjjUIssv.js` (766 kB / 214 kB gzip) and `index-DAQDTjmL.css` (40 kB), replacing the
-  `index-C7gXR99i.js` / `index-CUm0g7Lt.css` pair.
-- It renders invented values and says so in the UI. It is never the source of a number in the report, and
-  `ADR-018` settles its fate: it stays a reference while `web/legacy/` carries the M4 DoD.
+- `npm run build` writes `web/dist/`, which is **committed on purpose** so nginx can serve it without a Node
+  toolchain. Rebuild it whenever `src/` changes: a stale `dist/` is invisible until someone demos from it, because
+  the entry page then points at asset names that no longer exist.
+- Last rebuilt for the reference state on 2026-10-03 — `tsc && vite build` on a clean `npm ci` produced
+  `index-hjjUIssv.js` (766 kB / 214 kB gzip) and `index-DAQDTjmL.css` (40 kB). It is rebuilt again by 4.18/4.19,
+  when it stops being a reference and its bundle becomes the shipped artefact.
+- **It still renders invented values**, so until 4.16/4.20 have wired a screen it keeps `MockDataNotice` and may
+  not be the source of a number in the report. The promotion is what removes that caveat, and the notice goes when
+  the mock data does (4.18) — a label left on a surface with no mock data behind it is as misleading as mock data
+  without one.
+
+**The static dashboard (`web/legacy/`) — the surface that still ships today, retired by 4.19.**
+
+- No build step; served from `web/legacy/` under `/legacy/`. `js/api.js` takes the API base URL from a
+  `<meta name="api-base">` tag injected at container start, so the same files work on `localhost` and on the demo
+  host.
+- **Signing in.** Every terrarium route is authenticated (BR-02.2), so it cannot show a value before a session
+  exists. `js/api.js` keeps the tokens in `localStorage` and rotates once when a call answers `401`; the Live page
+  shows a sign-in form until it has a session, and the wallboard shares whatever the Live page signed in as.
+- Cache-busting by query string (`app.css?v=1.0.2`) so a stale browser cache cannot show old UI during a demo.
+- **It is the only web surface that renders real API data today**, which is why 4.15–4.19 wire the replacement
+  before 4.19 deletes this one rather than the other way round.
+- The M1 report screenshots in `06-report/snapshots/` came from here and are **not re-taken** after 4.19: they are
+  evidence of the M1 surface at the time it existed.
 
 ## 6. Release runbook (the order that actually works)
 

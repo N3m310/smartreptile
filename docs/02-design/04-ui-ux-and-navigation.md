@@ -40,22 +40,23 @@ semantics and status vocabulary are shared; the component implementations are no
 | W7 | Report | Daily summary table + export button (report screenshots come from here) |
 | W8 | Admin | Audit log viewer, retention status, `/metrics` snapshot |
 
-**Where the prototype sits (2026-10-03).** `web/` also contains the **TERRAGUARD** prototype: eight mock-data
-screens (login, dashboard, terrariums, terrarium detail, devices, alerts, history, settings) in React + Vite +
-Tailwind, Vietnamese-only, with no API client and no engine rules (ADR-017). It explores the subject matter of
-W1–W6 but implements none of this inventory: no wallboard, no thresholds editor, no report or admin page, and its
-alerts are `value > max` over mock bands. It is a **UI reference, not the M4 web surface** (ADR-018): the table
-above stays the target for task 4.10, and `web/legacy/` — the surface with the real API behind it — is what the
-milestone's DoD is measured on.
+**Where TERRAGUARD sits (revised 2026-10-06, `ADR-019`).** `web/` also contains the **TERRAGUARD** client: React
++ Vite + Tailwind, eight screens (login, dashboard, terrariums, terrarium detail, devices, alerts, history,
+settings). It arrived as a mock-data prototype with no API client and no engine rules (ADR-017), and `ADR-018` kept
+it a reference. **`ADR-019` revokes that and promotes it to the M4 web surface**: the inventory above is what it must grow into —
+note that W1's wallboard is *not* one of its eight screens, so that page is new work (4.19) — `web/legacy/` is
+retired at the end of the switch, and the promotion is staged by endpoint availability (4.15–4.20, with the
+per-screen readiness table in `03-implementation/07`). While a screen still renders `src/data/mockData.ts` it keeps
+its mock-data notice and counts for nothing in the DoD; the notice is removed when the mock data is, not before.
 
-Three things about the prototype are decided rather than open (task 4.14), and it labels itself as mock data
-wherever it renders a number:
+Three things were decided while it was a reference (task 4.14) and are **superseded by that promotion**. Each was
+correct for a prototype that never ships and is wrong for a surface that does:
 
-| Question | Decision |
-|---|---|
-| Status colours | A **prototype-only palette** that maps one-to-one onto §3's four roles (`--status-normal/warning/danger/offline` ↔ `color.inRange/warning/critical/unknown`). The hues differ because §3's tokens are tuned for the app's theme-based surface and fall to **3.0–3.5:1** on this prototype's `#0b1a0d` / `#112016` surfaces — under the 4.5:1 body-text budget of `04-quality/03` §4.4 — where the prototype's own hues measure **4.7–8.6:1**. The ratios are recorded at the top of `web/src/index.css`; §3 remains the token source of truth for the shipped clients |
-| Copy | **Vietnamese-only, by intent.** The prototype explores a Vietnamese-language UI and has no ARB keys, so `TC-I-15` cannot reach it and there is no translation set to drift. Localising it is worth doing only if it is ever promoted to a shipped surface, which `ADR-018` declines |
-| Coverage | Outside every `TC-*` case and outside CI (`ADR-017`). The compensating control is the mock-data notice in the UI plus `ADR-018` keeping it out of measured claims |
+| Question | Was (task 4.14) | Is now (`ADR-019`, task 4.18) |
+|---|---|---|
+| Status colours | A **prototype-only palette** mapping one-to-one onto §3's four roles (`--status-normal/warning/danger/offline` ↔ `color.inRange/warning/critical/unknown`), with different hues because §3's tokens are tuned for the app's theme-based surface: they fall to **3.0–3.5:1** on this client's `#0b1a0d` / `#112016` surfaces, under the 4.5:1 body-text budget of `04-quality/03` §4.4, where the prototype's own hues measure **4.7–8.6:1** | §3's tokens, at ≥ 4.5:1 for body text. §3 was already the source of truth for the shipped clients and this client is one of them now; the prototype's measured ratios stay at the top of `web/src/index.css` as the record of why the swap needs the contrast check re-run rather than a hue copy |
+| Copy | **Vietnamese-only, by intent.** No ARB keys, so `TC-I-15` could not reach it and there was no translation set to drift. Localising it was worth doing "only if it is ever promoted to a shipped surface, which `ADR-018` declines" | **Bilingual, vi default + en** (NFR-06, ADR-013), with a key set shared with the app so `TC-I-15`'s key-parity half covers it. That key-parity check is now a real gate rather than an unreachable one |
+| Coverage | Outside every `TC-*` case and outside CI (`ADR-017`), with the mock-data notice as the compensating control | `tsc`, `vite build` and key parity in CI; each screen enters the walkthrough of `04-quality/03` §3 as it is wired, and the screens stop being excluded from measurement by being measured |
 
 ## 2. Navigation graph (app)
 

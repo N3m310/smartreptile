@@ -22,9 +22,9 @@ unpinned versions are treated as a defect because "it worked last week" is not a
 | Mobile app | **Flutter** stable + Dart | Flutter 3.47.x / Dart 3.13.x | Rubric requires a real mobile app |
 | App packages | `provider` (state), `http` (REST), `signalr_netcore` or `web_socket_channel` (live), `fl_chart` (charts), `shared_preferences` (non-secret cache), `flutter_secure_storage` (tokens), `firebase_messaging`, `intl`, `flutter_localizations`, `go_router` | pinned in `pubspec.yaml` | `provider` is explicitly on the rubric |
 | App tests | `flutter_test`, `mocktail`, `integration_test` | pinned | Widget + unit + E2E |
-| Web dashboard (M1, `web/legacy/`) | Static HTML + CSS + vanilla JS + **Chart.js** | Chart.js 4.x pinned | Matches the mentor's reference ("nhẹ, có thể mở rộng lên React"); no build step to break at demo time. Still the only web surface that renders real API data (ADR-017) |
-| Web prototype (`web/`, TERRAGUARD) | **React 19** + **Vite 6** + **TypeScript 5.7** + **Tailwind CSS v4**, plus `react-router-dom` 7, `recharts` 2, `lucide-react` | pinned in `web/package.json` | A UI exploration of the keeper's screens over mock data, built faster than the vanilla-JS equivalent — and the reason ADR-003's "no build step" half is superseded (ADR-017) |
-| Node (prototype only) | Node.js 22 LTS + npm | 22.x | `npm run dev` / `npm run build` for `web/`; nothing else in the stack needs Node, and the committed `web/dist/` keeps the nginx demo Node-free |
+| Web dashboard (M1, `web/legacy/`) | Static HTML + CSS + vanilla JS + **Chart.js** | Chart.js 4.x pinned | Matches the mentor's reference ("nhẹ, có thể mở rộng lên React"); no build step to break at demo time. The only web surface that renders real API data — **until `ADR-019` retires it (task 4.19)** in favour of the TERRAGUARD client below |
+| Web client (`web/`, TERRAGUARD) | **React 19** + **Vite 6** + **TypeScript 5.7** + **Tailwind CSS v4**, plus `react-router-dom` 7, `recharts` 2, `lucide-react` | pinned in `web/package.json` | The M4 web surface from `ADR-019`. Arrived as a UI exploration over mock data — built faster than the vanilla-JS equivalent, and the reason ADR-003's "no build step" half is superseded (ADR-017). Promotion to shipped surface adds an API client, ARB-parity keys and CI (4.15–4.20) |
+| Node (web client only) | Node.js 22 LTS + npm | 22.x | `npm run dev` / `npm run build` for `web/`; nothing else in the stack needs Node, and the committed `web/dist/` keeps the nginx demo Node-free |
 | Reverse proxy | `nginx:1.27-alpine` serving the dashboard + TLS termination for the demo host | 1.27 | Simple, well understood |
 | Orchestration | **Docker Compose** | v2 | NFR-08 |
 | CI | GitHub Actions (or local `make ci` if no CI access) | — | `dotnet test`, `flutter test`, `pio run`, `flutter analyze` |
@@ -51,8 +51,8 @@ smartreptile/
 ├── app/                          # Flutter
 │   ├── lib/{core,data,state,screens,widgets,l10n}
 │   └── test/  integration_test/
-└── web/                          # two surfaces, one folder (ADR-017)
-    ├── legacy/                   # M1 static dashboard — the one that talks to the API, no build step
+└── web/                          # two surfaces, one folder (ADR-017); roles inverted by ADR-019
+    ├── legacy/                   # M1 static dashboard — talks to the API, no build step, retired by 4.19
     │   ├── index.html wallboard.html health.html
     │   ├── css/app.css
     │   └── js/{api.js, store.js, i18n.js, pages/live.js}
@@ -126,14 +126,15 @@ Android emulator, `demo` → `https://<host>`); no secrets are compiled into the
 
 ### 4.4 Web (`web/`) — two surfaces
 
-The **M1 static dashboard**, the only web surface that talks to the API:
+The **M1 static dashboard**, the only web surface that talks to the API today — retired by task 4.19 (`ADR-019`):
 
 ```bash
 cd web/legacy
 python -m http.server 8081           # compose serves these same files under /legacy/ (task 4.12)
 ```
 
-The **TERRAGUARD prototype** — mock data, no network calls (ADR-017):
+The **TERRAGUARD client** — the M4 web surface from `ADR-019`. Still mock data with no network calls until
+4.15–4.20 wire it screen by screen:
 
 ```bash
 cd web
@@ -143,9 +144,9 @@ npm run build                        # writes web/dist/, which is committed on p
 ```
 
 `npm run dev` binds the same port as the compose `web` service, so run one or the other. Compose itself serves both
-surfaces from one nginx (task 4.12): `/` is the committed prototype build and `/legacy/` is the M1 dashboard, per
-`web/nginx.conf`. **BUG-03** (`05-release/03` §4) is closed, and its regression check is the `curl` pair in
-`05-release/01` §5.
+surfaces from one nginx (task 4.12): `/` is the committed client build and `/legacy/` is the M1 dashboard, per
+`web/nginx.conf` — a layout that collapses to a single mount when 4.19 deletes `web/legacy/`. **BUG-03**
+(`05-release/03` §4) is closed, and its regression check is the `curl` pair in `05-release/01` §5.
 
 ## 5. Configuration reference (`.env.example`)
 

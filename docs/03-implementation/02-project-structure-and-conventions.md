@@ -157,11 +157,13 @@ Rules:
 
 ## 4. Web conventions (`web/`)
 
-The folder holds **two surfaces that follow different rules on purpose** (ADR-017). The first is the shippable
-dashboard — and the M4 web surface (ADR-018); the second is a prototype, allowed to break the first's rules only
-because it never ships.
+The folder holds **two surfaces that follow different rules on purpose** (ADR-017), and **`ADR-019` inverts their
+roles**: `web/legacy/` still ships today and is retired by task 4.19, while the TERRAGUARD client in `web/` becomes
+the M4 web surface. The rules below are stated per surface, and each one that exists to keep a *prototype* honest is
+written with the task that retires it — an obligation that outlives its reason is how a prototype ends up shipping
+with a prototype's rules.
 
-### 4.1 The static dashboard (`web/legacy/`) — the shippable one
+### 4.1 The static dashboard (`web/legacy/`) — still shippable, retired by 4.19
 
 - Vanilla ES modules; **no build step** — a demo must not depend on `npm install` succeeding.
 - Served by nginx under `/legacy/`, next to the prototype build at `/`; the two mounts and the prototype-only SPA
@@ -173,26 +175,31 @@ because it never ships.
 - Chart.js instance per chart, disposed on page unload; no chart re-creates on every push (only
   `chart.data` is appended, capped at 720 points client-side).
 
-### 4.2 The prototype (`web/`) — mock data, never shipped
+### 4.2 The TERRAGUARD client (`web/`) — the M4 web surface, being wired
 
 - React 19 + Vite + TypeScript + Tailwind v4 (ADR-017). `src/pages/*.tsx` is one screen per route,
   `src/components/Layout.tsx` is the shared shell; `npm run dev` to work on it, `npm run build` to refresh the
   committed `web/dist/`.
-- **No API layer exists.** Every value comes from `src/data/mockData.ts`. A `fetch`, a SignalR client or a token
-  in `localStorage` must not appear in this folder while it is a prototype — the demo depends on a reviewer
-  telling the two surfaces apart at a glance.
-- Threshold logic is `value > max` over mock bands. Dwell, hysteresis, phase and dedupe (ADR-005) are **absent by
-  construction**: a rule belongs in the engine, not in a screen.
-- **Labelled as mock data.** `src/components/MockDataNotice.tsx` renders on the login page — which is what
-  `http://127.0.0.1:8081/` serves — and in the app shell, so no screenshot can pass these numbers off as
-  measurements (task 4.14).
-- **Vietnamese-only, by intent** (task 4.14): the copy is inline Vietnamese and stays that way. `TC-I-15` does not
-  reach this folder, so there is no translation set to drift; localising it is worth doing only if the prototype is
-  ever promoted to a shipped surface, which `ADR-018` declines.
-- `src/index.css` carries a prototype-only status→colour palette that maps one-to-one onto `02-design/04` §3's four
-  roles; the hues differ so the statuses stay legible on this dark surface, and the measured contrast ratios that
-  justify it sit at the top of that file (task 4.14). §3 and `app/lib/core/status.dart` remain the source of truth
-  for the shipped clients.
+- **Wiring replaces mock data screen by screen** (4.15–4.20). A screen that still renders `src/data/mockData.ts`
+  must not call the API and must keep its mock-data notice; a screen that has been wired must not keep a mock
+  fallback, because a plausible number on a failed request is worse than an error state — the `failureKind`
+  distinction `web/legacy/js/api.js` makes (unreachable vs not-built vs not-found) is the behaviour to copy, and it
+  is why the dashboard's diagnosis is honest without a server.
+- **No threshold logic in the client.** Status, band and phase come from `readings/latest`; comparing a metric
+  value against a bound belongs in the engine, not in a screen (ADR-005, task 4.17). The prototype's `value > max`
+  alert path is the specific thing that rule was written against, and it goes with `Alerts.tsx`'s wiring rather
+  than lingering beside it.
+- **Labelled as mock data while any screen still is.** `src/components/MockDataNotice.tsx` renders on the login page
+  — which is what `http://127.0.0.1:8081/` serves — and in the app shell, so no screenshot can pass these numbers
+  off as measurements (task 4.14). The component is deleted by 4.18, when the last invented number is: a notice left
+  on a wired surface is as misleading as mock data without one.
+- **Bilingual, vi default + en** (task 4.18, NFR-06/ADR-013). The copy started inline Vietnamese with no ARB keys,
+  which is exactly why `TC-I-15` could not reach it. The promotion gives it a key set shared with the app and puts
+  key parity in CI, so a gate that was previously unreachable becomes a real one.
+- `src/index.css` carries a palette that maps onto `02-design/04` §3's four status roles with prototype-only hues,
+  justified by the measured contrast ratios at the top of that file (task 4.14). **Those hues are superseded by
+  4.18**: the shipped client uses §3's tokens and must clear the 4.5:1 body-text budget of `04-quality/03` §4.4,
+  and §3 plus `app/lib/core/status.dart` are the source of truth for every shipped client.
 
 ## 5. Cross-cutting conventions
 

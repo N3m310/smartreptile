@@ -51,7 +51,7 @@ flowchart LR
 **Conventions**
 
 - Every requirement has a stable id: `FR-01…FR-18`, `NFR-01…NFR-12`, `US-01…US-20`, `UC-01…UC-07`,
-  `ADR-001…ADR-018`, `TC-U-FW-*` / `TC-U-*` / `TC-I-*` / `TC-W-*` / `TC-E2E-*` (101 test cases).
+  `ADR-001…ADR-019`, `TC-U-FW-*` / `TC-U-*` / `TC-I-*` / `TC-W-*` / `TC-E2E-*` (107 test cases).
 - Paths are relative to this folder unless written with `../`.
 - `MUST` / `SHOULD` / `MAY` follow RFC 2119.
 - Anything marked **`[TBC]`** is an open decision the team must close before the demo — they are
@@ -116,7 +116,7 @@ flowchart LR
 ### 07 — Appendices
 | File | Purpose |
 |---|---|
-| `07-appendices/01-adr-log.md` | ADR-001…ADR-018 (context / decision / consequences / rejected options) |
+| `07-appendices/01-adr-log.md` | ADR-001…ADR-019 (context / decision / consequences / rejected options) |
 | `07-appendices/02-sql-schema-reference.md` | Full table reference: columns, types, keys, indexes, DDL excerpts, seed data |
 | `07-appendices/03-mqtt-and-rest-api-spec.md` | MQTT topics/payloads/QoS + REST endpoint reference with status/error codes |
 | `07-appendices/04-hardware-bom-and-wiring.md` | Bill of materials, pin map, power budget, enclosure notes, bring-up sequence |
@@ -163,7 +163,8 @@ and the three follow-ups are roadmap tasks 4.12–4.14. Its own Vietnamese summa
 **Revised 2026-10-03 (second pass) — the three follow-ups the re-base created are closed.** Roadmap **4.12** fixed
 **BUG-03** (`web/nginx.conf` plus sibling compose mounts; the regression `curl` pair lives in `05-release/01` §5);
 **4.13** is decided as **`ADR-018`** — the TERRAGUARD prototype stays a mock-data UI reference and `web/legacy/`
-remains the M4 web surface; **4.14** labels the prototype as mock data in the UI
+remains the M4 web surface (**`ADR-018` revoked in full on 2026-10-06 by `ADR-019`**, in the eighth pass below); **4.14** labels
+the prototype as mock data in the UI
 (`web/src/components/MockDataNotice.tsx`), documents its prototype-only palette with measured contrast ratios and
 settles the Vietnamese-only copy. Touched `07-appendices/01`, `02-design/04` §1.2, `03-implementation/01` §4.4,
 `03-implementation/02` §4, `03-implementation/07` (M4 status), `04-quality/01` §6, `05-release/01` §5,
@@ -215,4 +216,30 @@ bit was written as 16; it is 32), `05-release/03` §5 and the repository `README
 removed, so the doc set is still **36 files** (35 documents + this index). The branch's implementation record
 beside the set, `IMPLEMENTATION_SUMMARY_2026-10-03.md`, now carries this session as well: it covers 2026-10-03 and
 2026-10-04 in one file, because the second continues the first.
+
+**Revised 2026-10-06 (seventh pass) — the read surface, then password recovery.** Two pieces of work landed
+together. First, M2 task 2.8's terrarium read surface: six routes (`GET`/`POST /terrariums`, `GET /{id}`, `GET
+/{id}/readings/latest`, `GET /{id}/readings`, `GET /{id}/coverage`) and the `web/legacy` sign-in that calls them, so
+the dashboard renders measured values instead of an empty state; documented in `07-appendices/03` §4.2, 
+`03-implementation/03` §6/§9, `03-implementation/07` and `04-quality/02`/`04`. Second, password recovery for
+**FR-01**: a backup recovery code issued at registration (`POST /auth/recover` spends it), a server-issued
+single-use code (`POST /auth/forgot-password` + `/auth/reset-password`), and delivery as an
+`IPasswordResetNotifier` port whose demo implementation writes the code to the log behind `PasswordReset:LogCode`;
+documented in `02-design/06` §2, `07-appendices/03` §4.1/§5, `07-appendices/02` §3.1/§3.13/§4,
+`03-implementation/03` §6/§9, `03-implementation/07` (a new progress block), `04-quality/02` (`TC-U-51…56`),
+`04-quality/04` and `05-release/03` §7, where **L-02** is rewritten from "no password reset" to "reset-code
+delivery is a log line, not email". No document was added or removed, so the doc set is still **36 files**
+(35 documents + this index).
+
+**Revised 2026-10-06 (eighth pass) — `ADR-019` promotes TERRAGUARD, revokes `ADR-018` and retires the static dashboard.** The
+prototype that `ADR-018` kept as a mock-data reference becomes the M4 web surface, and `web/legacy/` — the vanilla-JS
+dashboard that has carried the milestone since M1 — is retired by new task 4.19. The promotion is recorded with the
+obligations that come with it rather than as a relabel: real API data (4.15–4.16), verdicts from the server instead
+of `value > max` in a screen (4.17), vi+en with a key set shared with the app (4.18), `02-design/04` §3 tokens at
+≥ 4.5:1 (4.18), the wallboard rebuilt in React (4.19), and the remaining screens wired as their endpoints land
+(4.20). Touched `07-appendices/01` (ADR-019 appended; the ADR-003/017/018 status lines), `03-implementation/07`
+(M4 intro, 4.10, 4.15–4.20, DoD and a per-screen staging table), `02-design/04` §1.2, `05-release/01` §5,
+`04-quality/01` §6, `04-quality/02` (the `TC-I-15` caveat), `04-quality/03` §5.12, `03-implementation/01`/`02` and
+`05-release/03` §3/§5. No document was added or removed, so the doc set is still **36 files** (35 documents + this
+index).
 

@@ -36,6 +36,7 @@ Conventions: `Id` = `uniqueidentifier` (Guid) unless stated; `bigint identity` f
 | 20 | `AuditLog` | Who changed what, when | small | 24 months |
 | 21 | `ExportJob` | Async export + download token | tiny | file 24 h, row 90 days |
 | 22 | `Snapshot` | Camera still (optional) | medium | 7 days |
+| 23 | `PasswordResetCode` | Single-use password-reset codes (hashed) | tiny | 30-minute TTL; consumed, not swept |
 
 ---
 
@@ -120,8 +121,14 @@ with `IX_Health_Device_Recorded (DeviceId, RecordedAt DESC)`.
 ## 3. Configuration and identity tables
 
 ### 3.1 `User`
-`(Id, Username nvarchar(32), Email nvarchar(256), PasswordHash varbinary(64), PasswordSalt varbinary(16), PasswordIterations int, Role tinyint, PreferredLanguage varchar(2), TimeZoneId varchar(64), QuietHoursStart time null, QuietHoursEnd time null, MinNotifySeverity tinyint, ChannelsFcm bit, ChannelsTelegram bit, ChannelsEmail bit, TelegramChatId nvarchar(32) null, FcmToken nvarchar(256) null, CreatedAt, LastLoginAt null, DisabledAt null)`
+`(Id, Username nvarchar(32), Email nvarchar(256), PasswordHash varbinary(64), PasswordSalt varbinary(16), PasswordIterations int, RecoveryCodeHash varbinary(32) null, RecoveryCodeSalt varbinary(16) null, RecoveryCodeIssuedAt null, Role tinyint, PreferredLanguage varchar(2), TimeZoneId varchar(64), QuietHoursStart time null, QuietHoursEnd time null, MinNotifySeverity tinyint, ChannelsFcm bit, ChannelsTelegram bit, ChannelsEmail bit, TelegramChatId nvarchar(32) null, FcmToken nvarchar(256) null, CreatedAt, LastLoginAt null, DisabledAt null)`
 Unique: `Username` (CI), `Email`.
+
+The three `RecoveryCode*` columns are the backup recovery code issued at registration (`03-implementation/07`, the
+password-recovery block). They are nullable on purpose: an account created before recovery codes existed has none,
+and the API answers a null code exactly like a wrong one rather than growing a special case. `RecoveryCodeHash` is
+`SHA-256(code ‖ RecoveryCodeSalt)` — salted, because this code is verified *after* the account is identified,
+unlike the lookup-keyed `PasswordResetCode.CodeHash` in §3.13.
 
 ### 3.2 `RefreshToken`
 `(Id, UserId FK, TokenHash varbinary(32), FamilyId uniqueidentifier, IssuedAt, ExpiresAt, ConsumedAt null, RevokedAt null, DeviceInfo nvarchar(200) null)`
@@ -195,6 +202,16 @@ Index: `(EntityName, EntityId, OccurredAt DESC)`, `(OccurredAt)`.
 `ExportJob` `(Id, UserId, TerrariumId, Format tinyint, RangeStartUtc, RangeEndUtc, MetricIdsJson, Status tinyint, RowCount int, FilePath nvarchar(400), DownloadToken varchar(64) unique, ExpiresAt, ErrorMessage nvarchar(300) null, CreatedAt, CompletedAt null)`.
 `Snapshot` `(Id, DeviceId, TerrariumId, CapturedAtUtc, ContentType varchar(32), ByteSize int, Sha256 char(64), StoragePath nvarchar(400), ExpiresAt, Status tinyint)`.
 
+### 3.13 `PasswordResetCode`
+`(Id, UserId FK, CodeHash varbinary(32), CreatedAt, ExpiresAt, ConsumedAt null, RequestedFromAddress nvarchar(45) null)`
+Unique: `CodeHash`. Index: `(UserId, ExpiresAt)`. Cascade-deleted with the account.
+
+`CodeHash` is the **unsalted** SHA-256 of the presented code, so the row can be found *by* the value presented —
+the same reasoning as `RefreshToken.TokenHash`, and deliberately unlike `User.RecoveryCodeHash`, which is salted
+because that code is only ever verified *after* the account has already been identified. At most one row per
+account is live: issuing a code stamps `ConsumedAt` on any outstanding one, and spending a code stamps it on the
+row it used, so a second request replaces the first rather than leaving two ways in.
+
 ---
 
 ## 4. DDL excerpts (the parts that carry invariants)
@@ -229,6 +246,17 @@ ALTER TABLE [Threshold] ADD CONSTRAINT [CK_Threshold_TargetOrder]
   CHECK ([TargetMin] < [TargetMax]);
 ALTER TABLE [Threshold] ADD CONSTRAINT [CK_Threshold_CriticalOrder]
   CHECK ([CriticalMin] IS NULL OR ([CriticalMin] <= [TargetMin] AND [CriticalMax] >= [TargetMax]));
+```
+
+From `20261006152641_AddPasswordResetCodes` (account recovery, BR-01.5) — the unique index is what makes "find the
+row by the code presented" a seek rather than a scan of every outstanding code, and the pair index is the only
+shape the store queries by:
+
+```sql
+CREATE UNIQUE INDEX [IX_PasswordResetCode_CodeHash] ON [PasswordResetCode]([CodeHash]);
+CREATE INDEX [IX_PasswordResetCode_UserId_ExpiresAt] ON [PasswordResetCode]([UserId], [ExpiresAt]);
+ALTER TABLE [PasswordResetCode] ADD CONSTRAINT [FK_PasswordResetCode_User_UserId]
+  FOREIGN KEY ([UserId]) REFERENCES [User]([Id]) ON DELETE CASCADE;
 ```
 
 Why these live in the database rather than in application code:
