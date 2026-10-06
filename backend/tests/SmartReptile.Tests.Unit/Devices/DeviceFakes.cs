@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Terrariums;
 
@@ -155,6 +156,14 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
         device?.Credentials.Add(credential);
     }
 
+    /// <summary>Audit rows staged for the next save; cleared by <see cref="SaveChangesAsync"/> like a real commit.</summary>
+    public List<AuditLog> PendingAuditEntries { get; } = [];
+
+    /// <summary>Audit rows that made it to a commit, in order (BR-18.4).</summary>
+    public List<AuditLog> CommittedAuditEntries { get; } = [];
+
+    public void AddAuditEntry(AuditLog entry) => PendingAuditEntries.Add(entry);
+
     public Task<Terrarium?> FindOwnedTerrariumAsync(
         Guid terrariumId,
         Guid ownerUserId,
@@ -169,6 +178,8 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveCount++;
+        CommittedAuditEntries.AddRange(PendingAuditEntries);
+        PendingAuditEntries.Clear();
         return Task.CompletedTask;
     }
 }

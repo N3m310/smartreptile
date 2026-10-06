@@ -1,6 +1,8 @@
 using System.Security.Claims;
+using SmartReptile.Api.Middleware;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
+using SmartReptile.Domain.Auditing;
 
 namespace SmartReptile.Api.Endpoints;
 
@@ -57,13 +59,15 @@ public static class DeviceEndpoints
         group.MapPost("/claim", async (
             ClaimRequest request,
             ClaimsPrincipal principal,
+            HttpContext context,
             DeviceProvisioningService provisioning,
             CancellationToken cancellationToken) =>
         {
             var outcome = await provisioning.ClaimAsync(
                 request,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                Actor(context));
 
             if (outcome.Problem is { } problem)
             {
@@ -87,13 +91,15 @@ public static class DeviceEndpoints
         group.MapPost("/{deviceId}/rotate-secret", async (
             string deviceId,
             ClaimsPrincipal principal,
+            HttpContext context,
             DeviceProvisioningService provisioning,
             CancellationToken cancellationToken) =>
         {
             var outcome = await provisioning.RotateSecretAsync(
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                Actor(context));
 
             if (outcome.Problem is { } problem)
             {
@@ -116,13 +122,15 @@ public static class DeviceEndpoints
         group.MapPost("/{deviceId}/revoke", async (
             string deviceId,
             ClaimsPrincipal principal,
+            HttpContext context,
             DeviceProvisioningService provisioning,
             CancellationToken cancellationToken) =>
         {
             var outcome = await provisioning.RevokeAsync(
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                Actor(context));
 
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
@@ -174,4 +182,13 @@ public static class DeviceEndpoints
 
     private static string ClientAddress(HttpContext context) =>
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    /// <summary>
+    /// Request provenance for the audit trail (§02-design/02 §3.18). Truncation of the two client-supplied values
+    /// happens in <see cref="AuditLog.ForDevice"/>, so it is applied wherever an actor is built.
+    /// </summary>
+    private static AuditActor Actor(HttpContext context) => new(
+        ClientAddress(context),
+        context.Request.Headers.UserAgent.ToString() is { Length: > 0 } userAgent ? userAgent : null,
+        context.Items[CorrelationIdMiddleware.ItemKey] as string ?? context.TraceIdentifier);
 }

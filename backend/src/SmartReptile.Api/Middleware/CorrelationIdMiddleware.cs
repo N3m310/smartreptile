@@ -10,6 +10,12 @@ public sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<Correl
     /// <summary>Header used for the correlation id.</summary>
     public const string HeaderName = "X-Correlation-ID";
 
+    /// <summary>
+    /// Key under which the resolved id is published on <see cref="HttpContext.Items"/>, so a handler can record it
+    /// — the audit trail stores it next to the change it explains (FR-18 BR-18.3).
+    /// </summary>
+    public const string ItemKey = "SmartReptile.CorrelationId";
+
     /// <summary>Runs the middleware.</summary>
     public async Task InvokeAsync(HttpContext context)
     {
@@ -19,6 +25,7 @@ public sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<Correl
             : context.TraceIdentifier;
 
         context.Response.Headers[HeaderName] = correlationId;
+        context.Items[ItemKey] = correlationId;
 
         using (logger.BeginScope(new Dictionary<string, object>
         {

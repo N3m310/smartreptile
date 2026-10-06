@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Readings;
@@ -54,6 +55,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Alerts and their lifecycle.</summary>
     public DbSet<Alert> Alerts => Set<Alert>();
 
+    /// <summary>Audit trail (FR-18).</summary>
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +69,7 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         ConfigureDevices(modelBuilder);
         ConfigureTelemetry(modelBuilder);
         ConfigureAlerts(modelBuilder);
+        ConfigureAuditing(modelBuilder);
     }
 
     private static void ConfigureIdentity(ModelBuilder modelBuilder)
@@ -348,6 +353,33 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Ignore(a => a.Duration);
 
             entity.ToTable("Alert");
+        });
+    }
+
+    private static void ConfigureAuditing(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(a => a.Id);
+            entity.Property(a => a.Id).ValueGeneratedOnAdd();
+            entity.Property(a => a.EntityName).HasMaxLength(40).IsRequired();
+            entity.Property(a => a.EntityId).HasMaxLength(64).IsRequired();
+            entity.Property(a => a.Action).HasMaxLength(40).IsRequired();
+            entity.Property(a => a.IpAddress).HasMaxLength(AuditLog.IpAddressMaxLength).IsRequired();
+
+            // Both are client-supplied headers, so the widths match the truncation in AuditLog.ForDevice rather
+            // than letting an over-long header fail the insert.
+            entity.Property(a => a.UserAgent).HasMaxLength(AuditLog.UserAgentMaxLength);
+            entity.Property(a => a.CorrelationId).HasMaxLength(AuditLog.CorrelationIdMaxLength);
+            entity.Property(a => a.OccurredAt).HasPrecision(3);
+
+            // "What happened to this thing, in order" is the query the trail exists to answer.
+            entity.HasIndex(a => new { a.EntityName, a.EntityId, a.OccurredAt }).IsDescending(false, false, true);
+            entity.HasIndex(a => a.OccurredAt);
+
+            // No foreign keys: an audit row outlives the entity it names, and a cascade would let deleting a user
+            // erase the record of what that user did.
+            entity.ToTable("AuditLog");
         });
     }
 }

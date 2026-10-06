@@ -1,3 +1,4 @@
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Terrariums;
 
@@ -30,6 +31,13 @@ public interface IProvisioningStore
 
     /// <summary>Stages a new credential.</summary>
     void AddCredential(DeviceCredential credential);
+
+    /// <summary>
+    /// Stages an audit row. It lives on this port rather than one of its own so the row is committed by the same
+    /// <see cref="SaveChangesAsync"/> as the change it describes (BR-18.4): an audited change that commits without
+    /// its entry is worse than no trail at all, because the gap reads as "nothing happened".
+    /// </summary>
+    void AddAuditEntry(AuditLog entry);
 
     /// <summary>
     /// The terrarium, but only when it belongs to <paramref name="ownerUserId"/> and is not soft-deleted.

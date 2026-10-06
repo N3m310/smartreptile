@@ -1,7 +1,9 @@
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Common;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
+using System.Text.Json;
 
 namespace SmartReptile.Application.Devices;
 
@@ -117,10 +119,12 @@ public sealed class DeviceProvisioningService(
     /// <param name="request">Claim code plus the terrarium to bind to.</param>
     /// <param name="ownerUserId">The authenticated caller; the terrarium must belong to them.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit row; omitted callers get <see cref="AuditActor.Unknown"/>.</param>
     public async Task<DeviceOutcome> ClaimAsync(
         ClaimRequest request,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null)
     {
         var now = clock.UtcNow;
         var code = ClaimCode.Normalise(request.ClaimCode);
@@ -170,6 +174,17 @@ public sealed class DeviceProvisioningService(
         device.ClaimCodeExpiresAt = null;
         device.Status = DeviceStatus.Provisioning;
 
+        // One row for the whole request: the binding and the secret are the same action, so `device.bound` is not
+        // written as well — two rows would make one claim look like two events.
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceClaimed,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            afterJson: Serialize(new { terrariumId = terrarium.Id, userId = ownerUserId })));
+
         await store.SaveChangesAsync(cancellationToken);
 
         return DeviceOutcome.Claimed(new ClaimResult(device.PublicId, secret, terrarium.Id, now));
@@ -179,10 +194,15 @@ public sealed class DeviceProvisioningService(
     /// Issues a replacement secret and puts the previous one on a grace window, so the device can reconnect and
     /// persist the new one before the old stops working (BR-05.5).
     /// </summary>
+    /// <param name="deviceId">Public id of the device.</param>
+    /// <param name="ownerUserId">The authenticated caller, who must own the device.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
     public async Task<DeviceOutcome> RotateSecretAsync(
         string deviceId,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null)
     {
         var now = clock.UtcNow;
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
@@ -211,6 +231,17 @@ public sealed class DeviceProvisioningService(
             IssuedByUserId = ownerUserId,
         });
 
+        // The secret itself is never recorded — only that a rotation happened and how long the previous one stays
+        // usable. The trail must not become a second place the credential lives.
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceSecretRotated,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            afterJson: Serialize(new { issuedAt = now, previousUsableUntil = graceUntil })));
+
         await store.SaveChangesAsync(cancellationToken);
 
         return DeviceOutcome.Rotated(new RotatedSecret(device.PublicId, secret, graceUntil));
@@ -222,12 +253,18 @@ public sealed class DeviceProvisioningService(
     /// <remarks>
     /// The credential is what makes the revocation permanent, and closing the live session is what makes it
     /// immediate (BR-05.4: "disconnected within 60 s"). The kick happens after the write, so a session that
-    /// survives it still cannot reconnect or publish.
+    /// survives it still cannot reconnect or publish. A repeat revoke changes nothing and therefore writes no
+    /// audit row — the trail records what happened, not that someone asked twice.
     /// </remarks>
+    /// <param name="deviceId">Public id of the device.</param>
+    /// <param name="ownerUserId">The authenticated caller, who must own the device.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
     public async Task<DeviceOutcome> RevokeAsync(
         string deviceId,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null)
     {
         var now = clock.UtcNow;
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
@@ -247,11 +284,23 @@ public sealed class DeviceProvisioningService(
         device.ClaimCode = null;
         device.ClaimCodeExpiresAt = null;
 
+        var credentialsRevoked = 0;
+
         foreach (var credential in device.Credentials.Where(credential => credential.RevokedAt is null))
         {
             credential.RevokedAt = now;
             credential.GraceUntil = null;
+            credentialsRevoked++;
         }
+
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceRevoked,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            afterJson: Serialize(new { status = nameof(DeviceStatus.Revoked), credentialsRevoked })));
 
         await store.SaveChangesAsync(cancellationToken);
 
@@ -310,6 +359,12 @@ public sealed class DeviceProvisioningService(
 
         return (code, expiresAt);
     }
+
+    /// <summary>
+    /// The snapshots an audit row carries. Only identifying and state-bearing fields go in, never a secret: the
+    /// trail must not become a second place a credential lives (§02-design/02 §3.18).
+    /// </summary>
+    private static string Serialize<T>(T value) => JsonSerializer.Serialize(value);
 
     private async Task<string> AllocatePublicIdAsync(CancellationToken cancellationToken)
     {

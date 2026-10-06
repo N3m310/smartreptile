@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Terrariums;
 
@@ -35,6 +36,9 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
 
     /// <inheritdoc />
     public void AddCredential(DeviceCredential credential) => db.DeviceCredentials.Add(credential);
+
+    /// <inheritdoc />
+    public void AddAuditEntry(AuditLog entry) => db.AuditLogs.Add(entry);
 
     /// <inheritdoc />
     public Task<Terrarium?> FindOwnedTerrariumAsync(
