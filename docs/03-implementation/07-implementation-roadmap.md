@@ -404,6 +404,29 @@ signed in with the new password.
 - **The dashboard's recovery form is M4 work in every other respect.** Both paths live on the Live page, and the
   Flutter app has no login screen yet (task 4.10), so the recovery UI exists in `web/legacy` only.
 
+**Task 2.9 — the SignalR push.** Complete on the client path that matters: a subscribed client is authorised on
+join and receives one event per committed sample.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| Membership before a join, with "not yours" and "does not exist" answered identically (BR-02.2) | `Application/Terrariums/TerrariumService.IsMemberAsync`, `Api/Hubs/TelemetryHub.JoinTerrarium` | live: a foreign id and an unknown id both refused with the same message; unit tests for owner, foreign, unknown and soft-deleted |
+| The push itself, replacing the `PendingTelemetryBroadcaster` placeholder | `Api/Hubs/SignalRTelemetryBroadcaster.cs` over `IHubContext<TelemetryHub>`, group `terrarium:{id}` | live: two `readingAdded` events, one per sample, **664 ms** after a two-sample batch was posted |
+| The event body as the contract documents it | `Application/Ingest/ReadingAddedPayload.cs` | 3 unit tests on the mapping; the live payload carried `terrariumId`, `sampleId`, `recordedAt` and five metrics keyed by `ApiKey` |
+| Auth over the WebSocket handshake | `Program.cs` `JwtBearerEvents.OnMessageReceived`, `access_token` accepted on `/hubs` only | live: a real `@microsoft/signalr` client connected with the token in the query string |
+
+The hub used to refuse every join with "Membership checks are not available yet", which was the safe state rather
+than a stub: an unchecked join would have turned the hub into a cross-tenant data leak, because a group is named
+after the terrarium and the id is the only secret involved.
+
+**What is deliberately still open in 2.9.** Two of the four documented events:
+
+- **`statusChanged` needs the transition surfaced.** The online/offline decision is made in `DeviceStateUpdater`,
+  but the fan-out boundary carries committed samples (`PersistedSample`), which have no status in them. Emitting it
+  is a small contract change plus a second caller, not a broadcast.
+- **`alertChanged` belongs to M3**, which owns alerts; nothing can emit it yet.
+
+`commandChanged` is not in 2.9 either — commands arrive with FR-14.
+
 ---
 
 ## M3 — Domain logic (7 days)

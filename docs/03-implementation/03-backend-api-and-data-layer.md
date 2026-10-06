@@ -316,6 +316,27 @@ Events pushed: `readingAdded {sampleId, recordedAt, metrics[]}`, `statusChanged 
 `alertChanged {alertId, state, severity}`. Membership is authorised on join — a group is never joined
 before the `TerrariumAccessRequirement` check, otherwise SignalR would become a cross-tenant data leak.
 
+**As built (task 2.9, 2026-10-06).** Three things the sketch does not say, all of them decisions rather than
+details:
+
+- **Membership is the ownership query the read surface already makes.** `TerrariumService.IsMemberAsync` asks
+  `ITerrariumStore.FindOwnedAsync`, so the hub answers "not yours" and "does not exist" identically, exactly as
+  `GET /terrariums/{id}` does (BR-02.2) — the hub cannot be used to enumerate ids. A connection with no subject is
+  refused rather than trusted; `[Authorize]` should make that unreachable, and the safe direction to be wrong in
+  costs nothing here.
+- **The push is an Application port implemented in the API project.** `SignalRTelemetryBroadcaster` sits beside the
+  hub because `IHubContext<TelemetryHub>` is not visible from Infrastructure; the ingest pipeline still depends only
+  on `ITelemetryBroadcaster`. The event body is `ReadingAddedPayload`, in the application layer so its shape is
+  testable without a hub, and one event is sent per sample rather than per batch — a client handler then treats
+  every arrival the same way instead of unwrapping a batch that may be one long. Metrics are keyed by the metric
+  dictionary's `ApiKey`, the same string `readings/latest` answers with, and the per-metric `qualityFlags` is the
+  *sample's* bitmask, because quality is recorded per sample.
+- **The token travels in the query string** (`?access_token=…`), because a browser cannot set a header on the
+  WebSocket handshake. Accepted on `/hubs` only: a token in a URL reaches logs, proxies and referrer headers, which
+  is worth paying for the one route that cannot avoid it and nowhere else.
+
+`statusChanged` and `alertChanged` are still unwritten — see the 2.9 block in `07-implementation-roadmap`.
+
 ## 8. Background workers
 
 | Worker | Schedule | Idempotency | Failure behaviour |

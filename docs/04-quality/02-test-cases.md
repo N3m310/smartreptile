@@ -217,8 +217,10 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 > nulls for empty buckets, and an unaligned 30-day window held to exactly 720 points — and the live run recorded in
 > `03-implementation/07` (task 2.8) confirms it over HTTP against SQL Server. `TC-I-11`'s **query** half is partly
 > covered (`readings/latest` and the bucketed series are exercised over HTTP, and a chart payload is bounded by the
-> point budget) but its **push** half (`event < 1 s`) and its p95 measurement are not: the broadcast is task 2.9 and
-> the 30-day dataset arrives with the rollups in 3.6. `TC-I-13`'s "foreign terrarium read" is green — the live run
+> point budget) and so is its **push** half since task 2.9: a real `@microsoft/signalr` client received one
+> `readingAdded` event per committed sample **664 ms** after the ingest request, well inside the 1 s line. What is
+> still not measured is the **p95** of `readings/latest`, which needs the 30-day dataset that arrives with the
+> rollups in 3.6. `TC-I-13`'s "foreign terrarium read" is green — the live run
 > answered `404 not_found` for another account's terrarium — and as of 2026-10-06 so is its audit half for the
 > device lifecycle: `device.claimed`, `device.secret_rotated` and `device.revoked` rows were read back from SQL
 > Server after a live claim → rotate → revoke, and a second revoke wrote nothing. Its login and token-reuse verbs

@@ -466,7 +466,12 @@ be probed (BR-02.2).
 | `commandChanged` | `{deviceId, cmdId, status}` | command ack/failure |
 
 Client methods: `JoinTerrarium(terrariumId)`, `LeaveTerrarium(terrariumId)` — **membership is authorised on
-join**, otherwise the hub would become a cross-tenant leak (`03-implementation/03` §7).
+join**, otherwise the hub would become a cross-tenant leak (`03-implementation/03` §7). A refused join throws a
+`HubException` carrying one message for both "not yours" and "does not exist", so the hub cannot be used to find
+out whether an id exists (BR-02.2).
+
+**Auth:** the JWT travels in the query string (`/hubs/telemetry?access_token=…`), because a browser cannot set a
+header on the WebSocket handshake. It is accepted on `/hubs` only — nowhere else does a token belong in a URL.
 
 **Client obligations:** re-subscribe after reconnect, and re-fetch `readings/latest` before resuming the stream
 so a reconnected socket never leaves pre-disconnect values on screen (UC-02, `03-implementation/05` §3).
