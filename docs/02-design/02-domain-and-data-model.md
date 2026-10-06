@@ -310,7 +310,7 @@ stateDiagram-v2
 | DI-09 | Claim codes are single-use and expire; reuse returns the same error as unknown | ClaimService + `TC-I-13` |
 | DI-10 | Deleting a terrarium is soft, and its device is unbound first | DeleteTerrariumCommand |
 
-**Note on claim codes.** Codes are 8 chars from a 32-symbol unambiguous alphabet (≈ 10¹² space,
+**Note on claim codes.** Codes are 8 chars from a 31-symbol unambiguous alphabet (≈ 8.5 × 10¹¹ space,
 birthday-safe for a demo fleet) and are stored **plaintext but with a hard 15-minute TTL and single-use
 flag**, because the device prints them on an OLED and a user may need to read them out. They are never
 usable as a credential and are audited. Secrets (the real credential) are only ever stored hashed.

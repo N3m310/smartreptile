@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="api-base" content="http://localhost:8080" />
     <title>SmartReptile · Health</title>
-    <link rel="stylesheet" href="css/app.css?v=0.1.1" />
+    <link rel="stylesheet" href="css/app.css?v=0.1.2" />
   </head>
   <!--
     Health page (W8, M1 version): shows exactly what docs/04-quality/03 §5 drills rely on — readiness of the
@@ -30,7 +30,7 @@
     <pre id="metrics" class="card">loading…</pre>
 
     <script type="module">
-      import { apiBase, failureKind, getJson } from './js/api.js?v=0.1.2';
+      import { apiBase, failureKind, getJson } from './js/api.js?v=0.1.5';
 
       // The other two pages get this from js/pages/live.js; this page had its own script and never set it, so the
       // header showed a bare em dash and you could not tell which API the numbers came from.

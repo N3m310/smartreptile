@@ -130,10 +130,12 @@ an unknown code never renders as "Error 500" with no explanation.
 | `AlertTile` | Shows severity, metric, duration, and state; ack/resolve actions are role-gated at render time *and* on the server |
 | `ChartPanel` | Gap-aware (nulls preserved), max 720 points appended, disposes the chart controller, shows bucket size (`5-min averages`) |
 
-## 6. Web dashboard structure
+## 6. Web structure
+
+### 6.1 The static dashboard (`web/legacy/`) — the shippable M4 surface
 
 ```
-web/js/
+web/legacy/js/
 ├── api.js        # fetch wrapper: base URL, token, problem+json → typed errors, 401 refresh
 ├── live.js       # SignalR client (same events as the app), re-subscribe on reconnect
 ├── store.js      # tiny observable store: {terrariums, latest, alerts}; pages subscribe
@@ -144,9 +146,35 @@ web/js/
 
 - The store mirrors the Flutter `TelemetryProvider` semantics (derived freshness, one notify per batch) so
   the two clients cannot disagree about what "stale" means.
-- `wallboard.html` renders one terrarium with no navigation, larger type, and a 24 h sparkline: this is the
+- `legacy/wallboard.html` renders one terrarium with no navigation, larger type, and a 24 h sparkline: this is the
   screen shown during the demo and in report screenshots.
-- The dashboard has no build step on purpose (NFR-08): a `git clone` + `docker compose up` must be enough.
+- The dashboard has no build step on purpose (NFR-08): a `git clone` + `docker compose up` must be enough. Today it
+  is not quite there — compose mounts all of `web/`, so it serves the prototype at `/` and these pages under
+  `/legacy/` (BUG-03, task 4.12).
+- **What exists on disk today (2026-10-06)** is the M1 shell plus the M2 data path — `index.html` (Live, with the
+  sign-in form), `wallboard.html`, `health.html` and `js/{api,store,i18n}.js` + `js/pages/live.js`. Every terrarium
+  route is authenticated, so `api.js` owns the session: it keeps the access and refresh tokens in `localStorage`,
+  rotates once when a call answers `401`, and `live.js` puts the sign-in form back when the refresh token is spent.
+  The other page files and `charts.js` are still the M4 work in task 4.10, which is why the tree above is a target
+  and not a description.
+
+### 6.2 The prototype (`web/`) — mock data, and no store to mirror
+
+```
+web/src/
+├── App.tsx              # BrowserRouter + the 8 routes (login sits outside the layout)
+├── components/Layout.tsx
+├── data/mockData.ts     # the whole "backend": 3 terrariums, 9 devices, 4 alerts, 24 history points each
+├── index.css            # theme tokens + fonts + a prototype-only status palette (task 4.14)
+└── pages/{Login,Dashboard,Terrariums,TerrariumDetail,Devices,Alerts,History,Settings}.tsx
+```
+
+- It has **no store, no API client and no SignalR**: state is per-page `useState` and every value comes from
+  `mockData.ts`. `generateHistoryData` re-randomises on every call, so the history table changes between renders —
+  a prototype quirk, and one more reason none of its numbers are evidence. Nothing here mirrors
+  `TelemetryProvider`, so nothing here can contradict it.
+- It is covered by no test case and no CI job (ADR-017), and its alerts are `value > max` comparisons against the
+  mock bands in `mockData.ts` — not the engine's decision procedure.
 
 ## 7. Widget and provider test hooks (mirrors `04-quality/02`)
 

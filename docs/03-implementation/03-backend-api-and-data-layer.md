@@ -157,6 +157,21 @@ separate class so it can be unit-tested without a broker:
 
 Fan-out happens **after** the commit; a SignalR failure must never roll back a stored sample.
 
+**As built (2026-10-04, task 2.4).** Two of the details above differ from this sketch, and the differences are
+deliberate:
+
+- **The channel carries raw envelopes, not batches.** An unparseable payload has to be counted under
+  `schema_invalid`, and the writer loop is the only place that can count; deserialising in the reader would either
+  lose that diagnostic or duplicate the counting. So `IngestWorker`'s reader enqueues the topic's device id, the
+  bytes and the arrival time, and the parse is the writer's first stage.
+- **Fan-out is done by the worker after `IngestPipeline` returns, not inside it.** `IngestOutcome.Stored` carries
+  the committed samples, so the push cannot be mistaken for part of the transaction it follows: a failed broadcast
+  is logged as a lost push by `IngestOutcomeRecorder`, never as a refused batch.
+
+The stage classes below are the ones that exist; `TelemetryPayloadValidator` and `PlausibilityGuard` live in the
+Application layer and `TelemetryWriter`/`DeviceStateUpdater` are application stages over an `ITelemetryStore` port,
+which is what keeps them unit-testable without a broker or a database.
+
 ## 4. Threshold evaluation implementation
 
 ```csharp
@@ -248,8 +263,29 @@ skipped and nothing is evaluated twice.
 
 | Group | Endpoints (abbreviated) | Notes |
 |---|---|---|
-| `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password` | Anonymous + `[Authorize]` |
-| `/api/v1/terrariums` | `GET/POST`, `GET/PATCH/DELETE {id}`, `GET {id}/thresholds`, `PUT {id}/thresholds`, `POST {id}/silences`, `GET {id}/coverage`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/summaries`, `POST {id}/exports` | Owner-scoped via `TerrariumAccessRequirement` |
+| `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password`, `recover`, `forgot-password`, `reset-password` | Anonymous + `[Authorize]`; the three recovery routes are anonymous and share the group's throttle |
+
+Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of design, and one file owns it:
+
+- **Two credentials, two endpoints, one non-disclosure rule.** `recover` spends the backup code issued at
+  registration; `forgot-password` + `reset-password` spend a code the server issues. Every failure on both paths is
+  the same opaque `401` (`invalid_recovery_code` / `invalid_reset_code`) whether the identifier is unknown, the
+  account is disabled, the code is spent, or the code belongs to someone else. `forgot-password` always answers
+  `202` with an empty body, including when it issued nothing, so it cannot be used to ask whether an account exists.
+- **A failing delivery channel cannot change the answer.** `AuthService.ForgotPasswordAsync` commits the code and
+  then calls `IPasswordResetNotifier` inside a guard that swallows a throwing implementation: a `500` for accounts
+  that exist next to a `202` for accounts that do not would hand back exactly the oracle the `202` exists to deny.
+  The port is still required not to throw — the guard is the second line, not the first.
+- **Hashing follows what the secret is used for.** The backup code is salted (`Sha256SecretHasher`, shared with
+  device credentials) because it is verified after the account is known. The reset code is **unsalted** SHA-256 via
+  `ISecretGenerator.Sha256`, like a refresh token, because the row has to be *found* by the value presented; both
+  are high-entropy and short-lived, so there is nothing to brute-force. Passwords remain PBKDF2.
+- **One live code per account.** Issuing stamps `ConsumedAt` on any outstanding row for the user, so asking again
+  replaces the previous code instead of leaving two working ways in; spending does the same for the row it used.
+- **Delivery is a port with a log implementation.** `LogPasswordResetNotifier` writes the code when
+  `PasswordReset:LogCode` is true (development only) and otherwise warns that it reached nobody — a production log
+  holding a live credential is a leak, so the default is off and the release note says so (limitation L-02).
+| `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage` · **planned:** `PATCH/DELETE {id}`, `GET/PUT {id}/thresholds`, `POST {id}/silences`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` + `ITerrariumStore`), not a filter applied afterwards |
 | `/api/v1/devices` | `GET`, `GET {id}`, `POST self-register`, `POST claim`, `PATCH {id}`, `POST {id}/rebind`, `POST {id}/rotate-secret`, `POST {id}/revoke`, `POST {id}/calibration`, `POST {id}/commands`, `POST {id}/snapshots` | `self-register` anonymous + rate-limited |
 | `/api/v1/ingest` | `POST http` | Device-auth header; the HTTP fallback path |
 | `/api/v1/alerts` | `GET`, `GET {id}`, `POST {id}/ack`, `POST {id}/resolve` | Role-gated ack/resolve |
@@ -297,26 +333,37 @@ correlation id. Each exposes a counter so a stuck worker is visible on `/metrics
 
 ## 9. Repository and query patterns
 
-- Repositories exist only where a query is non-trivial or reused (readings range, alert inbox, coverage).
-  Simple CRUD goes through `DbContext` in the `Application` layer via a small `IUnitOfWork` — adding a
-  repository for every entity is noise, and this choice is stated in the report rather than hidden.
-- All range queries use `AsNoTracking()` and explicit projections (`Select` into DTOs) — never
-  materialise `TelemetrySample` graphs for a chart.
-- Coverage query (FR-07 BR-07.5):
-
-```csharp
-public async Task<CoverageDto> GetCoverageAsync(Guid terrariumId, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
-{
-    var interval = TimeSpan.FromSeconds(await db.Devices.Where(d => d.TerrariumId == terrariumId)
-                                                        .Select(d => d.SamplingIntervalSec).FirstAsync(ct));
-    var expected = (int)Math.Max(1, (to - from) / interval);
-    var received = await db.TelemetrySamples.CountAsync(s => s.TerrariumId == terrariumId &&
-                                                             s.RecordedAt >= from && s.RecordedAt < to, ct);
-    var first = await db.TelemetrySamples.Where(s => s.TerrariumId == terrariumId)
-                                         .MinAsync(s => (DateTimeOffset?)s.RecordedAt, ct);
-    return new CoverageDto(expected, received, 100.0 * received / expected, first, /* gaps computed client-side or in SQL */ null);
-}
-```
+- Ports exist only where a set of queries is non-trivial or reused. `ITerrariumStore`
+  (`Application/Abstractions`) with its `EfTerrariumStore` adapter (`Infrastructure/Persistence`) is the read path of
+  FR-03/FR-08/FR-09 (task 2.8). It follows `IProvisioningStore`: **one port per use-case family**, and no repository
+  per entity, which is why there is no `ITerrariumRepository`/`IDeviceRepository` pair.
+- **Built — ownership is a query parameter.** Every terrarium query filters by owner in SQL
+  (`Where(t => t.Id == id && t.UserId == owner)`) instead of loading a row and discarding it, so a foreign terrarium
+  is never materialised and a later refactor cannot leak one (BR-02.2). The soft-delete filter is an EF query filter
+  on the model, so it applies to all of them without being repeated.
+- **Built — grouped queries, not N+1.** A list of twenty terrariums resolves the newest sample and the open-alert
+  count for all of them with one `GroupBy` each (`SummariseActivityAsync`), and `readings/latest` reads a bounded
+  window of 50 samples rather than one query per metric.
+- **Built — a filtered include for a series.** `readings` loads samples carrying only the requested metric
+  (`Include(s => s.Readings.Where(r => r.Metric == metric))`), so drawing one chart does not pull four metrics.
+- All range queries project with `AsNoTracking()` where the caller cannot mutate, and never materialise
+  `TelemetrySample` graphs for a chart. The read path above is the deliberate exception: the aggregates it loads (a
+  terrarium, its device, a window of samples) are small, and `readings/latest` has to walk several samples anyway
+  because a metric the newest one lacks lives in an earlier one.
+- **Built — a fourth port, for the delivery channel.** `IPasswordResetNotifier` (`Application/Abstractions`) exists
+  so the identity use cases can issue a reset code without knowing how it travels; `LogPasswordResetNotifier`
+  (`Infrastructure/Security`) is the implementation the demo ships, and the SMTP sender of the next phase replaces
+  the registration rather than the call site. It is the same shape as `ITerrariumStore` and `IProvisioningStore`:
+  one port per use-case family, no repository per entity. `IUserStore` gained the three reset-code queries
+  (`AddPasswordResetCode`, `FindPasswordResetCodeAsync`, `InvalidateOutstandingResetCodesAsync`) rather than a new
+  port, because they belong to the account aggregate that port already owns.
+- **Built — the lookup key is the query, not a scan.** `FindPasswordResetCodeAsync` matches on the SHA-256 index
+  `IX_PasswordResetCode_CodeHash` (unique), so verifying a presented code is one seek. A salted hash could not do
+  this: it would have to load every outstanding code and compare each one.
+- Coverage (FR-07 BR-07.5): `expected = ⌊(to − from) ÷ samplingIntervalSec⌋`, `received` a `COUNT` over the window,
+  `coveragePct = min(100, received ÷ expected × 100)`. `TerrariumService.CoverageAsync` answers `409
+  device_not_bound` rather than dividing by a null device, and takes the interval from the bound device so the
+  expectation is that device's own cadence rather than a system default.
 
 ## 10. Performance defence (the part that is easy to get wrong)
 

@@ -63,3 +63,49 @@ body.wallboard .card { background: #1c1c1c; border-color: rgba(255, 255, 255, 0.
 body.wallboard .card .value { font-size: 72px; }
 body.wallboard .card .metric-name, body.wallboard .card .band, body.wallboard .card .age { color: #bdbdbd; }
 body.wallboard header.page h1 { font-size: 32px; }
+
+/* Sign-in and password-recovery forms (W2). Plain on purpose: a dashboard that needs a build step to look right
+   is not the dashboard ADR-003 chose. */
+form.auth-form { display: grid; gap: 6px; max-width: 340px; }
+form.auth-form label { margin-top: 8px; }
+form.auth-form input {
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  font: inherit;
+}
+form.auth-form button {
+  margin-top: 14px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-in-range);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+form.auth-form button.secondary {
+  margin-top: 2px;
+  padding: 2px 0;
+  background: transparent;
+  color: #1b1b1b;
+  font-weight: 400;
+  text-decoration: underline;
+  justify-self: start;
+}
+form.auth-form .message { min-height: 18px; margin: 8px 0 0; font-size: 13px; color: #5f5f5f; }
+
+/* A one-time secret the keeper has to write down: monospace, selectable, and obviously not decoration. */
+.code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  background: #f1f8e9;
+  border: 1px solid rgba(46, 125, 50, 0.35);
+  border-radius: 6px;
+  padding: 10px;
+  margin: 10px 0 0;
+  word-break: break-all;
+  user-select: all;
+}

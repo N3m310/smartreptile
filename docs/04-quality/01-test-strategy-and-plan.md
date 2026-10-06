@@ -96,6 +96,7 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 | Capacitive/wear behaviour of NVS writes | Requires a long-term hardware study | Documented as an assumption with the measured write rate |
 | Usability with a real keeper | No test participants guaranteed | Heuristic review against the UX rules + accessibility checks |
 | Load beyond 50 RPS | Out of scope for a single-host demo | Trend recorded, no claim made (NFR-01 note) |
+| The **TERRAGUARD** client in `web/` — *while a screen still renders `mockData.ts`* | A screen on mock data has no behaviour to assert, and the client carries no ARB keys yet, so even `TC-I-15`'s key-parity check cannot reach it | The screen keeps the mock-data notice (`web/src/components/MockDataNotice.tsx`) and counts for nothing in the DoD. **This exclusion is temporary and shrinking**: `ADR-019` promotes the client to the M4 web surface and 4.15–4.20 remove it screen by screen — a wired screen is tested like any other client, and 4.18's key-parity gate is what ends the exclusion for good. It is stated here as a *transitional* gap, not a settled one |
 
 ## 7. Test execution plan
 

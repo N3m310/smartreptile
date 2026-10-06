@@ -1,4 +1,4 @@
-# 01 — Architecture Decision Log (ADR-001 … ADR-016)
+# 01 — Architecture Decision Log (ADR-001 … ADR-019)
 
 Append-only. Each entry: **Context → Decision → Consequences → Rejected alternatives.** Numbers are never
 reused; a superseded ADR keeps its id and gains a "Superseded by" note.
@@ -53,7 +53,7 @@ the team's SQL Server familiarity reduces schedule risk).
 ---
 
 ## ADR-003 — Flutter app + light vanilla-JS web dashboard
-**Status:** Accepted · **Related:** rubric (state management), NFR-06
+**Status:** Accepted — **superseded in part by `ADR-017` and `ADR-019`** (the "no build step" half: ADR-017 applied it to the prototype surface the team demonstrates, and `ADR-019` promotes that surface to the deliverable while `web/legacy/` is retired, so the vanilla-JS web half of this decision ends with task 4.19; the Flutter-app half stands) · **Related:** rubric (state management), NFR-06, ADR-017, ADR-019
 
 **Context.** The brief says "dashboard (web **or** app)". The course rubric requires a mobile app with state
 management. A web dashboard is invaluable for the demo wallboard and report screenshots.
@@ -361,3 +361,167 @@ pairing endpoint is not finished in time.
 correctly — an unacceptable demo and support risk). Proxying the secret through the backend (creates a second
 authoritative path for a secret the server already stores hashed). BLE-assisted pairing (extra stack for one flow,
 and chipset support varies across the cheap dev boards in the BOM).
+
+---
+
+## ADR-017 — The web dashboard gets a React prototype, and `web/` is split around it
+**Status:** Accepted · **Date:** 2026-10-03 · **Related:** ADR-003, ADR-005, FR-08, NFR-06, `02-design/04` §1.2, roadmap 4.10 · **Note (2026-10-03):** the BUG-03 consequence below is closed (task 4.12) and this entry's open follow-up — which web surface carries M4 — is settled by `ADR-018` · **Note (2026-10-06):** `ADR-019` **revokes** that settlement — `ADR-018` is revoked in full, the prototype is promoted to the M4 web surface, and the split this entry created is undone when `web/legacy/` is retired (task 4.19)
+
+**Context.** ADR-003 chose a "light vanilla-JS dashboard, no build step" and rejected React because it "needs a
+build step and adds a language to the project for no coursework benefit". On 2026-10-02 a commit
+(`5581ea1`, branch `tuanTV2`) landed a **React UI prototype of the keeper's screens** under the working title
+**TERRAGUARD**: React 19 + Vite 6 + TypeScript 5.7 + Tailwind CSS v4, eight routes (`/` login, `/dashboard`,
+`/terrariums`, `/terrariums/:id`, `/devices`, `/alerts`, `/history`, `/settings`), Vietnamese-only copy, driven
+entirely by `web/src/data/mockData.ts`. It makes **no network calls at all** (no `fetch`, no `axios`, no
+`import.meta.env`, no `SignalR`/`WebSocket`), and its build output (`web/dist/`) was committed. The commit put the
+prototype at the root of `web/` and moved the M1 static dashboard to `web/legacy/`, which left the doc set, the
+compose `web` service and `.gitignore` describing a repository that no longer existed.
+
+**Decision.** Keep both surfaces, and say which is which rather than blending them:
+
+| Path | What it is | Stack | Data |
+|---|---|---|---|
+| `web/legacy/` | The **M1 static dashboard** — `index.html` (Live), `wallboard.html`, `health.html` | HTML + CSS + vanilla-JS ES modules + Chart.js 4 | The **real API** (`<meta name="api-base">`), empty/offline states included |
+| `web/` | The **TERRAGUARD prototype** — a UI exploration of the keeper's screens | React 19 + Vite 6 + TypeScript + Tailwind v4 + `react-router-dom` + `recharts` + `lucide-react` | **Mock data only**; no request leaves the page |
+
+`web/dist/` stays committed as an **explicit exception** to the "no generated build output in git" rule, so
+`docker compose up` can serve the prototype without a Node toolchain in the image — the same reasoning ADR-003
+used to reject npm in the critical path in the first place.
+
+**Consequences.**
+- The prototype is a **UI artefact, not the dashboard**. It carries no dwell, hysteresis, phase, dedupe or
+  escalation logic — those live in the backend (ADR-005) — so its alerts are plain `value > max` comparisons
+  against mock thresholds, and no number on it may be quoted as engine behaviour. This is stated in the
+  prototype's own summary (`TERRAGUARD_SUMMARY.md`) and repeated here because that is exactly the kind of
+  confusion the "never fake a number" standing rule exists to prevent.
+- **Two web codebases exist and neither is the M4/M6 deliverable** (roadmap 4.10). The next decision is a real
+  one and is tracked as task 4.13: wire the prototype to the API and retire `web/legacy/`, or keep the prototype
+  as a mock-data reference and extend the static dashboard. Wiring it is a rewrite of its data layer, not a patch.
+- The prototype defines a **second status→colour palette** (`web/src/index.css` — `--status-{normal,warning,
+  danger,offline}`) with no mechanical link to the app's single mapping in `core/status.dart` or to `02-design/04`
+  §3. Tracked as task 4.14 alongside its localisation gap.
+- The prototype is **outside every existing gate**: not in the five CI jobs, not covered by any `TC-*` case, and
+  it escapes `TC-I-15` (i18n key parity) because it has no ARB keys to compare. This is recorded as a known hole
+  rather than papered over; 4.14 either closes the localisation half or writes the exclusion down.
+- The move broke a documented path: compose's `web` service still mounts `web/`, so `:8081/` serves the Vite dev
+  entry (`<script src="/src/main.tsx">`) as a blank page and `/wallboard.html` is a 404. Recorded as **BUG-03**
+  (`05-release/03` §4) and tracked as task 4.12.
+
+**Rejected.** Deleting `web/legacy/` (it is the only web surface that renders real data, and the M1 evidence set in
+`06-report/snapshots/` could no longer be reproduced); building the prototype at image-build time with a
+multi-stage `web/Dockerfile` (correct in general, but it re-imports exactly the npm-in-the-path risk ADR-003
+rejected, to serve a UI whose numbers are invented); editing ADR-003 in place to say React was always acceptable
+(the log is append-only, and the reversal — not its erasure — is the part worth reading).
+
+---
+
+## ADR-018 — The TERRAGUARD prototype stays a mock-data UI reference; `web/legacy/` remains the M4 web surface
+**Status:** **REVOKED (2026-10-06) by `ADR-019`** — no part of this decision remains in force. `ADR-019` promotes the TERRAGUARD client to the M4 web surface and retires `web/legacy/` (roadmap 4.15–4.20), which reverses the decision below and every consequence of it. An accepted ADR is revoked by a later one, never edited or deleted, so this entry keeps its original text as the record of what was decided on 2026-10-03 and why; `ADR-019` cites that reasoning as what the reversal was decided on. · **Date:** 2026-10-03 · **Revoked by:** ADR-019 · **Related:** ADR-003, ADR-005, ADR-017, ADR-019, FR-08, NFR-06, `02-design/04` §1.2, `05-release/01` §5, roadmap 4.13
+
+**Context.** ADR-017 absorbed the prototype and left one decision open, tracked as task 4.13: wire TERRAGUARD to
+the real API and retire `web/legacy/`, or keep it as a mock-data reference and finish the static dashboard. The two
+candidate surfaces are not equivalent:
+
+| | `web/legacy/` — static dashboard | `web/` — TERRAGUARD prototype |
+|---|---|---|
+| Data | The **real API** (`js/api.js`, `<meta name="api-base">`) | `src/data/mockData.ts`; no request leaves the page |
+| Threshold verdicts | Renders what the engine computed | Re-implements `value > max` in a screen (the ADR-005 violation) |
+| Failure behaviour | `failureKind` classifies unreachable / not-built / not-found | Nothing can fail, so nothing is exercised |
+| Evidence | `06-report/snapshots/` — the M1 screenshots were taken from it | None; no number on it may be quoted |
+| Cost to make it the deliverable | Extend toward W1–W8 as M2/M3 endpoints land | Rewrite the data layer **and** wait for the same endpoints |
+
+M2 and M3 — the endpoints any real web surface needs — are the critical path, so neither option removes the
+dependency on them. The difference is what happens to the surface that already works.
+
+**Decision.** The prototype stays a **mock-data UI reference**, and `web/legacy/` remains the M4 web surface: the
+one task 4.10 extends toward W1–W8, and the one the milestone's DoD ("every screen shows real data with a
+timestamp") is measured on.
+
+Two consequences are accepted deliberately:
+
+1. **The prototype is not promoted.** It is labelled as mock data in the UI (task 4.14) and stays outside CI and the
+   `TC-*` set (ADR-017). What the team reuses is its **screens**, not its code: the card hierarchy, the layout and
+   the Vietnamese copy are the visual reference for the same screens in the static dashboard.
+2. **M4 web effort goes into the static dashboard.** That is vanilla-JS work rather than React — the stack ADR-003
+   chose for it — and it keeps the M1 evidence reproducible.
+
+**Consequences.**
+- `02-design/04` §1.2, `05-release/01` §5 and roadmap table 4.10–4.14 now agree on which surface ships, which is
+  the acceptance condition for task 4.13.
+- React is **deferred, not rejected on merit**: if extending the static dashboard to W1–W8 becomes the bottleneck,
+  the prototype is the ready-made starting point and this decision is revisited.
+- The prototype keeps a maintenance cost — a second codebase and a second palette — that buys nothing at demo time.
+  The exit stays cheap and stated: it is one folder, reachable only through the `/` mount, and removing it would
+  touch `ADR-017`'s rejected-alternatives note and `TERRAGUARD_SUMMARY.md` only.
+
+**Rejected.** Wiring TERRAGUARD to the API now (the right call one milestone later, but it would spend the M4 web
+budget re-rendering data the static dashboard already renders, while M2/M3 remain the critical path). Deleting the
+prototype now that `web/legacy/` is confirmed as the surface (it is the team's UI reference for the W1–W8 work and
+it already exists, labelled). Editing ADR-017 in place to record this outcome (append-only log).
+
+---
+
+## ADR-019 — TERRAGUARD is promoted to the M4 web surface; `web/legacy/` is retired
+**Status:** Accepted · **Date:** 2026-10-06 · **Revokes:** `ADR-018` **in full** (not amended, not superseded in part — its decision and all of its consequences are no longer in force) · **Related:** ADR-003, ADR-005, ADR-013, ADR-017, ADR-018, FR-01, FR-08, NFR-06, `02-design/04` §1.2, `05-release/01` §5, roadmap 4.10 and 4.15–4.20
+
+**Context.** ADR-018 named `web/legacy/` the M4 web surface and kept TERRAGUARD a mock-data UI reference, with one
+escape clause: *"React is deferred, not rejected on merit: if extending the static dashboard to W1–W8 becomes the
+bottleneck, the prototype is the ready-made starting point and this decision is revisited."* The team is invoking
+that clause, and two things made it the right moment:
+
+1. **The read half of ADR-018's argument expired.** Its cost table charged the prototype with "rewrite the data
+   layer **and** wait for the same endpoints". The second half no longer applies to the screens that matter most:
+   FR-01 authentication (including the recovery flows of 2026-10-06) and task 2.8's terrarium read surface
+   (`GET`/`POST /terrariums`, `GET /{id}`, `readings/latest`, `readings`, `coverage`) are built and verified, so
+   the endpoints that wire TERRAGUARD's *read* screens exist today, and what remains is shared with any surface.
+2. **Reaching W1–W8 in `web/legacy/` is a design job, not a wiring job.** `02-design/04` §1.2 lists eight web
+   pages. Legacy implements a subset as plain HTML; the prototype already carries the card hierarchy, layout,
+   charting (`recharts`) and Vietnamese copy for eight screens. Extending legacy means re-deciding that design in
+   vanilla JS, while wiring the prototype means writing an API client against endpoints that now exist. The team
+   judged the second cheaper and the result better — which is the comparison ADR-018 said it would revisit on.
+
+**Decision.** The **TERRAGUARD prototype becomes the M4 web surface**, and `web/legacy/` is retired when the switch
+completes (task 4.19). Promotion is not a relabel: it carries the obligations the prototype was previously excused
+from, and those obligations are the substance of this decision rather than footnotes to it.
+
+| The prototype was… | As the shipped surface it must be… | Task |
+|---|---|---|
+| `src/data/mockData.ts`; no request leaves the page | Wired to the real API, with the mock shapes deleted as each screen lands | 4.15, 4.16, 4.20 |
+| `value > max` over mock bands, evaluated in a screen | Fed by the server's verdict and band (`readings/latest`), with no comparison operator on a metric value outside the engine's contract — the ADR-005 rule that ADR-018 used as an argument *against* it | 4.17 |
+| Vietnamese-only, no ARB keys, unreachable by `TC-I-15` | Bilingual (vi default, en) like the app, so `TC-I-15`'s key-parity check covers it (NFR-06, ADR-013) | 4.18 |
+| A prototype-only palette measuring 4.7–8.6:1 on its own surfaces | `02-design/04` §3's tokens, at ≥ 4.5:1 for body text (`04-quality/03` §4.4) | 4.18 |
+| Outside CI and every `TC-*` case | `tsc`, `vite build` and the key-parity check in CI, and the mock-data notice removed **because the mock data is gone** | 4.18 |
+| No wallboard, while the M4 DoD requires one on a second screen | A wallboard route rebuilt in React, since retiring legacy would otherwise strand the page the DoD names | 4.19 |
+
+**Consequences.**
+- **The promotion is staged by the backend, not by preference.** Only three of the eight screens have endpoints
+  today (`Login`, `Dashboard`, `History`, plus the read half of `Terrariums`/`TerrariumDetail`). `Alerts` waits on
+  task 3.4, `Settings` on `PATCH /auth/me`, `Devices` on device read routes, and live push on task 2.9. Task 4.20
+  exists so those screens are wired when their endpoints land rather than ahead of them; the per-screen readiness
+  table is in `03-implementation/07`.
+- `web/nginx.conf` collapses from two mounts to one, and its SPA fallback becomes the only routing rule.
+  `05-release/01` §5's BUG-03 regression pair changes with it: `/legacy/*` stops being checked because the pages
+  stop existing, and a deep route returning `200` through the fallback takes its place — otherwise the fix for
+  BUG-03 would quietly become an untested assumption of the new layout.
+- **The M1 report screenshots are not re-taken.** `06-report/snapshots/` is evidence of the M1 surface at the time
+  it existed; re-shooting it from a different client would misrepresent what was measured then.
+- `web/dist/` stays committed (ADR-017) and stays what nginx serves.
+- **A screen that still renders `mockData.ts` keeps its mock-data notice.** `MockDataNotice` is removed when the
+  last invented number is removed, not before — a notice that outlives the mock data is as misleading as mock data
+  without one.
+- The prototype's maintenance cost — a second codebase, which ADR-018 kept at arm's length — is now borne
+  deliberately, and that second codebase becomes the first.
+- **`ADR-018` is revoked outright, not superseded in part.** Its status line now reads `REVOKED` and there is no
+  surviving half of it to check a future change against. Two things it recorded are nevertheless **not** undone by
+  the revocation, because they were never its to revoke: the mock-data labelling of task 4.14 (which 4.18 removes
+  when the last invented number goes, not before) and `web/dist/` being committed (ADR-017's decision). Revoking a
+  decision also does not rewrite the history that cites it, so 4.12–4.14 stay closed and `06-report/snapshots/`
+  keeps describing what M1 measured.
+
+**Rejected.** **Keeping both surfaces** (ADR-018's outcome): the DoD has to name one surface anyway, so the second
+one becomes a reference cost and a divergence risk rather than a free option. **Wiring the read-only screens and
+leaving `web/legacy/` for the write screens**: two clients that must stay visually identical, which is worse than
+either alone. **Promoting the prototype without its obligations** — wiring it and leaving the palette, the
+Vietnamese-only copy and the CI exclusion as they are: that is how a mock prototype becomes a shipped surface that
+still cannot be measured, and it would empty `TC-I-15`'s gate of meaning. **Editing or deleting ADR-018** to record
+this (append-only log: a revoked entry keeps its text, and its status line is what declares the revocation).

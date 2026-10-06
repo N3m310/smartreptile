@@ -109,10 +109,20 @@ and seeding policy.
 **R6.5 Real-time path.** SignalR setup, reconnect + re-fetch rule, degraded polling mode.
 **R6.6 UI/UX implementation.** Screenshot gallery (Home, Alerts detail, Thresholds, Claim, Report, Wallboard),
 plus the "never render a value without its timestamp" rule and how the widget signature enforces it.
-**R6.7 Web dashboard.** Structure and why no build step. The M1 evidence set is `06-report/snapshots/` — live API
-responses plus captured pages, taken from the running stack; where the Live and Wallboard pages show their empty
-state behind an `http_404` banner, that is the documented milestone boundary (the `/api/v1` routes are M2), not a
-fault, and the caption must say so.
+**R6.7 Web.** Structure, and the **three** decisions that produced it (`ADR-017`, `ADR-018`, `ADR-019`). Tell it in
+the order it happened, because the reversal is the interesting part: `ADR-017` split `web/` in two, `ADR-018` kept
+the TERRAGUARD React client a mock-data **reference** and named `web/legacy/` — the static vanilla-JS dashboard with
+the real API behind it — the M4 web surface, and **`ADR-019` (2026-10-06) revokes it in full**: TERRAGUARD becomes the
+surface and `web/legacy/` is retired (roadmap 4.15–4.20). State the promotion's obligations rather than just the
+relabel — real API data, verdicts from the server instead of `value > max` in a screen (ADR-005), vi+en key parity,
+§3 tokens at ≥ 4.5:1, CI coverage, and the wallboard rebuilt in React — and that it is staged by which endpoints
+exist, not by preference (three of eight screens are wireable today). Also say why committing `web/dist/` was
+accepted as the price of keeping npm out of the demo path, and that the M1 evidence set is
+`06-report/snapshots/` — live API responses plus captured pages, taken from the running stack, **not re-taken**
+after the promotion because they are evidence of the M1 surface at the time it existed; where the Live and
+Wallboard pages show their empty state behind an `http_404` banner, that is the documented milestone boundary (the
+`/api/v1` routes are M2), not a fault, and the caption must say so. Quoting a prototype number as a measurement is
+the one thing this section must not do.
 **R6.8 Code quality.** Commenting convention with an annotated excerpt, analyzer/format gates, coverage gates.
 
 ## R7 — Testing and quality assurance

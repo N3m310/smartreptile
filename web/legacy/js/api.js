@@ -6,12 +6,42 @@
 const meta = document.querySelector('meta[name="api-base"]');
 export const apiBase = (meta?.content ?? 'http://localhost:8080').replace(/\/$/, '');
 
-/** Access token for authenticated calls (set after login in M2). */
-let accessToken = null;
+// Sessions live in localStorage rather than in memory: a page reload must not sign the keeper out, and the
+// wallboard tab has to share the session the Live page started.
+const ACCESS_KEY = 'sr.accessToken';
+const REFRESH_KEY = 'sr.refreshToken';
 
-/** Stores the bearer token used by subsequent requests. */
-export function setAccessToken(token) {
-  accessToken = token;
+/** Access token for authenticated calls, restored from the last page load. */
+let accessToken = localStorage.getItem(ACCESS_KEY);
+
+/** Refresh token, spent once to survive the 15-minute access-token lifetime (BR-01.3). */
+let refreshToken = localStorage.getItem(REFRESH_KEY);
+
+/** Stores a session. Either argument may be null, which is exactly what signing out is. */
+export function setSession(access, refresh) {
+  accessToken = access ?? null;
+  refreshToken = refresh ?? null;
+
+  persist(ACCESS_KEY, accessToken);
+  persist(REFRESH_KEY, refreshToken);
+}
+
+/** Forgets the session. */
+export function clearSession() {
+  setSession(null, null);
+}
+
+/** True when an access token is held; the Live page shows its sign-in form when it is not. */
+export function hasSession() {
+  return Boolean(accessToken);
+}
+
+function persist(key, value) {
+  if (value) {
+    localStorage.setItem(key, value);
+  } else {
+    localStorage.removeItem(key);
+  }
 }
 
 /** Error carrying the API problem code so pages can explain what happened. */
@@ -52,16 +82,66 @@ export function failureKind(error) {
   return 'failed';
 }
 
+/**
+ * Signs in and stores the session (§07-appendices/03 §4.1). Throws ApiError carrying the server's stable problem
+ * code, so a page can tell a wrong password (`invalid_credentials`) from a lockout (`account_locked`) without
+ * parsing prose.
+ */
+export async function login(usernameOrEmail, password) {
+  const session = await postJson('/api/v1/auth/login', { usernameOrEmail, password });
+  setSession(session.accessToken, session.refreshToken);
+
+  return session.user;
+}
+
+/** POST a JSON document. */
+export function postJson(path, body, allowRefresh = true) {
+  return send('POST', path, body, allowRefresh);
+}
+
+/**
+ * Replaces a forgotten password with the account's backup recovery code (§07-appendices/03 §4.1). Returns the
+ * replacement code, which the caller must show once — the code it consumed is spent.
+ */
+export function recover(usernameOrEmail, recoveryCode, newPassword) {
+  return postJson('/api/v1/auth/recover', { usernameOrEmail, recoveryCode, newPassword })
+    .then((result) => result.recoveryCode);
+}
+
+/**
+ * Asks the server to issue a reset code (§07-appendices/03 §4.1). Always answers 202, whether or not the
+ * identifier has an account — the caller cannot tell the two apart, and must not try to.
+ */
+export function forgotPassword(usernameOrEmail) {
+  return postJson('/api/v1/auth/forgot-password', { usernameOrEmail });
+}
+
+/**
+ * Replaces a forgotten password with a code the server issued. Returns the new backup recovery code, for the same
+ * reason as {@link recover}: the reset rotates it, so the keeper has to leave with the working one.
+ */
+export function resetPassword(usernameOrEmail, resetCode, newPassword) {
+  return postJson('/api/v1/auth/reset-password', { usernameOrEmail, resetCode, newPassword })
+    .then((result) => result.recoveryCode);
+}
+
 /** GET a JSON document; throws ApiError on any non-2xx response. */
-export async function getJson(path) {
+export function getJson(path) {
+  return send('GET', path, null, true);
+}
+
+async function send(method, path, body, allowRefresh) {
   let response;
 
   try {
     response = await fetch(`${apiBase}${path}`, {
+      method,
       headers: {
         Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
+      body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
     // No status code: unreachable. Callers show cached values with explicit timestamps instead of pretending.
@@ -71,19 +151,46 @@ export async function getJson(path) {
   const text = await response.text();
 
   if (!response.ok) {
-    let code = `http_${response.status}`;
-    let detail = null;
-    try {
-      const problem = JSON.parse(text);
-      code = problem.code ?? code;
-      detail = problem.detail ?? null;
-    } catch {
-      /* not JSON: keep the status-derived code */
+    // An access token lasts 15 minutes, so a single 401 is far likelier to be an expired session than a bad one.
+    // Rotating once and repeating the call keeps the dashboard alive across a demo; a second 401 means the refresh
+    // token is spent and the keeper has to sign in again.
+    if (response.status === 401 && allowRefresh && refreshToken && (await rotateSession())) {
+      return send(method, path, body, false);
     }
-    throw new ApiError(code, response.status, detail);
+
+    throw toApiError(response, text);
   }
 
   return text.length ? JSON.parse(text) : {};
+}
+
+/** Rotates the session. False means the refresh token no longer works, and the stored session is dropped. */
+async function rotateSession() {
+  try {
+    const session = await postJson('/api/v1/auth/refresh', { refreshToken }, false);
+    setSession(session.accessToken, session.refreshToken);
+
+    return true;
+  } catch {
+    clearSession();
+
+    return false;
+  }
+}
+
+function toApiError(response, text) {
+  let code = `http_${response.status}`;
+  let detail = null;
+
+  try {
+    const problem = JSON.parse(text);
+    code = problem.code ?? code;
+    detail = problem.detail ?? null;
+  } catch {
+    /* not JSON: keep the status-derived code */
+  }
+
+  return new ApiError(code, response.status, detail);
 }
 
 /** Reads readiness (database + MQTT broker) for the "live updates paused" banner. */

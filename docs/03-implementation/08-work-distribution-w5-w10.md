@@ -2,13 +2,32 @@
 
 **Short version.** M1's missing DoD line lands in W5, the pipeline and the engine land in W6–W7, **the app and
 the dashboard are feature-complete by the end of W8**, W9 is hardening plus the release artefacts, and W10 is
-only the report, two rehearsals and the submission. **Nothing new is built after W9 Friday.**
+only the report, two rehearsals and the submission. **Nothing new is built after W9 Friday.** The TERRAGUARD
+prototype that arrived in W4 is absorbed **inside W4 itself** — tasks 4.12–4.14 closed on 2026-10-03 — so it buys
+neither the app nor the dashboard any extra time.
 
 - Calendar: W1 = Mon 2026-09-07 → W4 = 09-28…10-04 (contains 2026-09-29) → **W5 = 10-05 … W10 = 11-15**.
   Shift the dates if your week 1 differs; the week numbers are what matter.
 - ~30 working days left, so the app gets **four weeks and never fewer**. §3 is how that is protected.
 - Task ids and definitions of done live in `03-implementation/07-implementation-roadmap.md`; this file owns
   *who, when, and what must be true on Friday*.
+
+**Brought forward (2026-10-03, W4).** The prototype's three follow-ups are already closed: **4.12** fixed
+**BUG-03**, **4.13** was decided as **`ADR-018`** (the prototype stays a mock-data reference; `web/legacy/` is the
+M4 web surface) and **4.14** labelled the prototype and settled its palette and copy (`05-release/03` §5). They
+were budgeted at 3 h + 3 h + 4 h for W5–W7; those hours are spent, so the `DOC` total in §4 is unchanged, but the
+weekly `DOC` figures for W5–W7 overstate what is left by 3, 3 and 4 h (W4 is not in that table). The rest of the
+plan — W8's freeze and every Friday gate — is untouched, and the W5/W6/W7 `DOC` bullets below are now 4.10 and
+report time rather than prototype time.
+
+**Reopened 2026-10-06 (`ADR-019`) — the `DOC` track's web work changed shape, and its owner has not been
+re-assigned.** `ADR-019` promotes TERRAGUARD to the M4 web surface and retires `web/legacy/`, so 4.13's decision
+above no longer holds and the four hours 4.12–4.14 spent are not the end of it: `DOC` now owns roadmap 4.15–4.20 —
+an API client, four screens, a server-verdict pass, a localisation/CI pass, the surface switch and the wallboard
+rebuild. That is **React and TypeScript work**, not the vanilla-JS dashboard `DOC` was scoped for, and it overlaps
+M2/M3 by construction (4.20 is gated on their endpoints). Two consequences to settle before W8: **who owns `DOC`**
+now that the work is React, and **whether 3.1–3.7's endpoints can land early enough** for 4.20 to be more than a stub
+at the freeze. Until both are answered, treat the W8 web gate as at risk rather than scheduled.
 
 ## 1. Roles — fill in the names
 
@@ -18,7 +37,7 @@ only the report, two rehearsals and the submission. **Nothing new is built after
 | `BE-1` | backend — ingest + API surface | **M2** (2.2, 2.3, 2.4, 2.8, 2.9), 5.2, 5.7 | `BE-2` |
 | `BE-2` | backend — engine + alerts | **M3** (3.1–3.7), **M5** (5.1, 5.3–5.5) | `BE-1` |
 | `APP` | Flutter app | **M4** (4.1–4.9, 4.11), 6.3 | `DOC` |
-| `DOC` | web dashboard + docs/report + submission | **M6** (4.10, 1.8, report, 6.5–6.8) | `APP` |
+| `DOC` | web client (TERRAGUARD) + docs/report + submission | **M6** (1.8, report, 6.5–6.8) and the M4 web track (4.10, **4.15–4.20** per `ADR-019`; `web/legacy/` retired by 4.19) | `APP` |
 
 | Code | Full name | Student id |
 |---|---|---|
@@ -35,7 +54,8 @@ only the report, two rehearsals and the submission. **Nothing new is built after
 - `BE-1` 2.2 device claim + 2.3 MQTT credential check + TLS
 - `BE-2` 2.4 ingest worker and pipeline (`TC-U-01…09`)
 - `APP` 4.1 auth + 4.2 home — **built against the stub API, not waiting for a real endpoint**
-- `DOC` book the mentor slot for W7; close the `Arid-cool` gap; literature pass; web 4.10 live page
+- `DOC` book the mentor slot for W7; close the `Arid-cool` gap; literature pass; then the 4.10 live page
+  (**4.12 was closed early**, 2026-10-03 — BUG-03 is fixed)
 - **Gate:** real sensor values on serial — the line M1 has been missing
 
 ### W6 · 10-12 … 10-18 — first sample end to end
@@ -44,6 +64,8 @@ only the report, two rehearsals and the submission. **Nothing new is built after
 - `BE-2` finish 2.4 (`TC-I-03/04`); start 3.1 threshold resolution
 - `APP` 4.3 live subscription + polling fallback; 4.4 history chart
 - `DOC` 4.10 live page on real data; report R1 + R2 — take the enclosure photos this week
+  (**4.13 was decided early**, 2026-10-03, as `ADR-018`: `web/legacy/` stays the web surface — **`ADR-018` revoked
+  2026-10-06 by `ADR-019`**, so this week's `DOC` work is now the first stage of 4.15; see the note under §1)
 - **Gate: 2.10 first E2E** — node → broker → SQL Server → `/readings/latest`, screenshot saved
 
 ### W7 · 10-19 … 10-25 — the engine can tell the keeper something
@@ -51,7 +73,8 @@ only the report, two rehearsals and the submission. **Nothing new is built after
 - `BE-1` 3.4 alert lifecycle + 3.5 notifications — get one real Telegram message through
 - `FW` 2.6 HTTPS back-fill; 2.7 provisioning + claim code on the OLED
 - `APP` 4.5 alerts inbox/detail/ack; 4.6 threshold editor — **6 of 9 screens done by Friday**
-- `DOC` mentor meeting: demo M3 and write the dated 1.1 line; report R3
+- `DOC` mentor meeting: demo M3 and write the dated 1.1 line; report R3 (**4.14 was closed early**, 2026-10-03:
+  the prototype is labelled as mock data and its palette and copy are settled)
 - **Gate:** an induced excursion produces **exactly one alert and one notification**; a 4-minute disturbance
   produces **nothing**
 
@@ -120,35 +143,45 @@ own evidence covers.
 | Backend ingest + API (2.2–2.4, 2.8, 2.9, 5.2, 5.7) | 55 | | 55 | | | |
 | Backend engine + hardening (3.x, 5.1, 5.3–5.5) | 60 | | | 60 | | |
 | App (4.1–4.9, 4.11, 6.3) | 60 | | | | 60 | |
-| Web (4.10) + literature (1.8) + QA walkthroughs | 45 | | | | | 45 |
+| Web (4.10) + literature (1.8) + QA walkthroughs — 4.12–4.14 closed in W4 | 55 | | | | | 55 |
 | Report, demo, packaging (R1–R14, 6.4–6.8) | 55 | 5 | 5 | 5 | 5 | 35 |
-| **Total** | **345** | **75** | **60** | **65** | **65** | **80** |
+| **Total** | **355** | **75** | **60** | **65** | **65** | **90** |
 
 The same hours spread over the six weeks (indicative, read off §2's task assignments):
 
 | Week | `FW` | `BE-1` | `BE-2` | `APP` | `DOC` | Team |
 |---|---|---|---|---|---|---|
-| W5 | 16 | 12 | 12 | 12 | 12 | 64 |
-| W6 | 11 | 14 | 8 | 14 | 12 | 59 |
-| W7 | 12 | 12 | 16 | 16 | 14 | 70 |
+| W5 | 16 | 12 | 12 | 12 | 15 | 67 |
+| W6 | 11 | 14 | 8 | 14 | 15 | 62 |
+| W7 | 12 | 12 | 16 | 16 | 18 | 74 |
 | W8 | 11 | 11 | 12 | 18 | 15 | 67 |
 | W9 | 15 | 7 | 13 | 3 | 12 | 50 |
 | W10 | 10 | 4 | 4 | 2 | 15 | 35 |
-| **Total** | **75** | **60** | **65** | **65** | **80** | **345** |
+| **Total** | **75** | **60** | **65** | **65** | **90** | **355** |
 
 Read it the way the team experiences it: **W7 and W8 are the two heavy weeks for everybody** (the engine, the
 app screens and the freeze land together), and W10 is deliberately light on code. `FW`'s W5 is front-loaded on
 purpose — if the bench does not produce a number that week, the W6 end-to-end gate is already at risk.
 
 `APP` carries ~60 h inside four weeks — **≈15 h/week in W5–W8**, which is the price of finishing before W10 and
-the one number to check every Monday. `DOC` peaks at ~13 h/week; if either is unrealistic, move 4.8/4.9 to `DOC`
-or the web pages to the cut list — never the freeze.
+the one number to check every Monday. `DOC` peaks at ~18 h/week (W7: R3 plus the remaining web pages), and the
+10 h the prototype cost — 4.12 (3 h), 4.13 (3 h), 4.14 (4 h) — were spent in W4 on 2026-10-03 rather than in
+W5–W7, so the `DOC` total is unchanged while those three weeks are lighter than the table above shows; if the
+remaining `DOC` load is unrealistic, move 4.8/4.9 to `DOC` or the web pages to the cut list — never the freeze.
 
 ## 6. Cut list (use it the Friday a week slips)
 
 1. FR-17 camera snapshot · 2. web pages beyond wallboard + live · 3. 5.7 k6 → a measured single-client sample
 4. 24 h soak → 8 h with the same instrumentation · 5. 4.8 report screen (the API export stays)
-6. SMTP email channel (keep FCM + Telegram)
+6. SMTP email channel (keep FCM + Telegram) · 7. ~~promoting the prototype past a mock-data reference (`ADR-018`
+declines this)~~ — **no longer available as a cut: `ADR-019` makes the promotion the plan** (4.15–4.20), so cutting
+it now means cutting the M4 web surface itself. **4.12 was never on this list**: it
+repaired a broken demo path (BUG-03) and was closed on 2026-10-03, together with 4.13 and 4.14.
+
+> **Note (2026-10-06).** Item 2 ("web pages beyond wallboard + live") also needs reading against `ADR-019`: with
+> TERRAGUARD as the surface, the wallboard is new work (4.19) rather than something already standing in
+> `web/legacy/`, so the cut still works but it cuts more than it used to — and 4.19 has to happen before any page
+> beyond it, or the DoD's second screen has nothing to show.
 
 **Never cut:** the report, the rehearsals, the release-mode proof, the rubric's unit + widget tests, the
 alert-correctness tests, and the **W8 app freeze**.

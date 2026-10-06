@@ -3,7 +3,7 @@
 IoT environmental monitoring and alerting for reptile terrariums — **v1: measure, store, display, alert.
 No AI, no actuation** (see `docs/07-appendices/06-v2-ai-roadmap.md` for what comes next).
 
-> Design documentation for this repository lives in [`docs/`](docs/) — 34 files covering product, design,
+> Design documentation for this repository lives in [`docs/`](docs/) — 36 files covering product, design,
 > implementation, quality, release, report and the appendices. Section references below (`§`) point there.
 
 | Component | Path | Stack |
@@ -11,7 +11,8 @@ No AI, no actuation** (see `docs/07-appendices/06-v2-ai-roadmap.md` for what com
 | Firmware (sensor node) | `firmware/` | ESP32 / Arduino via PlatformIO (`esp32dev` + `native` for host tests) |
 | Backend | `backend/` | ASP.NET Core 10, EF Core 10, SQL Server 2022, in-process MQTT broker (MQTTnet), SignalR |
 | Mobile app | `app/` | Flutter (Android primary), `provider` |
-| Web dashboard | `web/` | Static HTML/CSS/JS + Chart.js (no build step) |
+| Web dashboard | `web/legacy/` | Static HTML/CSS/JS + Chart.js (no build step) — the only web surface with a real API behind it today; **retired by task 4.19** (`ADR-019`) |
+| Web client | `web/` | React 19 + Vite + TypeScript + Tailwind CSS v4 — the M4 web surface from `ADR-019`. Still mock data until 4.15–4.20 wire it screen by screen; a screen that still renders `mockData.ts` keeps its mock-data notice |
 
 ## Quick start
 
@@ -73,11 +74,26 @@ flutter run -d android     # or: flutter run -d emulator-5554
 flutter test
 ```
 
-### 5. Web dashboard
+### 5. Web (`web/` — two surfaces during the transition, see `ADR-017`, `ADR-018` and `ADR-019`)
+
+Compose serves both surfaces from one nginx (`web/nginx.conf`, task 4.12): `http://127.0.0.1:8081/` is the
+committed prototype build, and `http://127.0.0.1:8081/legacy/` is the dashboard that talks to the API.
+
+The dashboard — the surface that still ships today, retired by task 4.19 (`ADR-019`) — no build step:
+
+```bash
+cd web/legacy
+python -m http.server 8081     # the same files compose serves under /legacy/
+```
+
+The TERRAGUARD client — the M4 web surface from `ADR-019`, still mock data with no network calls until
+4.15–4.20 wire it screen by screen:
 
 ```bash
 cd web
-python -m http.server 8081     # or the `web` service in docker compose (nginx)
+npm install
+npm run dev                    # Vite on http://127.0.0.1:8081 — the same port as compose, so run one, not both
+npm run build                  # refresh the committed web/dist/ that compose serves at /
 ```
 
 ## Verification gates for Milestone M1 (`docs/03-implementation/07-implementation-roadmap.md`)
@@ -87,7 +103,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Gate | Command / method | Result |
 |---|---|---|
 | Backend builds, warnings as errors | `dotnet build backend/SmartReptile.sln -c Release` | ✅ Build succeeded, 0 warnings |
-| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **54 passed**, 0 failed |
+| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **422 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery) |
 | Formatting gate (CI parity) | `dotnet format SmartReptile.sln --verify-no-changes --severity error` | ✅ clean (generated migrations excluded via `.editorconfig`) |
 | Schema created by migrations only | `dotnet ef migrations add InitialSchema` | ✅ one migration; `(DeviceId, Sequence)` unique, filtered open-alert unique, one-device-per-terrarium unique, band CHECK constraints all present |
 | Docker image builds | `docker compose build api` | ✅ builds from a clean context (needed `backend/.dockerignore` — defect 8 below) |
@@ -96,21 +112,25 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Invariants exist in SQL, not only in C# | `sys.indexes`, `sys.check_constraints`, `sys.foreign_keys` | ✅ filtered unique `IX_Alert_DedupeKey ([State]<>(2))`, `IX_Device_TerrariumId ([TerrariumId] IS NOT NULL AND [Status]<>(3))`, 5 `CK_Threshold*` / `CK_ThresholdOverride*` ordering constraints |
 | Cascade risk does not fire | read the FK delete rules back | ✅ `Device → Terrarium` is `SET_NULL`, so `TelemetrySample` has a single cascade path — this was the specific shape that was flagged as a risk before the schema existed |
 | Reference data seeds on startup | `SELECT COUNT(*) FROM SpeciesProfile` | ✅ 3 profiles (`Arid (desert)`, `Leopard gecko (semi-desert)`, `Tropical (humid forest)`) and 17 threshold bands |
-| Dashboard served, and the browser accepts the API | nginx `web` on `:8081` + real browser `fetch` to `:8080` | ✅ `index`/`wallboard`/`health` all `200`; browser fetch of `/version` returns `200` with `Access-Control-Allow-Origin: http://127.0.0.1:8081` (+`204` preflight) |
+| Dashboard served, and the browser accepts the API | nginx `web` on `:8081` + real browser `fetch` to `:8080` | ✅ `index`/`wallboard`/`health` all `200`; browser fetch of `/version` returns `200` with `Access-Control-Allow-Origin: http://127.0.0.1:8081` (+`204` preflight). *(The three pages now live in `web/legacy/` after the prototype took the root of `web/` — `ADR-017`.)* **Re-verified 2026-10-03 after 4.12:** `:8081/` now serves the prototype build and `:8081/legacy/index.html` / `wallboard.html` / `health.html` all return `200`; BUG-03 is closed, with the `curl` pair written down in `docs/05-release/01` §5 |
 | Liveness | `curl /health/live` | ✅ `200 Healthy`, answers immediately |
 | Readiness with the database **up** | `curl /health/ready` | ✅ `200 Healthy` — `database: Healthy` ("Database is reachable") + `mqtt-broker: Healthy`, 7 ms |
 | Readiness with the database **down** | `docker stop smartreptile-db` → `curl /health/ready` | ✅ `503` in **3.0 s** — `database: Unhealthy` ("Database probe timed out after 3 s"), `mqtt-broker: Healthy`; `/health/live`, `/version` and `/metrics` all still `200` (degraded mode, NFR-03). Before the probe was bounded this took 16.1 s — defect 10 below |
 | Recovery without an API restart | `docker start smartreptile-db` → `curl /health/ready` | ✅ back to `200 Healthy` in 7 ms; api `RestartCount` was 0 across the whole drill |
 | Version / metrics / root | `curl /version /metrics /` | ✅ counters + `brokerRunning: true` |
 | MQTT rejects anonymous devices | `paho-mqtt` connect without credentials | ✅ `CONNACK: Bad user name or password`, and `mqtt_rejected_connections_total` incremented |
-| MQTT verifies the device secret | — | ⬜ **M2 work**: M1 rejects anonymous connections only; the `DeviceCredential` lookup lands with provisioning (FR-05) |
+| MQTT verifies the device secret | `paho-mqtt` over TLS with a real credential, a wrong one and none | ✅ **2.3 done 2026-10-03**: anonymous, wrong-secret and unknown-device connects all answered `Bad user name or password`; a claimed device connected over TLS *and* over plaintext; wildcard and cross-device subscriptions refused; a publish under another device's prefix refused and that session dropped; `POST /devices/{id}/revoke` closed the live session in **0.0 s** and the credential could not reconnect |
+| MQTT topic ACL | `paho-mqtt` subscribe/publish attempts outside the device's own prefix | ✅ **2.3**: own `cmd` granted; `sr/v1/d/+/telemetry` and another device's `cmd` refused; counters `mqtt_refused_subscriptions_total` / `mqtt_refused_publications_total` on `/metrics` |
+| MQTT plaintext is loopback-only | `netstat -ano` with TLS on, then again with `Mqtt:DisablePlaintextEndpoint=true` | ✅ **2.3**: `127.0.0.1:1883` **and** `[::1]:1883` only (no wildcard bind — binding the IPv4 address alone leaves the IPv6 socket open); in the release shape nothing listens on `1883` at all and TLS kept authenticating devices |
+| Ingest: broker → bus → worker → SQL Server | `paho-mqtt` publish over a real MQTT listener against a live API + SQL Server, then `curl /metrics` and read the rows back | ✅ **2.4 done 2026-10-04**: a two-sample batch published twice stored **2** `TelemetrySample` rows (sequences `1, 2`), **8** `MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, set `LastSeenAt` / `FirmwareVersion` / `SignalStrengthDbm` / `FreeHeapKb` and wrote a `DeviceHealthSample`; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`, `ingest_rejected_total=0`. A `tf = 85` sample was stored with `QualityFlags = 2`; a 121-sample batch was `payload_too_large` and a malformed body `schema_invalid`, taking `ingest_rejected_total` to **2** |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **15 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`) |
+| Device provisioning over HTTP | `curl` against a live API + SQL Server (50 assertions) | ✅ **2.2 done 2026-10-03**: self-register `201`/`429`/`400`, claim `200`/`404 claim_code_invalid`/`404 not_found`/`409 terrarium_already_bound`, rotate `200` with a 10-minute grace, revoke `204` and idempotent — with `Owner`-only gating (`Technician` → `403 insufficient_role`) |
 | Firmware builds for the target | `pio run -e esp32dev` | ✅ RAM 13.6% (44 536 B), Flash 20.7% (270 673 B) |
 | Firmware host unit tests | `docker run --rm -v "$PWD/firmware:/firmware" smartreptile-fw-test` (image from `firmware/Dockerfile.host-tests`; plain `pio test -e native` wherever a host compiler exists) | ✅ **22/22 passed** — 8 filters + 8 payload + 6 ring buffer, ~18 s. First ever execution, and it caught defect 11 |
 | App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **19 tests passed** |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
-| No committed secrets or build output | `git ls-files` audit | ✅ 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores |
+| No committed secrets or build output | `git ls-files` audit | ✅ at M1: 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores. **Re-audited 2026-10-03:** 247 files and still no secrets — the increase is the TERRAGUARD prototype, including the three `web/dist/` build artefacts that `ADR-017` accepts deliberately |
 | **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
-| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **8 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, and the SQL-level invariants reject what they should |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
@@ -119,13 +139,22 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   and no failure drill has been executed against a live stack — those are M5 work by plan. The integration tests
   also run against a single SQL Server that is already up, so they say nothing about a database that disappears
   mid-run.
-- **The REST surface does not exist yet.** The API exposes ops endpoints only (`/health`, `/version`, `/metrics`,
-  the SignalR hub), so the dashboard's live view requests `/api/v1/terrariums`, receives `404`, and degrades to
-  its empty state showing `(http_404)` — by design, not by accident; those endpoints are M2/M3 work.
+- **The domain REST surface is partly there.** The API serves the ops endpoints (`/health`, `/version`,
+  `/metrics`, the SignalR hub), `/api/v1/auth` (register, login, refresh, logout, me, change-password — added
+  2026-10-03 — plus recover, forgot-password and reset-password, added 2026-10-06), `/api/v1/devices`
+  (self-register, claim, rotate-secret, revoke — added the same day, task 2.2) and `/api/v1/terrariums` (list,
+  create, detail, `readings/latest`, `readings`, `coverage` — added 2026-10-06, task 2.8), so the dashboard's
+  live view signs in and renders measured values rather than degrading to its empty state; the empty state now
+  means an account with no terrarium, and one can be created over HTTP. Terrarium update/delete, thresholds,
+  silences, summaries, exports and alerts are still M2/M3 work.
 - **No sensor hardware is connected**: `main.cpp` runs with bench mode off and reports placeholder values until
   M2, and no board has ever been flashed from this repository.
-- **The MQTT broker accepts *any* username/password today** — only *anonymous* connections are refused; the
-  `DeviceCredential` lookup lands with provisioning (FR-05).
+- **The MQTT broker verifies device credentials** (task 2.3, 2026-10-03): `username = deviceId`, `password =
+  secret`, validated against the current `DeviceCredential` with the rotation grace window applied, plus a
+  per-device topic ACL and a revoke-time session kick. The consumer landed with task 2.4 on 2026-10-04: a
+  telemetry publication now becomes a `TelemetrySample`, its `MetricReading` rows and a device state update, and
+  the counters move. `health`, `status` and `events` are still forwarded to nobody, and the HTTPS fallback
+  endpoint arrives with the firmware work of 2.6.
 - **No load, soak, or backup testing**, and the retention/rollup jobs have never run against real data.
 - **Nothing is deployed**: this is a local Compose stack, not a host with TLS, backups, or monitoring (M6).
 
@@ -167,6 +196,12 @@ Twelve issues surfaced only because each gate was executed rather than assumed:
     **0 bytes** with nothing to find (verified: the same repo scans clean locally). Only reachable by executing
     the pipeline. The step now installs a pinned gitleaks and scans the full history, which also catches secrets
     committed and later removed.
+13. **The first fix for BUG-03 could not start at all** — mounting `web/legacy` *inside* the read-only prototype
+    mount failed with `mountpoint ... read-only file system`, because a nested bind mount needs its mountpoint
+    created inside the parent mount. Making the parent writable instead would have created `web/dist/legacy/` in
+    the working tree. The two surfaces are now mounted as **siblings** (`/srv/prototype`, `/srv/legacy`) with
+    per-location `root` directives, which is also what keeps a missing `/legacy/` page a `404` rather than a SPA
+    fallback into the wrong surface.
 Windows `localhost` resolves to IPv6 `::1` first, Docker Desktop does not proxy a container's published port on
 `::1`, and a refused IPv6 attempt is followed by a **connect timeout** rather than a quick fallback — so use
 `127.0.0.1` in every host-side connection string.
@@ -174,7 +209,8 @@ Windows `localhost` resolves to IPv6 `::1` first, Docker Desktop does not proxy 
 
 ## Repository conventions
 
-- **Do not commit `.env`**, keystores, or generated build output — see `.gitignore`.
+- **Do not commit `.env`**, keystores, or generated build output — see `.gitignore`. The one recorded exception is
+  `web/dist/`, the prototype's Vite build, committed so the nginx demo needs no Node toolchain (`ADR-017`).
 - All timestamps are UTC in storage; local-day bucketing happens only in the rollup/summary layer (§`ADR-015`).
 - Schema changes go through EF Core migrations only (§`03-implementation/03` §2).
 - Interfaces in `Application`, implementations in `Infrastructure`, no EF Core types in `Domain`
@@ -186,3 +222,132 @@ Windows `localhost` resolves to IPv6 `::1` first, Docker Desktop does not proxy 
 Milestone **M1 (foundations)** scaffolded: solution + layered backend with health/readiness, in-process MQTT
 broker, initial EF migration, unit-tested domain logic, firmware skeleton with host tests, Flutter app shell,
 web dashboard shell, CI. Next: **M2 — telemetry pipeline** (provisioning, ingest, readings API).
+
+**Added 2026-10-03.** A TERRAGUARD web UI prototype (React + Vite + Tailwind, eight mock-data screens,
+Vietnamese-only) landed in `web/`, which pushed the M1 dashboard pages into `web/legacy/`. The decision and its
+consequences are `ADR-017`; the three follow-ups it created are closed — **4.12** fixed the compose mount (BUG-03),
+**4.13** is decided as `ADR-018` (the prototype stays a mock-data reference, `web/legacy/` remains the web
+surface), and **4.14** labelled the prototype and settled its palette and copy. See
+[`docs/03-implementation/07-implementation-roadmap.md`](docs/03-implementation/07-implementation-roadmap.md) for
+the M4 status table.
+
+**Added 2026-10-03 (backend, M2).** User authentication (FR-01) is implemented, because task 2.2's `claim` endpoint
+is `Owner`-gated and there was nothing to be `Owner` with: `/api/v1/auth/{register,login,refresh,logout,me,change-password}`,
+PBKDF2-HMAC-SHA256 at 210 000 iterations **stored per user** and upgraded on the next login, 15-minute HS256 access
+tokens (`sub`/`role`/`iat`/`exp`/`jti`/`ver`), single-use refresh rotation that revokes a whole family on reuse,
+failed-login throttling, and a 10-per-minute per-address limit on the group. Verified against a real SQL Server and
+a real HTTP surface.
+
+**Added 2026-10-03 (backend, M2, task 2.2).** Device provisioning is implemented:
+`/api/v1/devices/{self-register,claim,{deviceId}/rotate-secret,{deviceId}/revoke}`. A board self-registers against
+its chip id and receives an 8-character claim code from a 31-symbol alphabet (15-minute TTL, single use, one code
+live at a time); an `Owner` claims it for a terrarium and receives a 256-bit secret in base32 **once**, stored as
+`SHA-256(secret ‖ 16-byte salt)`; rotating puts the previous secret on a 10-minute grace window; revoking
+invalidates every credential. All of it is gated by the role policies — `Owner` for claim, rotate and revoke, so a
+`Technician` gets `403 insufficient_role`. Run end to end against the same live stack, 50 assertions green;
+**186 backend unit tests pass** (was 121).
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/devices/self-register \
+  -H 'Content-Type: application/json' \
+  -d '{"chipId":"A0B1C2D3E4F5","macAddress":"A0:B1:C2:D3:E4:F5","firmwareVersion":"1.0.0"}'
+curl -s -X POST http://localhost:8080/api/v1/devices/claim \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"claimCode":"K7M2-QP4T","terrariumId":"6f1c…"}'
+```
+
+**Added 2026-10-03 (backend, M2, task 2.3).** The MQTT broker is now the FR-05 broker rather than a listener that
+refused only *anonymous* clients: a connection needs `username = deviceId` and a password matching a usable
+`DeviceCredential` (the rotation grace window included), TLS `8883` and a loopback-only plaintext `1883` are
+separate listeners with the plaintext one switchable off entirely, a device may publish only on its own
+`telemetry`/`health`/`status`/`events`/`ack` topics and subscribe only to its own `cmd` — anything else is refused
+and, for a publish, the session is dropped — and revoking a device closes its live session so BR-05.4's
+60-second budget is met in about zero. Checked with `paho-mqtt` against the real TLS listener (30 assertions, all
+green) and by `netstat` in both shapes; **226 backend unit tests pass** (was 186). The consumer of what the broker
+accepts arrived with task 2.4, recorded just above.
+
+**Added 2026-10-04 (backend, M2, task 2.4).** A published batch is no longer counted and dropped: the broker's
+publish interceptor hands accepted telemetry to an in-process bounded queue, and `IngestWorker` runs each batch
+through the design's stages — schema/shape/timing (rules V-01…V-03, V-07…V-09, V-10), device authentication,
+plausibility (flag and store, never refuse), calibration (`Value` corrected, `RawValue` untouched), dedupe on
+`(DeviceId, Sequence)` and persistence in one transaction with the device's `LastSeenAt`, status, firmware and
+health denorms. Checked by publishing over a real MQTT listener with `paho-mqtt` and reading the rows back
+(see the gate table above); **325 backend unit tests pass** (was 226) and the integration project passes 15 of
+15 against a fresh database. Two things are wired but deliberately empty — the SignalR broadcast (2.9) and the
+evaluation queue (3.2/3.3) — so `TC-I-03`'s "zero alerts" holds because nothing evaluates yet, not because the
+evaluator skipped the flagged row.
+
+The whole session — the TERRAGUARD re-base and its three follow-ups, FR-01, and tasks 2.2 and 2.3 — is recorded
+build by build in [`IMPLEMENTATION_SUMMARY_2026-10-03.md`](IMPLEMENTATION_SUMMARY_2026-10-03.md), including the
+nine defects that only showed up once the code and its gates were run.
+
+**Added 2026-10-06 (backend, M2 task 2.8 — the terrarium read surface).** Six routes both clients were already
+written against: `GET`/`POST /api/v1/terrariums`, `GET /{id}`, `GET /{id}/readings/latest`,
+`GET /{id}/readings` (raw and bucketed, gap-aware, with the 720-point ceiling enforced) and `GET /{id}/coverage`,
+taking the backend from 16 to 22 routes. Ownership is a query parameter on every store call rather than a filter
+applied afterwards, so a foreign terrarium is never materialised (BR-02.2), and `readings/latest` walks back at
+most 50 samples per metric rather than issuing one query per metric. `web/legacy` gained sign-in, a session that
+rotates once on a `401`, and the calls above. Checked over real HTTP against a real SQL Server (register `202`,
+login `200`, terrarium created `201`, a foreign id `404 not_found`, an unaligned 30-day window exactly 720 points,
+`coverage` reporting `expected=60, received=3`) and in a browser, which rendered the real values; **386 backend
+unit tests pass** (was 325) and the integration project passes 15 of 15 against a fresh database. One defect came
+out of the live run rather than the tests — an unaligned `from` produced 721 hourly points, breaking the
+documented budget, so the bucket loop is now clamped to it.
+
+**Added 2026-10-06 (backend, FR-01 — password recovery).** A forgotten password no longer means recreating the
+account. Registration returns a 20-character **backup recovery code** from the claim-code alphabet (≈ 99 bits),
+stored as `SHA-256(code ‖ 16-byte salt)` and shown once; `POST /api/v1/auth/recover` spends it, rotates it and ends
+every session. A keeper who no longer has it can ask for a **server-issued code** instead:
+`POST /api/v1/auth/forgot-password` mints a single-use, 30-minute code and `POST /api/v1/auth/reset-password`
+spends it, rotates the backup code and ends every session. The issued code is stored as an **unsalted** SHA-256 —
+like a refresh token, and unlike the backup code — because the row has to be found *by* the value presented. Both
+paths answer identically for an unknown identifier, a spent code and another account's code, which is the point:
+`forgot-password` returns `202` with an empty body on every path, including when it issued nothing, and the failure
+code on both reset paths is one opaque `401`. Delivery is the `IPasswordResetNotifier` port; the implementation
+this deployment ships writes the code to the server log when `PasswordReset:LogCode` is true (false in
+`appsettings.json`, true in `appsettings.Development.json` only) and otherwise says plainly that it reached nobody,
+which is all that is left of limitation **L-02** — the transport, not the flow. Checked over real HTTP (the
+lower-case, separator-laden code accepted once and refused after rotation, the old password `401` and the new one
+`200`, a pre-reset refresh token `401` afterwards, the rotated backup code working through `/recover`) and in the
+browser, where the recovery form now offers both paths; **422 backend unit tests pass** (was 386).
+
+**Decided 2026-10-06 — `ADR-019` promotes TERRAGUARD to the M4 web surface and retires `web/legacy/`, revoking
+`ADR-018` in full.** The move is `ADR-018`'s own escape clause being invoked: it said the decision would be revisited if
+extending the static dashboard to W1–W8 became the bottleneck, and it has — the endpoints the wiring needs now exist
+(FR-01 and task 2.8), while extending `web/legacy/` means re-deciding eight screens' visual design in vanilla JS that
+the TERRAGUARD client already carries. It is a superseding ADR rather than an edit, because `ADR-018`'s surface
+analysis is what the revocation was decided *on*. Promotion carries the obligations the prototype was excused from,
+which is the substance of the decision rather than a footnote: real API data (4.15, 4.16), verdicts from the server
+instead of `value > max` in a screen (4.17 — the ADR-005 rule), vi+en with a key set shared with the app (4.18),
+`02-design/04` §3 tokens at ≥ 4.5:1 (4.18), CI coverage (4.18), and the wallboard rebuilt in React (4.19), because
+the M4 DoD names a wallboard on a second screen and the wallboard is a legacy page. The remaining screens are wired
+as their endpoints land (4.20), and it is staged by the backend rather than by preference: **only three of the eight
+screens have endpoints today** (`Login`, `Dashboard`, `History`), which is why 4.15–4.17 can start now and 4.20
+cannot. Until a screen is wired it keeps its mock-data notice, and the notice goes when the mock data does. See
+[docs/03-implementation/07-implementation-roadmap.md](docs/03-implementation/07-implementation-roadmap.md).
+
+```bash
+# The password below is a throwaway value for a local demo account, and the recovery codes are alphabet
+# patterns rather than captured values, for the same reason: CI's secret scanner rejects realistic-looking
+# credentials wherever they appear, test fixtures and documentation included, and allow-listing those paths is
+# exactly how a real key gets committed unnoticed. A real code from a live run is a credential until it expires.
+curl -s -X POST http://localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"keeper","email":"keeper@example.com","password":"local-demo-1"}'
+# -> 202 {"status":"accepted","recoveryCode":"DEM2DEM2DEM2DEM2DEM2"}   # store it: shown once, never retrievable
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"usernameOrEmail":"keeper","password":"local-demo-1"}'
+# Forgot it instead? Ask for a code; the answer is the same whether or not the account exists, and in a
+# development environment the code itself is in the API log (PasswordReset:LogCode).
+curl -s -X POST http://localhost:8080/api/v1/auth/forgot-password \
+  -H 'Content-Type: application/json' -d '{"usernameOrEmail":"keeper"}'
+curl -s -X POST http://localhost:8080/api/v1/auth/reset-password \
+  -H 'Content-Type: application/json' \
+  -d '{"usernameOrEmail":"keeper","resetCode":"DEM3DEM3DEM3DEM3DEM3","newPassword":"local-demo-2"}'
+# -> 200 {"recoveryCode":"DEM4DEM4DEM4DEM4DEM4"}   # the backup code rotated too, so take the new one
+
+# With a terrarium and a sample in place, the read surface the dashboard uses:
+curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings/latest"
+curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings?metric=tempC&from=2026-10-06T00:00:00Z&to=2026-10-07T00:00:00Z"
+```

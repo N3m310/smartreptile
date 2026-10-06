@@ -28,7 +28,7 @@ mTLS (both recorded as accepted limitations / v1.1 candidates).
 | Throttling | 5 failed logins per username per 15 min → 15-min lock with an audit entry; 20 failures per IP per 15 min → 15-min block. Response time is constant-ish to avoid user enumeration by timing. |
 | Error messages | Login failure is always the same generic message; registration on an existing email returns a neutral "if this address is free you will receive a confirmation" style response. |
 | Session invalidation | Logout revokes the refresh token; password change revokes all refresh tokens for that user. |
-| Password reset | **Not implemented in v1** (no email infrastructure). Owner can change the password while logged in; a forgotten password means recreating the account in the demo environment. Recorded as limitation L-02 in `05-release/03`. |
+| Password reset | Two anonymous paths, neither of which needs a mail server to be correct. **Backup recovery code:** registration returns a 20-character code drawn from the claim-code alphabet (31 symbols without `0/O/1/I/L`, ≈ 99 bits of entropy), stored as `SHA-256(code ‖ 16-byte salt)`; presenting it with a new password consumes it, issues a replacement and ends every session. **Server-issued code:** `POST /auth/forgot-password` issues a single-use, 30-minute code — stored unsalted so the row can be found by its SHA-256, like a refresh token — and hands it to a delivery channel (`IPasswordResetNotifier`); `POST /auth/reset-password` spends it. Both paths answer identically whether or not the identifier has an account, are throttled exactly like a login, and let the account's owner (not a guesser) tell them apart. Only delivery is unfinished: the demo has no mail server, so the code is written to the server log (`PasswordReset:LogCode`, development only) and limitation L-02 now covers the transport rather than the ability to reset. |
 
 ## 3. Roles and permissions
 
@@ -111,7 +111,7 @@ per 5 min, 20 per hour globally for the demo), payload-validated, and creates de
 `Provisioning` state with zero capability. Unclaimed devices older than 24 h are swept. A flood can
 create junk rows but can never read or write other tenants' data.
 
-**Claim-code properties:** 8 chars from a 32-symbol alphabet excluding `0/O/1/I/L` (see
+**Claim-code properties:** 8 chars from a 31-symbol alphabet excluding `0/O/1/I/L` (see
 `07-appendices/03` §2.1), 15-minute TTL, regenerated while in provisioning mode, single-use, and —
 crucially — **the same error is returned for unknown, expired and consumed codes** (BR-04.3).
 

@@ -307,6 +307,43 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.ToTable("DeviceHealthSample", (string)null);
                 });
 
+            modelBuilder.Entity("SmartReptile.Domain.Identity.PasswordResetCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RequestedFromAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "ExpiresAt");
+
+                    b.ToTable("PasswordResetCode", (string)null);
+                });
+
             modelBuilder.Entity("SmartReptile.Domain.Identity.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -409,6 +446,17 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.Property<TimeOnly?>("QuietHoursStart")
                         .HasColumnType("time");
+
+                    b.Property<byte[]>("RecoveryCodeHash")
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<DateTimeOffset?>("RecoveryCodeIssuedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<byte[]>("RecoveryCodeSalt")
+                        .HasMaxLength(16)
+                        .HasColumnType("varbinary(16)");
 
                     b.Property<int>("Role")
                         .HasColumnType("int");
@@ -816,6 +864,15 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.HasOne("SmartReptile.Domain.Devices.Device", null)
                         .WithMany()
                         .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Identity.PasswordResetCode", b =>
+                {
+                    b.HasOne("SmartReptile.Domain.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

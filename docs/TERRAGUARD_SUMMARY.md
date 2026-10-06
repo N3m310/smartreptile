@@ -14,7 +14,8 @@ src/
 ├── data/
 │   └── mockData.ts            # Dữ liệu giả lập (terrarium, thiết bị, cảnh báo)
 ├── components/
-│   └── Layout.tsx             # Sidebar + Header dùng chung
+│   ├── Layout.tsx             # Sidebar + Header dùng chung
+│   └── MockDataNotice.tsx     # Nhãn "Dữ liệu mô phỏng" — hiện ở trang đăng nhập và trong app shell (task 4.14)
 └── pages/
     ├── Login.tsx              # Trang đăng nhập
     ├── Dashboard.tsx          # Dashboard tổng quan
@@ -44,6 +45,19 @@ src/
 | Cảnh báo | `#e8a832` (vàng) |
 | Nguy hiểm | `#e05530` (đỏ) |
 | Ngoại tuyến | `#556055` (xám) |
+
+> **Lưu ý (2026-10-03).** Đây là **nguyên mẫu giao diện với dữ liệu mô phỏng**: không gọi API, không hiển thị số đo
+> thật, và mọi màn hình đều mang nhãn "Dữ liệu mô phỏng" (`src/components/MockDataNotice.tsx`). Bảng màu trạng thái
+> ở trên là **riêng cho nguyên mẫu** — lý do và tỉ số tương phản đo được nằm ở đầu `src/index.css`. Nguyên mẫu
+> **không phải** web dashboard của đồ án: dashboard là `web/legacy/` và chạy trên API thật (`ADR-018`).
+
+> **Cập nhật (2026-10-06) — `ADR-019` thu hồi (`revoke`) quyết định trên.** Nguyên mẫu TERRAGUARD **trở thành** giao diện web
+> của mốc M4, và `web/legacy/` sẽ bị gỡ bỏ khi hoàn tất việc chuyển đổi (task 4.19). Việc "thăng cấp" này đi kèm
+> các nghĩa vụ mà trước đây nguyên mẫu được miễn: nối API thật (4.15–4.16), lấy kết luận ngưỡng từ máy chủ thay vì
+> `value > max` trong màn hình (4.17), song ngữ vi+en với bộ key dùng chung với app (4.18), dùng token màu của
+> `02-design/04` §3 ở mức ≥ 4.5:1 (4.18), dựng lại màn hình wallboard bằng React (4.19), và nối các màn hình còn lại
+> khi endpoint của chúng hoàn thành (4.20). Cho đến khi một màn hình được nối xong, màn hình đó vẫn giữ nhãn "Dữ
+> liệu mô phỏng" và **không** được tính vào DoD. Bảng màu riêng của nguyên mẫu cũng sẽ được thay bằng token của §3.
 
 ---
 

@@ -48,6 +48,9 @@ services:
       Jwt__AccessTokenMinutes: ${JWT_ACCESS_MINUTES:-15}
       Jwt__RefreshTokenDays: ${JWT_REFRESH_DAYS:-30}
       Mqtt__Host: ${MQTT_HOST:-0.0.0.0}
+      # Inside a container the plaintext listener has to bind 0.0.0.0 for Docker's port proxy to reach it, so
+      # "plaintext is loopback-only" (BR-05.1) is enforced at the published port instead — see the 1883 mapping.
+      Mqtt__PlaintextHost: ${MQTT_PLAINTEXT_HOST:-0.0.0.0}
       Mqtt__Port: ${MQTT_PORT:-1883}
       Mqtt__EnableTls: ${MQTT_ENABLE_TLS:-false}
       Mqtt__TlsPort: ${MQTT_TLS_PORT:-8883}
@@ -76,9 +79,11 @@ services:
       OpenTelemetry__Tracing__SampleRatio: ${OTEL_TRACE_SAMPLE_RATIO:-0.25}
       OpenTelemetry__Otlp__Endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
-      - "8080:8080"      # REST + SignalR
-      - "1883:1883"      # MQTT plaintext (dev only; disabled in the release runbook, FR-05)
-      - "8883:8883"      # MQTT over TLS
+      - "8080:8080"          # REST + SignalR
+      - "127.0.0.1:1883:1883"  # MQTT plaintext: bound to the host's loopback, never published to the network.
+                               # BR-05.1 wants plaintext for local debugging and gone in the release runbook
+                               # (MQTT_DISABLE_PLAINTEXT=true); this mapping is what keeps it off the LAN meanwhile.
+      - "8883:8883"          # MQTT over TLS — the only port a real device needs
     depends_on:
       db:
         condition: service_healthy
@@ -93,7 +98,14 @@ services:
     ports:
       - "8081:80"
     volumes:
-      - ./web:/usr/share/nginx/html:ro
+      # Two web surfaces, kept apart by web/nginx.conf (ADR-017; the fix for BUG-03, task 4.12):
+      #   /        -> the committed TERRAGUARD prototype build (web/dist), so the demo needs no Node
+      #   /legacy/ -> the M1 static dashboard (web/legacy), the one with the real API behind it
+      # Mounting all of ./web here is what served the prototype's Vite entry as a blank page.
+      # The mounts are siblings, not nested: a nested mountpoint inside a read-only mount fails.
+      - ./web/dist:/srv/prototype:ro
+      - ./web/legacy:/srv/legacy:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - api
     restart: unless-stopped

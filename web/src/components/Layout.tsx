@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { initialAlerts } from '../data/mockData';
+import { MockDataNotice } from './MockDataNotice';
 
 export const Layout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -138,6 +139,11 @@ export const Layout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Honesty notice: nothing this app renders is a measurement (ADR-017, task 4.14) */}
+        <div className="px-4 sm:px-8 pt-4">
+          <MockDataNotice />
+        </div>
+
         {/* Header */}
         <header className="h-18 px-4 sm:px-8 border-b border-[#1e3825] bg-[#112016]/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between">
           <div className="flex items-center gap-3">

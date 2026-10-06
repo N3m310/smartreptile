@@ -240,7 +240,7 @@ see their acceptance criteria in `03-functional-requirements.md`.
 **Main flow**
 1. Technician compares the live value against a reference for 10 minutes.
 2. If a systematic offset is measured, the Owner enters `tempOffsetC` / `rhOffsetPct` / `luxGain` on the device record.
-3. Backend applies offsets at ingest so raw values stay untouched; a quality bit `16` (calibrationApplied) marks affected samples.
+3. Backend applies offsets at ingest so raw values stay untouched; a quality bit `32` (`calibrationApplied`) marks affected samples.
 4. Dashboard shows corrected values with a footnote that the sensors are hobby-grade and indicative (no metrology claim).
 5. The verification result is noted in the manual QA log (`04-quality/03`).
 

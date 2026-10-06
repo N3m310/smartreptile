@@ -35,6 +35,22 @@ public class User
     /// </summary>
     public int PasswordIterations { get; set; } = 210_000;
 
+    /// <summary>
+    /// Salted hash of the account's current backup recovery code (BR-01.5). Null when the account has none —
+    /// one created before recovery codes existed, or one whose code was cleared.
+    /// </summary>
+    /// <remarks>
+    /// A null code is not a special case in the API: it fails verification exactly like a wrong code does, so the
+    /// caller cannot tell an account without a code from an account that does not exist.
+    /// </remarks>
+    public byte[]? RecoveryCodeHash { get; set; }
+
+    /// <summary>Salt the recovery-code digest was produced with.</summary>
+    public byte[]? RecoveryCodeSalt { get; set; }
+
+    /// <summary>When the current recovery code was issued; set on creation and again on every rotation.</summary>
+    public DateTimeOffset? RecoveryCodeIssuedAt { get; set; }
+
     /// <summary>Authorisation role.</summary>
     public UserRole Role { get; set; } = UserRole.Owner;
 
@@ -110,4 +126,12 @@ public class RefreshToken
 
     /// <summary>Client description for the session list (device model, platform).</summary>
     public string? DeviceInfo { get; set; }
+
+    /// <summary>
+    /// True when the token may still be exchanged for a new session: unexpired, not yet consumed and not
+    /// revoked. A consumed token is not "unusable" by accident — presenting it again is evidence of theft
+    /// and revokes the family (TC-U-34), so this deliberately reports <c>false</c> for it too.
+    /// </summary>
+    public bool IsUsableAt(DateTimeOffset nowUtc) =>
+        RevokedAt is null && ConsumedAt is null && ExpiresAt > nowUtc;
 }

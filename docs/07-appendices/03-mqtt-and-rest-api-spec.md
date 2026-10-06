@@ -22,9 +22,9 @@ Broker (dev): `mqtts://localhost:8883` · plaintext `1883` bound to loopback onl
 ## 2. Provisioning endpoints
 
 ### 2.1 Claim-code alphabet
-32 symbols, excluding `0 O 1 I L` to avoid transcription errors:
+31 symbols, excluding `0 O 1 I L` to avoid transcription errors:
 `23456789ABCDEFGHJKMNPQRSTUVWXYZ` → codes are 8 chars, typically displayed as `XXXX-XXXX`.
-Entropy ≈ 32⁸ ≈ 1.1 × 10¹²; TTL 15 min; single-use; regenerated while the device stays in provisioning mode.
+Entropy ≈ 31⁸ ≈ 8.5 × 10¹¹ (≈ 39.6 bits); TTL 15 min; single-use; regenerated while the device stays in provisioning mode.
 
 ### 2.2 `POST /api/v1/devices/self-register`
 Anonymous. Rate limit: 1 per IP per 5 min, 20 per hour globally (demo setting).
@@ -39,8 +39,8 @@ Content-Type: application/json
 201 Created
 { "deviceId": "sr-3f9a2c", "claimCode": "K7M2QP4T", "expiresAtUtc": "2026-09-21T08:30:00Z" }
 ```
-Errors: `429 rate_limited`, `409 device_already_registered` (returns the existing `deviceId` and a fresh code
-only if the device is still unclaimed).
+Errors: `400 registration_invalid` (a missing or malformed `chipId`/`macAddress`), `409 device_already_registered`
+(returns the existing `deviceId` and a fresh code only if the device is still unclaimed), `429 rate_limited`.
 
 ### 2.3 `POST /api/v1/devices/claim`
 Requires `Owner`.
@@ -55,8 +55,13 @@ Authorization: Bearer <jwt>
 200 OK
 { "deviceId": "sr-3f9a2c", "secret": "MFRGGZDFMZTWQ2LK…", "terrariumId": "6f1c…", "boundAtUtc": "…" }
 ```
-`secret` is returned **once**; it is never retrievable again. Errors: `404 claim_code_invalid` (unknown,
-expired, or consumed — deliberately indistinguishable), `409 terrarium_already_bound`, `403 insufficient_role`.
+`secret` is returned **once**; it is never retrievable again. Errors: `401 unauthenticated`,
+`403 insufficient_role`, `404 claim_code_invalid` (unknown, expired, consumed or superseded — deliberately
+indistinguishable), `404 not_found` (unknown **or foreign** terrarium, also indistinguishable so ids cannot be
+probed — `BR-02.2`), `409 terrarium_already_bound`.
+
+A revoked device stops occupying its terrarium — `IX_Device_TerrariumId` is filtered to `Status <> 3` — so its
+replacement is claimed into the same terrarium without a rebind step.
 
 ---
 
@@ -75,6 +80,13 @@ expired, or consumed — deliberately indistinguishable), `409 terrarium_already
 
 `{deviceId}` is the short id (`sr-xxxxxx`). Subscriptions use wildcards server-side (`sr/v1/d/+/telemetry`);
 the client is never allowed to subscribe to another device's topics (broker ACL = own prefix only).
+
+The ACL is enforced at the broker, before a message is stored: a device publishes only on
+`telemetry`/`health`/`status`/`events`/`ack` and subscribes only to its own `cmd`, with no wildcard. A refused
+**subscription** is answered with a failure code and simply not applied; a refused **publication** is dropped and
+that client's session is closed, because a device reaching outside its own prefix is either broken or hostile.
+Refusals are counted (`mqtt_refused_subscriptions_total`, `mqtt_refused_publications_total`) and logged with the
+reason.
 
 ### 3.2 Telemetry batch (device → broker)
 
@@ -173,13 +185,42 @@ return `nextCursor`.
 
 | Method | Path | Role | Body / params | Success | Errors |
 |---|---|---|---|---|---|
-| POST | `/auth/register` | A | `{username, email, password}` | `201 {userId, username}` | `400 validation_failed`, `409 username_taken` / `email_taken` |
+| POST | `/auth/register` | A | `{username, email, password}` | `202 {status, recoveryCode}` | `400 registration_invalid` |
 | POST | `/auth/login` | A | `{username, password}` | `200 {accessToken, refreshToken, expiresIn, user}` | `401 invalid_credentials`, `423 account_locked` |
 | POST | `/auth/refresh` | A | `{refreshToken}` | `200 {accessToken, refreshToken}` | `401 token_invalid`, `401 token_reused` |
 | POST | `/auth/logout` | U | `{refreshToken}` | `204` | — |
 | GET | `/auth/me` | U | — | `200 {user, preferences}` | `401` |
 | PATCH | `/auth/me` | U | preferences, timezone, language | `200` | `400 validation_failed` |
 | POST | `/auth/change-password` | U | `{currentPassword, newPassword}` | `204` (all refresh tokens revoked) | `400 weak_password`, `401 invalid_credentials` |
+| POST | `/auth/recover` | A | `{usernameOrEmail, recoveryCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_recovery_code`, `429 account_locked` |
+| POST | `/auth/forgot-password` | A | `{usernameOrEmail}` | `202` (empty body, **always**) | `429 rate_limited` |
+| POST | `/auth/reset-password` | A | `{usernameOrEmail, resetCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_reset_code`, `429 account_locked` |
+
+**Where a code comes from, and why there are two.** Registration is the only moment the server can hand the keeper
+something without a delivery channel, so it returns a **backup recovery code** — 20 characters from the same
+31-symbol alphabet as claim codes (§2.1), stored as `SHA-256(code ‖ 16-byte salt)`, shown once and never
+retrievable. Recovery with it (`/auth/recover`) consumes the code, issues a replacement and ends every session.
+
+The three server-issued rows are the path for a keeper who no longer has that code. `/auth/forgot-password` mints a
+single-use code that expires after `PasswordReset:CodeMinutes` (default 30) and hands it to
+`IPasswordResetNotifier`; `/auth/reset-password` spends it, rotates the backup code and ends every session. The
+code is stored **unsalted** (SHA-256 of the presented value) for the same reason a refresh token is: the row has to
+be findable by the value presented, and the code is high-entropy and short-lived, so there is nothing to brute-force.
+
+`/auth/forgot-password` answers `202` with **no body on every path** — unknown identifier, disabled account, live
+account — because any difference would make it an account-existence oracle (BR-02.2). The difference shows only in
+the delivery channel, and only to the account's owner. Both reset paths are throttled exactly like login (5 per
+identifier / 20 per address per 15 min) and answer a failure with the single opaque code `invalid_reset_code` /
+`invalid_recovery_code` — never "no such account". Where the code goes is a deployment decision: the demo has no
+mail server, so `LogPasswordResetNotifier` writes it to the server log when `PasswordReset:LogCode` is true
+(development only) and otherwise says plainly that it reached nobody (limitation L-02).
+
+**Built so far (2026-10-06):** every row above except `PATCH /auth/me` is implemented. Three cells still describe
+the intended shape rather than the built one: `register` answers `202 {status, recoveryCode}` (not `201`), the
+session body carries `accessTokenExpiresAtUtc`/`refreshTokenExpiresAtUtc` instead of `expiresIn`, and a lockout is
+`429 account_locked` (not `423`) because it is produced by the same throttle that answers `429 rate_limited`. The
+registration errors are a single `400 registration_invalid` that carries `errors[]` per field rather than a
+`409 username_taken`. `03-implementation/03` §6 is the as-built table.
 
 ### 4.2 Terrariums, thresholds, readings
 
@@ -211,7 +252,90 @@ return `nextCursor`.
   "alerts": [ { "id": 812, "severity": "Critical", "from": "…", "to": "…", "metric": "tempC" } ]
 }
 ```
-Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5).
+Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5). A bucketed series therefore carries
+every bucket in the window, empty ones included. A `raw` series carries one point per sample instead: a sample's own
+timestamp is its bucket, so a gap shows up as absent points rather than as nulls.
+
+**Built so far (roadmap 2.8, 2026-10-06):** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
+`GET /terrariums/{id}/readings/latest`, `GET /terrariums/{id}/readings` and `GET /terrariums/{id}/coverage`. The
+rest of this table — `PATCH`/`DELETE`, thresholds, silences, summaries, exports — is specified and not built.
+
+`GET /terrariums` answers `{ "items": [ … ] }` and is **not paginated**: the per-account count is small and the
+`?cursor=&pageSize=` convention in the legend above is not implemented yet, so no `nextCursor` is returned.
+
+Bucket selection follows BR-09.1, with the width capped so the point budget (NFR-02) cannot be broken by a wide
+window or by an unaligned `from`:
+
+| Requested width | `bucket` | Worst case |
+|---|---|---|
+| ≤ 6 h | `raw` | one point per sample; a series over 720 points degrades to `5min` |
+| ≤ 48 h | `5min` | 576 points |
+| ≤ 30 d | `hourly` | 720 points |
+| > 30 d | — | refused `400 range_too_large` |
+
+`metric` is required and must be a metric-dictionary key, otherwise `400 metric_invalid`. `from` and `to` are
+required ISO-8601 instants with `from < to`, otherwise `400 invalid_range`.
+
+`readings/latest` response:
+
+```json
+{
+  "terrariumId": "6ec11ae9-…",
+  "lastSampleAt": "2026-10-06T14:56:57.092Z",
+  "device": { "deviceId": "sr-e2e01", "deviceName": "E2E node", "status": "online",
+              "firmwareVersion": "0.1.0-test", "lastSeenAt": "2026-10-06T14:56:57.092Z",
+              "samplingIntervalSec": 60, "signalStrengthDbm": -61, "batteryPct": 87.5, "uptimeSeconds": 4200 },
+  "metrics": [ { "code": "tempC", "value": 35.0, "unit": "°C", "capturedAt": "2026-10-06T14:56:57.092Z",
+                 "status": "Critical", "qualityFlags": 0, "target": { "min": 24.0, "max": 28.0 } } ]
+}
+```
+
+- `status` is one of the `02-design/04` §5 vocabulary values (`InRange`, `OutOfRange`, `Critical`, `Unavailable`,
+  `Maintenance`) and is an **instantaneous** judgement of the value against the effective band. Dwell, hysteresis,
+  dedupe and alert rows are the evaluator's (FR-11), so an `OutOfRange` reading does **not** imply an alert exists.
+- `target` is the band the value was judged against: a per-terrarium override where one exists, otherwise the
+  species profile's band for the **phase** the sample fell in (BR-10.3, BR-11.2). It is `null` when the metric has
+  no configured band.
+- `Unavailable` covers a faulted or implausible sample (quality bits 1 and 2, BR-11.1) *and* a value outside the
+  metric's plausible range even when no bit was set; `Maintenance` covers a device in maintenance (BR-12.6).
+- A metric with no stored reading is **omitted** rather than sent with a `null` `capturedAt`, because both clients
+  parse that field unconditionally.
+- `device.status` is derived, not echoed: a device unheard from for three sampling intervals reads `offline`
+  (FR-07 BR-07.2), since the silence watchdog is not built yet. `device` is `null` when nothing is claimed.
+
+`coverage` response:
+
+```json
+{ "terrariumId": "6ec11ae9-…", "fromUtc": "2026-10-06T13:58:05Z", "toUtc": "2026-10-06T14:58:05Z",
+  "samplingIntervalSec": 60, "expectedSamples": 60, "receivedSamples": 3, "coveragePct": 5 }
+```
+
+`expectedSamples` is the window divided by the bound device's sampling interval and `coveragePct` is `received` over
+`expected`, capped at 100. A terrarium with no bound device answers `409 device_not_bound`: coverage is a statement
+about a device, and there is nothing honest to say about `null`.
+
+`POST /terrariums` takes `{name, speciesProfileId, location?, description?, timeZoneId?}` and answers `201` with the
+item shape below. It is `Owner`-gated and exists ahead of the rest of FR-03 because every other route needs a
+terrarium to point at — `POST /devices/claim` has nothing to bind a board to until one exists. Validation is
+`400 validation_failed` with field-level `errors[]` (`terrarium_name_required`, `terrarium_location_too_long`,
+`terrarium_description_too_long`, `terrarium_timezone_invalid`, `species_profile_not_found`); `timeZoneId` falls back
+to `Defaults:TimeZoneId` when omitted.
+
+The item shape returned by `GET /terrariums` (inside `items`), `POST /terrariums` and `GET /terrariums/{id}`:
+
+```json
+{
+  "id": "6ec11ae9-…", "name": "E2E gecko box", "speciesProfileId": "…", "speciesName": "Arid (desert)",
+  "location": "desk", "description": "end-to-end check", "timeZoneId": "Asia/Ho_Chi_Minh",
+  "createdAt": "…", "updatedAt": "…",
+  "device": { "…": "the DeviceSummary above, or null when nothing is claimed" },
+  "latestSampleAt": "…", "openAlertCount": 0
+}
+```
+
+`openAlertCount` reads 0 until the evaluator writes alert rows (FR-11). A terrarium that does not exist, is
+soft-deleted, or belongs to another account answers `404 not_found` — identically in all three cases, so ids cannot
+be probed (BR-02.2).
 
 ### 4.3 Species profiles
 
@@ -276,7 +400,11 @@ Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5).
 | 400 | `threshold_ordering_invalid` / `threshold_critical_invalid` | Band arithmetic violated |
 | 400 | `schema_invalid` | Telemetry payload shape wrong |
 | 400 | `payload_too_large` | > 32 KB batch or > 120 samples |
+| 400 | `password_policy_violation` | New password failed the policy (see `errors`) |
+| 400 | `registration_invalid` | Username, email or password failed validation (see `errors`) |
 | 401 | `invalid_credentials` | Wrong username/password |
+| 401 | `invalid_recovery_code` | Wrong, spent, malformed or account-less backup recovery code — one answer for all of them |
+| 401 | `invalid_reset_code` | Wrong, spent, expired, foreign or account-less reset code — one answer for all of them |
 | 401 | `token_invalid` / `token_reused` | Expired, consumed, or replayed refresh token (family revoked) |
 | 403 | `insufficient_role` | Role not permitted for the action |
 | 403 | `builtin_immutable` | Attempt to edit a built-in species profile |
@@ -295,7 +423,7 @@ Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5).
 
 | Scope | Limit |
 |---|---|
-| `/auth/login`, `/auth/refresh` | 10 / min / IP; 5 failures per username per 15 min |
+| `/api/v1/auth/*` (whole group) | 10 / min / IP; 5 failures per username per 15 min, 20 per IP per 15 min (login and both reset paths share the counters) |
 | `/devices/self-register` | 1 / 5 min / IP; 20 / hour global |
 | `/ingest/http` | 6 / min / device |
 | `/devices/{id}/snapshots` | 1 / 30 s / device |

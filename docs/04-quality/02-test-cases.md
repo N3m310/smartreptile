@@ -46,7 +46,7 @@ void test_median_rejects_single_glitch(void) {
 
 ---
 
-## B. Backend unit tests (TC-U-01…50)
+## B. Backend unit tests (TC-U-01…56)
 
 ### B1. Ingest: validation, plausibility, calibration
 
@@ -56,7 +56,7 @@ void test_median_rejects_single_glitch(void) {
 | TC-U-02 | Schema rejects an unparseable timestamp | `ts = "yesterday"` | failure `schema_invalid` | 1 | FR-06 |
 | TC-U-03 | Sample count limits enforced | 121 samples in one batch | failure `payload_too_large` | 2 | FR-06 |
 | TC-U-04 | Unknown metric code is dropped, batch survives | sample with `zz: 1.0` plus valid metrics | valid metrics persisted, `unknown_metric` logged, no failure | 2 | FR-06 |
-| TC-U-05 | Device authenticator is constant-time and rejects a wrong secret | correct secret, then a secret differing in one char | true then false; comparison uses `FixedTimeEquals` (asserted by no early-exit surrogate: timing variance test with 1 000 iterations under 10% spread) | 1 | FR-05 |
+| TC-U-05 | Device authenticator is constant-time and rejects a wrong secret | correct secret, then a secret differing in one char | true then false; comparison uses `FixedTimeEquals` (constant time asserted at the one line that implements it, in `DeviceCredentials.VerifySecret`; the test asserts the half a timing test cannot — 1 000 differently-shaped wrong secrets all refused — because a wall-clock spread assertion measures the CI scheduler, not the code) | 1 | FR-05 |
 | TC-U-06 | Plausibility flags, never rejects | `TempC = 85` | accepted with quality bit 2, `IsEvaluable = false` | 1 | FR-06 |
 | TC-U-07 | Plausibility boundaries per metric | `HumidityPct = 0`, `100`, `100.1` | first two clean, third flagged | 1 | FR-06 |
 | TC-U-08 | Negative lux rejected as implausible | `LightLux = -5` | flagged | 2 | FR-06 |
@@ -142,6 +142,12 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-34 | Refresh rotation is single-use and families are revoked on reuse | refresh twice with the same token | first succeeds and invalidates; second → `401 token_reused`, whole family revoked, audit entry | 1 | FR-01 |
 | TC-U-35 | Login throttling is per-username and generic | 6 failures within 15 min | lock at the 6th, identical error body in every failure, audit entries written | 1 | FR-01 |
 | TC-U-36 | RBAC matrix | Owner/Technician/Viewer × 10 actions | exactly the permission matrix in `02-design/06` §3; foreign terrarium → `404`, insufficient role → `403` | 1 | FR-02 |
+| TC-U-51 | Backup recovery code shape and storage | register | 20 characters from the 31-symbol claim-code alphabet (no `0`/`O`/`1`/`I`/`L`), stored as `SHA-256(code ‖ 16-byte salt)`, plaintext absent from the row | 1 | FR-01 |
+| TC-U-52 | Recovery with the backup code rotates everything | register, sign in, then recover with the code and a new password | code consumed and replaced, every refresh token revoked, the old password and the spent code both refused | 1 | FR-01 |
+| TC-U-53 | Server-issued reset code is single-use and time-boxed | `forgot-password`, then `reset-password` | the row holds only the SHA-256 and expires `PasswordReset:CodeMinutes` ahead; the code works once (case and separators ignored) and a replayed or expired one → `401 invalid_reset_code` | 1 | FR-01 |
+| TC-U-54 | Reset cannot be used to probe for accounts | `forgot-password`/`reset-password` with an identifier that has no account | `202` with an empty body and `401 invalid_reset_code` — identical to the known-account answers, including for a code issued to a different account | 1 | FR-01, BR-02.2 |
+| TC-U-55 | A failing delivery channel cannot change the answer | channel throws while issuing a code | `202` still returned and the code row still committed, so a known account is never a `500` next to an unknown one's `202` | 2 | FR-01 |
+| TC-U-56 | Issuing a second code closes the first | two `forgot-password` requests, then reset with the first code | the first code → `401 invalid_reset_code`; at most one code is ever live for an account | 1 | FR-01 |
 
 ### B6. Notification policy, retries and content
 
@@ -188,10 +194,10 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 
 | Id | Case | Setup | Expected | P | FR |
 |---|---|---|---|---|---|
-| TC-I-01 | Ingest persists sample + readings + updates last seen | 1 valid batch over MQTT | 1 sample, N readings, `LastSeenAt` set, status `online`, `ingest_samples_total` = N | 1 | FR-06 |
+| TC-I-01 | Ingest persists sample + readings + updates last seen | 1 valid batch over MQTT | 1 sample, N readings, `LastSeenAt` set, status `online`, `ingest_samples_total` up by 1 per persisted sample (FR-18's "1 000 samples → +1 000" fixes the unit: the counter counts `TelemetrySample` rows, not readings and not batches) | 1 | FR-06 |
 | TC-I-02 | Duplicate `(deviceId, seq)` is idempotent | publish the same batch 5× | exactly 1 sample, duplicate counter = 4, second and later responses reported as duplicates (no 5xx) | 1 | FR-06 |
 | TC-I-03 | Implausible sample stored but not evaluated | `TempC = 85` | row exists with quality bit 2, zero alerts created | 1 | FR-06 |
-| TC-I-04 | Device health + fault events update state | health + `sensor_fault` event | health denorms updated; humidity `Unavailable`; no humidity alert | 1 | FR-07 |
+| TC-I-04 | Device health + fault events update state | health + `sensor_fault` event | health denorms updated (task 2.4); humidity `Unavailable` and no humidity alert (the `SensorFault` signal, task 3.3 — the event arrives on `events`, which ingest does not consume yet) | 1 | FR-07 |
 | TC-I-05 | Provisioning end to end | self-register → claim → connect with secret → publish | device bound, status `online`, first sample stored; a second claim of the same code → `404 claim_code_invalid`; a claim for an already-bound terrarium → `409` | 1 | FR-04, FR-05 |
 | TC-I-06 | Evaluation through the pipeline | `daily` fixture played back with a fake clock | exactly one alert, correct `TriggeredAt`, correct `PeakValue`; rollups and the daily summary agree with the fixture's hand-computed values | 1 | FR-11, FR-14 |
 | TC-I-07 | Alert lifecycle through the API | open → ack (Technician) → resolve (`FalsePositive`) | states and actors stored; a Viewer ack → `403`; a second ack → `409 alert_not_open` | 1 | FR-12, FR-02 |
@@ -202,7 +208,38 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-I-12 | Notification integration with fakes | WireMock Telegram + fake FCM | one send, correct body/localisation, retries counted, `NotificationLog` rows per attempt, quiet-hours behaviour as in TC-U-38 | 2 | FR-13 |
 | TC-I-13 | Security/auth integration | anonymous MQTT publish, wrong secret, revoked device, expired claim code, foreign terrarium read, Viewer mutation, token reuse | each rejected with the documented status; audit rows written; revoked device blocked within 60 s | 1 | FR-01, FR-02, FR-04, FR-05, NFR-04 |
 | TC-I-14 | Retention sweep and purge | 91-day-old raw + rollups; snapshot 8 days old; export older than 24 h | raw deleted with count logged, rollups retained, snapshot deleted, export file removed and job `Expired`; a 7-day late back-fill recomputes rollups and the summary | 2 | FR-15, NFR-11 |
-| TC-I-15 | Ops endpoints and counters | scrape `/metrics` before and after 1 000 ingests; stop the broker and call `/ready` | counters increase exactly by the expected amounts; `/ready` → 503 with `broker:false` while reads still work; i18n key sets of app and dashboard are identical | 2 | FR-18, NFR-12 |
+| TC-I-15 | Ops endpoints and counters | scrape `/metrics` before and after 1 000 ingests; stop the broker and call `/ready` | counters increase exactly by the expected amounts; `/ready` → 503 with `broker:false` while reads still work; i18n key sets of the app and of the web client are identical. *(`ADR-019` moves this half: the key set starts as `web/legacy/js/i18n.js` and becomes the TERRAGUARD client's when task 4.18 gives it a shared key set, at which point `web/legacy/` is gone. Either way the check is against the surface that ships, and the mock-data screens are outside it until they are wired — see the caveat below.)* | 2 | FR-18, NFR-12 |
+
+> **Implementation status (measured 2026-10-06, roadmap task 2.8).** `TC-I-10` is green at the unit level:
+> `RangeQueryRulesTests` asserts the bucket for every offered width (1 h → `raw`, 24 h → `5min`, 30 d → `hourly`),
+> that the widest accepted range is exactly the 720-point budget, and that a window not ending after it starts is
+> refused; `TerrariumServiceTests` asserts the same through the service — a 74-point gap-aware 5-minute series with
+> nulls for empty buckets, and an unaligned 30-day window held to exactly 720 points — and the live run recorded in
+> `03-implementation/07` (task 2.8) confirms it over HTTP against SQL Server. `TC-I-11`'s **query** half is partly
+> covered (`readings/latest` and the bucketed series are exercised over HTTP, and a chart payload is bounded by the
+> point budget) but its **push** half (`event < 1 s`) and its p95 measurement are not: the broadcast is task 2.9 and
+> the 30-day dataset arrives with the rollups in 3.6. `TC-I-13`'s "foreign terrarium read" is green — the live run
+> answered `404 not_found` for another account's terrarium — while its audit half is not, because `AuditLog` is
+> still absent from the schema (see 2.2 and 2.3 above).
+
+> **Caveat on `TC-I-15`'s i18n half.** The app and dashboard key sets are **not** identical today, and were not
+> before this change: the dashboard carries strings the ARB set does not (`brokerDown`, `databaseDown`,
+> `errorEndpointMissing`, `lastUpdated`, …) and the ARB carries app-only ones (`tabHome`, `retry`,
+> `maintenanceNotice`, …). The dashboard side of that gap grew by 28 keys with the sign-in and password-recovery
+> work: the nine the sign-in form added (`signIn`, `signOut`, `usernameOrEmail`, `password`, `signInPrompt`,
+> `signingIn`, `invalidCredentials`, `sessionExpired`, `signedInAs`), the twelve the recovery form added
+> (`forgotPassword`, `backToSignIn`, `recoverPrompt`, `recoveryCode`, `newPassword`, `recoverButton`, `recovering`,
+> `recoveryFailed`, `passwordPolicyViolation`, `accountLocked`, `recoveryIssued`, `recoveryDone`) and the seven the
+> server-issued path added (`recoverHintBackup`, `recoverHintIssued`, `resetCodeLabel`, `sendResetCode`,
+> `sendingResetCode`, `resetCodeRequested`, `resetCodeLogHint`). Reconciling the two sets is a client-set task, and
+> `TC-I-15` cannot pass until it is done — the case is a real gate, not a formality.
+
+> **Which surface that gate applies to is changing (`ADR-019`).** The key set described above is
+> `web/legacy/js/i18n.js`, and `web/legacy/` is retired by task 4.19 in favour of the TERRAGUARD React client. So
+> the fix is not "the dashboard catches up with the app": task 4.18 gives the React client a key set shared with
+> the app and puts key parity in CI, and from then on `TC-I-15`'s i18n half covers *that* set. Until 4.18 lands the
+> case still fails, and it should — a gate waived for the surface being promoted would be waived exactly when it
+> starts to matter.
 
 ---
 
@@ -269,8 +306,8 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | Suite | Cases | Target |
 |---|---|---|
 | Firmware native (TC-U-FW-*) | 12 | all green before flashing a release build |
-| Backend unit (TC-U-*) | 50 | ≥ 70% line coverage on Domain + Application |
+| Backend unit (TC-U-*) | 56 | ≥ 70% line coverage on Domain + Application |
 | Backend integration | 15 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
 | E2E | 6 | executed per milestone, results recorded |
-| **Total** | **101** | |
+| **Total** | **107** | |

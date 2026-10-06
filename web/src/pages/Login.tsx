@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Eye, EyeOff, Lock, Mail, CheckCircle2, Box, Cpu, AlertTriangle, ArrowRight } from 'lucide-react';
+import { MockDataNotice } from '../components/MockDataNotice';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('admin@terraguard.vn');
@@ -20,7 +21,11 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b1a0d] flex items-center justify-center p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-[#0b1a0d] flex flex-col items-center justify-center gap-4 p-4 sm:p-6 lg:p-8">
+      {/* The login screen is what `http://127.0.0.1:8081/` serves, so the notice is unmissable here (task 4.14) */}
+      <div className="w-full max-w-5xl">
+        <MockDataNotice />
+      </div>
       <div className="w-full max-w-5xl bg-[#112016] border border-[#1e3825] rounded-3xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[620px]">
         {/* Left Hero Panel */}
         <div className="lg:col-span-5 bg-gradient-to-br from-[#162a1d] via-[#112016] to-[#0e1d11] p-8 sm:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-[#1e3825]">

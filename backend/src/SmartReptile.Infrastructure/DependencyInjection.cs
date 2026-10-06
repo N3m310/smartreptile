@@ -4,11 +4,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Ingest;
+using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Health;
+using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Infrastructure.Mqtt;
 using SmartReptile.Infrastructure.Observability;
 using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
+using SmartReptile.Infrastructure.Security;
 using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Infrastructure;
@@ -52,6 +56,10 @@ public static class DependencyInjection
         services.AddOptions<OnboardingProtectionOptions>()
             .Bind(configuration.GetSection(OnboardingProtectionOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<PasswordResetOptions>()
+            .Bind(configuration.GetSection(PasswordResetOptions.SectionName))
+            .Validate(o => o.CodeMinutes is > 0 and <= 1440, "PasswordReset:CodeMinutes must be between 1 and 1440")
+            .ValidateOnStart();
 
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is required (see .env.example).");
@@ -64,6 +72,68 @@ public static class DependencyInjection
             }));
 
         services.AddSingleton<IClock, SystemClock>();
+
+        // Identity adapters (FR-01). The application services that use them are registered by the API's
+        // composition root, which keeps this method a set of adapters rather than a second composition root.
+        services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+        services.AddSingleton<ISecretGenerator, SecureTokenGenerator>();
+        services.AddSingleton<ILoginThrottleStore, InMemoryLoginThrottleStore>();
+        services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
+        services.AddScoped<IUserStore, EfUserStore>();
+
+        // Account recovery (BR-01.5). The hash primitive is shared with device credentials — one implementation
+        // of SHA-256(secret ‖ salt) for every high-entropy secret the system issues.
+        services.AddSingleton<ISecretHasher, Sha256SecretHasher>();
+        services.AddSingleton<IRecoveryCodeGenerator, RecoveryCodeGenerator>();
+
+        // Where a server-issued reset code goes. The log sender is the default because the default environment has
+        // no mail server: it writes the code when PasswordReset:LogCode is on, and otherwise says plainly that the
+        // code reached nobody. A real SMTP channel replaces this registration (03-implementation/07, the
+        // password-recovery block) and changes nothing else.
+        services.AddSingleton<IPasswordResetNotifier, LogPasswordResetNotifier>();
+
+        // Device onboarding adapters (FR-04, FR-05 — roadmap task 2.2).
+        services.AddSingleton<IClaimCodeGenerator, ClaimCodeGenerator>();
+        services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
+        services.AddSingleton<IOnboardingThrottleStore, InMemoryOnboardingThrottleStore>();
+        services.AddScoped<IProvisioningStore, EfProvisioningStore>();
+
+        // Terrarium read surface (FR-03, FR-08, FR-09 — roadmap task 2.8).
+        services.AddScoped<ITerrariumStore, EfTerrariumStore>();
+
+        // Broker session registry (FR-05 BR-05.4): the broker writes it, the revoke use case reads it.
+        services.AddSingleton<DeviceSessionRegistry>();
+        services.AddSingleton<IDeviceSessionRegistry>(sp => sp.GetRequiredService<DeviceSessionRegistry>());
+
+        // Ingest pipeline (FR-06, roadmap task 2.4). The bus is the in-process hop from the broker; the stages are
+        // scoped because the two that touch the database share one context and therefore one transaction.
+        services.AddSingleton<InProcessTelemetryBus>();
+        services.AddSingleton<ITelemetryPayloadParser, JsonTelemetryPayloadParser>();
+        services.AddSingleton(sp =>
+        {
+            var ingest = sp.GetRequiredService<IOptions<IngestOptions>>().Value;
+
+            return new TelemetryValidationLimits(
+                ingest.MaxSamplesPerBatch,
+                TelemetryIngestRules.MaxSampleOffsetSeconds,
+                ingest.MaxPayloadKb);
+        });
+
+        services.AddSingleton<TelemetryPayloadValidator>();
+        services.AddScoped<ITelemetryStore, EfTelemetryStore>();
+        services.AddScoped<DeviceAuthenticator>();
+        services.AddScoped<PlausibilityGuard>();
+        services.AddScoped<CalibrationApplier>();
+        services.AddScoped<TelemetryWriter>();
+        services.AddScoped<DeviceStateUpdater>();
+        services.AddScoped<IngestPipeline>();
+
+        // Placeholders with a real boundary: 2.9 replaces the broadcaster, 3.2/3.3 replace the queue.
+        services.AddSingleton<ITelemetryBroadcaster, PendingTelemetryBroadcaster>();
+        services.AddSingleton<IEvaluationQueue, PendingEvaluationQueue>();
+        services.AddSingleton<IngestOutcomeRecorder>();
+        services.AddHostedService<IngestWorker>();
+
         services.AddSingleton<SmartReptileMetrics>();
         services.AddSingleton<MqttBrokerStatus>();
         services.AddSingleton<IMqttBrokerStatus>(sp => sp.GetRequiredService<MqttBrokerStatus>());

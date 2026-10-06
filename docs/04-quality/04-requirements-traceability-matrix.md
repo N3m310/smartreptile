@@ -14,15 +14,15 @@ future work · `R12` Conclusion · `R13` References · `R14` Appendices.
 
 | FR | Design doc | Code module | Tests | Report § | Status |
 |---|---|---|---|---|---|
-| FR-01 Account & session | `02-design/06` §2 | `Api/Endpoints/AuthEndpoints.cs`, `Application/Auth/*`, `Infrastructure/Security/Pbkdf2PasswordHasher.cs`, `app/lib/state/auth_provider.dart` | TC-U-32…35, TC-I-13, TC-W-01…03 | R3, R6, R8 | ☐ |
-| FR-02 RBAC | `02-design/06` §3 | `Api/Security/TerrariumAccessHandler.cs`, policies in `Program.cs`, role gates in UI widgets | TC-U-36, TC-I-13, TC-W-12 | R3, R6, R8 | ☐ |
-| FR-03 Terrarium management | `02-design/02` §3.5 | `Api/Endpoints/TerrariumEndpoints.cs`, `Application/Terrariums/*`, `app/lib/screens/terrariums/*` | TC-I-07, TC-W-04, TC-E2E-01 | R3, R4, R6 | ☐ |
+| FR-01 Account & session | `02-design/06` §2 | `Api/Endpoints/AuthEndpoints.cs`, `Application/Identity/AuthService.cs`, `Infrastructure/Security/{Pbkdf2PasswordHasher,Sha256SecretHasher,RecoveryCodeGenerator}.cs`, `app/lib/state/auth_provider.dart` | TC-U-32…35, TC-U-51…56, TC-I-13, TC-W-01…03 | R3, R6, R8 | ☐ |
+| FR-02 RBAC | `02-design/06` §3 | `Api/Security/TerrariumAccessHandler.cs`, policies in `Program.cs`, role gates in UI widgets (the terrarium read routes gate on `Owner` for create and on ownership-as-a-query-parameter elsewhere — the access handler lands with the membership model) | TC-U-36, TC-I-13, TC-W-12 | R3, R6, R8 | ☐ |
+| FR-03 Terrarium management | `02-design/02` §3.5 | `Api/Endpoints/TerrariumEndpoints.cs` (list, create, detail built; update/delete planned), `Application/Terrariums/*`, `Infrastructure/Persistence/EfTerrariumStore.cs`, `app/lib/screens/terrariums/*` | TC-I-10, TC-I-11, `TerrariumServiceTests`, TC-W-04, TC-E2E-01 | R3, R4, R6 | ☐ |
 | FR-04 Provisioning | `02-design/06` §5, `02-design/02` §4.1 | `firmware/src/net/wifi_manager.cpp`, `Application/Devices/ClaimService.cs`, `app/lib/screens/devices/claim_screen.dart` | TC-I-05, TC-I-13, TC-W-14, TC-E2E-01 | R5, R6, R8 | ☐ |
 | FR-05 Device auth | `02-design/06` §4, ADR-006 | `Infrastructure/Mqtt/*`, `Infrastructure/Security/DeviceSecretHasher.cs`, `firmware/src/net/mqtt_transport.cpp` | TC-U-05, TC-I-05, TC-I-13, TC-E2E-01 | R8 | ☐ |
 | FR-06 Telemetry ingest | `02-design/03` §1–3, `07-appendices/03` | `Api/Workers/IngestWorker.cs`, `Application/Ingest/*`, `Infrastructure/Mqtt/*`, `firmware/src/net/*` | TC-U-01…09, TC-U-FW-07…09, TC-I-01…04, TC-I-08, TC-E2E-01 | R4, R5, R6 | ☐ |
 | FR-07 Sensor health & buffering | `02-design/03` §4.3, §8 | `Domain/Devices/QualityFlags.cs`, `Api/Workers/DeviceSilenceWatchdog.cs`, `firmware/lib/ringbuffer/*` | TC-U-27…31, TC-U-FW-04…06, TC-I-04, TC-I-09, TC-W-07, TC-E2E-05 | R5, R9 | ☐ |
-| FR-08 Live dashboard | `02-design/04` §4.1, §6 | `app/lib/state/telemetry_provider.dart`, `app/lib/widgets/metric_card.dart`, `web/js/live.js` | TC-I-11, TC-W-04…08, TC-E2E-03 | R6, R9 | ☐ |
-| FR-09 History & range queries | `02-design/03` §6, `07-appendices/03` §4.5 | `Application/Readings/RangeQueryService.cs`, `app/lib/widgets/chart_panel.dart` | TC-I-10, TC-I-11, TC-W-09, TC-W-10 | R6, R9 | ☐ |
+| FR-08 Live dashboard | `02-design/04` §4.1, §6 | `Application/Terrariums/TerrariumService.cs` (`readings/latest`), `app/lib/state/telemetry_provider.dart`, `app/lib/widgets/metric_card.dart`, `web/legacy/js/{api.js,pages/live.js}`, `web/legacy/index.html` | TC-I-11, TC-W-04…08, TC-E2E-03 | R6, R9 | ☐ |
+| FR-09 History & range queries | `02-design/03` §6, `07-appendices/03` §4.2 | `Application/Readings/RangeQueryRules.cs`, `Application/Terrariums/TerrariumService.cs` (`ReadingsAsync`, `CoverageAsync`), `app/lib/widgets/chart_panel.dart` | TC-I-10, TC-I-11, TC-W-09, TC-W-10 | R6, R9 | ☐ |
 | FR-10 Species profiles & thresholds | `03-implementation/06`, `07-appendices/05`, ADR-005 | `Domain/Thresholds/*`, `Application/Thresholds/ThresholdService.cs`, `app/lib/screens/thresholds/*` | TC-U-21…26, TC-I-07, TC-W-13, TC-E2E-04 | R3, R6, R13 | ☐ |
 | FR-11 Threshold engine | `02-design/03` §4, ADR-005 | `Domain/Alerts/ThresholdDecision.cs`, `Api/Workers/EvaluatorWorker.cs`, `Application/Alerts/*` | TC-U-10…20, TC-I-06, TC-E2E-03 | R4, R6, R7 | ☐ |
 | FR-12 Alert lifecycle | `02-design/03` §5, `02-design/02` §3.14 | `Domain/Alerts/Alert.cs`, `Api/Endpoints/AlertEndpoints.cs`, `app/lib/screens/alerts/*` | TC-U-26, TC-I-07, TC-W-11, TC-W-12, TC-E2E-03 | R4, R6 | ☐ |
@@ -107,7 +107,7 @@ future work · `R12` Conclusion · `R13` References · `R14` Appendices.
 | No automated test for real FCM delivery | Push regressions are caught only manually | `04-quality/01` §6 |
 | Sensor accuracy is verified manually | A drifting sensor is caught by the 24 h soak/QA log, not CI | `04-quality/01` §6 |
 | Physical tampering of the node is unprotected | A stolen node's secret can be extracted | `02-design/06` §7 (I10), limitation L-01 |
-| No password reset flow | A forgotten password means account recreation in the demo | `05-release/03` limitation L-02 |
+| Reset-code delivery is a log line, not email | The reset flow itself is complete, but the code reaches the keeper only through the server log until `PasswordReset:Smtp` is configured | `05-release/03` limitation L-02, `02-design/06` §2 |
 | No OTA firmware update | A deployed node cannot be patched remotely | `02-design/06` §7 (I4), limitation L-03 |
 | Threshold literature verification is manual | A wrong band ships if the checklist is skipped | `07-appendices/05` §5 (gate) |
 | Load tested only to 50 RPS on one host | No scalability claim is made | `01-product/04` §1 NFR-01 note |

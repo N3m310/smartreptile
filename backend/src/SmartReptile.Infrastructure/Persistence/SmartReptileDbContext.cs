@@ -21,6 +21,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Rotating refresh tokens.</summary>
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    /// <summary>Single-use password-reset codes (BR-01.5).</summary>
+    public DbSet<PasswordResetCode> PasswordResetCodes => Set<PasswordResetCode>();
+
     /// <summary>Monitored enclosures.</summary>
     public DbSet<Terrarium> Terrariums => Set<Terrarium>();
 
@@ -73,6 +76,11 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(u => u.Email).HasMaxLength(256).IsRequired();
             entity.Property(u => u.PasswordHash).HasMaxLength(64).IsRequired();
             entity.Property(u => u.PasswordSalt).HasMaxLength(16).IsRequired();
+
+            // Optional on purpose: an account created before recovery codes existed has none, and the API answers
+            // a null code exactly like a wrong one rather than growing a special case (BR-01.5).
+            entity.Property(u => u.RecoveryCodeHash).HasMaxLength(32);
+            entity.Property(u => u.RecoveryCodeSalt).HasMaxLength(16);
             entity.Property(u => u.PreferredLanguage).HasMaxLength(2).IsRequired();
             entity.Property(u => u.TimeZoneId).HasMaxLength(64).IsRequired();
             entity.Property(u => u.TelegramChatId).HasMaxLength(32);
@@ -94,6 +102,22 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasIndex(t => new { t.UserId, t.FamilyId });
             entity.HasOne<User>().WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.ToTable("RefreshToken");
+        });
+
+        modelBuilder.Entity<PasswordResetCode>(entity =>
+        {
+            entity.HasKey(c => c.Id);
+
+            // SHA-256 of the presented code. Unsalted, so the row can be found by this column — see the type for
+            // why that is safe here.
+            entity.Property(c => c.CodeHash).HasMaxLength(32).IsRequired();
+            entity.Property(c => c.RequestedFromAddress).HasMaxLength(45);
+            entity.HasIndex(c => c.CodeHash).IsUnique();
+
+            // Covers "this account's live codes", the only shape the store queries by.
+            entity.HasIndex(c => new { c.UserId, c.ExpiresAt });
+            entity.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable("PasswordResetCode");
         });
     }
 

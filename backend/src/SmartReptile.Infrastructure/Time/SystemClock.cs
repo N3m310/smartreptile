@@ -12,6 +12,10 @@ public sealed class SystemClock : IClock
     public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 
     /// <inheritdoc />
+    public DateTimeOffset InZone(DateTimeOffset instantUtc, string timeZoneId) =>
+        TimeZoneInfo.ConvertTime(instantUtc, ResolveZone(timeZoneId));
+
+    /// <inheritdoc />
     public DateTimeOffset NowIn(string timeZoneId)
     {
         var zone = ResolveZone(timeZoneId);
