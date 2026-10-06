@@ -219,8 +219,10 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 > covered (`readings/latest` and the bucketed series are exercised over HTTP, and a chart payload is bounded by the
 > point budget) but its **push** half (`event < 1 s`) and its p95 measurement are not: the broadcast is task 2.9 and
 > the 30-day dataset arrives with the rollups in 3.6. `TC-I-13`'s "foreign terrarium read" is green — the live run
-> answered `404 not_found` for another account's terrarium — while its audit half is not, because `AuditLog` is
-> still absent from the schema (see 2.2 and 2.3 above).
+> answered `404 not_found` for another account's terrarium — and as of 2026-10-06 so is its audit half for the
+> device lifecycle: `device.claimed`, `device.secret_rotated` and `device.revoked` rows were read back from SQL
+> Server after a live claim → rotate → revoke, and a second revoke wrote nothing. Its login and token-reuse verbs
+> are still unwritten: `AuditLog` exists, but nothing on the FR-01 path writes to it (see 2.2 and 2.3 above).
 
 > **Caveat on `TC-I-15`'s i18n half.** The app and dashboard key sets are **not** identical today, and were not
 > before this change: the dashboard carries strings the ARB set does not (`brokerDown`, `databaseDown`,

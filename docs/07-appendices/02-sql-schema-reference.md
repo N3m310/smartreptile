@@ -195,8 +195,21 @@ Indexes: `IX_Alert_Terrarium_State_Triggered` `(TerrariumId, State, TriggeredAt 
 Index: `(UserId, CreatedAt DESC)`, `(AlertId)`.
 
 ### 3.11 `AuditLog`
-`(Id bigint, UserId null, DeviceId null, EntityName varchar(40), EntityId nvarchar(64), Action varchar(40), BeforeJson nvarchar(max) null, AfterJson nvarchar(max) null, IpAddress varchar(45) null, UserAgent nvarchar(200) null, CorrelationId varchar(64) null, OccurredAt datetime2(3))`
-Index: `(EntityName, EntityId, OccurredAt DESC)`, `(OccurredAt)`.
+`(Id bigint identity, UserId uniqueidentifier null, DeviceId uniqueidentifier null, EntityName nvarchar(40), EntityId nvarchar(64), Action nvarchar(40), BeforeJson nvarchar(max) null, AfterJson nvarchar(max) null, IpAddress nvarchar(45), UserAgent nvarchar(200) null, CorrelationId nvarchar(64) null, OccurredAt datetimeoffset(3))`
+PK `(Id)`. Index: `(EntityName, EntityId, OccurredAt DESC)`, `(OccurredAt)`.
+
+Created by `20261006170132_AddAuditLog` (the audit-row follow-up to tasks 2.2 and 2.3, 2026-10-06). The table was
+specified in `02-design/02` §3.18 from the start but `InitialSchema` never created it, which is why the device
+lifecycle ran un-audited for three days. Three differences from the sketch that first appeared here, all read back
+from `sys.columns`: the character columns are `nvarchar` like the rest of this schema (the catalogue uses
+`varchar` as shorthand throughout); `IpAddress` is **NOT NULL**, because `AuditLog.ForDevice` substitutes the
+literal `unknown` when the transport cannot name the caller; and the instant is `datetimeoffset(3)`, because every
+other instant in this schema is one. `UserAgent` and `CorrelationId` are **truncated** to their widths rather than
+rejected — both arrive as client-supplied headers of unbounded length, and a refused insert would turn a valid
+claim into a `500`.
+
+There are no foreign keys, deliberately: the row outlives the entity it names, and a cascade would let deleting a
+user erase the record of what that user did.
 
 ### 3.12 `ExportJob` and `Snapshot`
 `ExportJob` `(Id, UserId, TerrariumId, Format tinyint, RangeStartUtc, RangeEndUtc, MetricIdsJson, Status tinyint, RowCount int, FilePath nvarchar(400), DownloadToken varchar(64) unique, ExpiresAt, ErrorMessage nvarchar(300) null, CreatedAt, CompletedAt null)`.

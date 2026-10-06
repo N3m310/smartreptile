@@ -176,14 +176,19 @@ and both credential rows read `32/16/revoked`; re-registering a **claimed** chip
 with the `deviceId` and no code, re-registering an **unclaimed** chip `409` with the same `deviceId` and a **fresh**
 code; `Technician` `403 insufficient_role` on claim and rotate. **186 backend unit tests pass** (was 121).
 
-**What is deliberately still open in 2.2.** Four caveats, three of which a later task has to clear:
+**What is deliberately still open in 2.2.** Four caveats were recorded here; two have since been closed by later
+work and two stand:
 
-- **Revoking does not disconnect a live MQTT session.** A revoked board is refused on its next connect or publish
-  rather than mid-session, because the kick needs the broker that task 2.3 owns.
-- **No audit rows are written** for claim, rotate or revoke. `BR-18.4` asks for them and `02-design/02` §3.18
-  specifies an `AuditLog` table, but that table is not in `InitialSchema` — it was never created in M1, so the
-  acceptance line "audit rows written" in `TC-I-13` cannot pass yet. Task 2.3 inherits this directly, because its
-  own acceptance line is "bad credentials refused **+ audited**".
+- **Revoking does not disconnect a live MQTT session — closed by task 2.3.** A revoked board used to be refused on
+  its next connect or publish rather than mid-session, because the kick needed the broker that 2.3 owns; the block
+  below records the kick closing a live session in 0.0 s.
+- **No audit rows were written for claim, rotate or revoke — closed 2026-10-06.** `BR-18.4` asks for them and
+  `02-design/02` §3.18 specifies an `AuditLog` table, but `InitialSchema` never created one, so the acceptance line
+  "audit rows written" in `TC-I-13` could not pass. The follow-up added the table (`Domain/Auditing/AuditLog.cs`,
+  `IProvisioningStore.AddAuditEntry`, migration `20261006170132_AddAuditLog`) and the three writes in
+  `DeviceProvisioningService`; each row is staged on the same save as the change it describes, so the change cannot
+  commit without it. The login and token-reuse verbs of the vocabulary are still unwritten — they belong to the
+  FR-01 path, not to this one.
 - **The last write is not guarded against a race.** Two simultaneous claims of one terrarium can both pass the
   pre-check; the filtered unique index `IX_Device_TerrariumId` then refuses the second insert and the caller sees a
   `500` instead of `409 terrarium_already_bound`. Correct, but unpolished until exception translation lands.
@@ -210,11 +215,13 @@ another device's prefix refused and the session dropped while a fresh connection
 release shape (`DisablePlaintextEndpoint=true`) `1883` was not listening at all while TLS kept working.
 **226 backend unit tests pass** (was 186).
 
-**What is deliberately still open in 2.3.** One thing, now that 2.4 has landed:
+**What is deliberately still open in 2.3.** One thing was, and it is now half closed:
 
-- **No audit rows.** `BR-18.4` wants `device.secret_rotated`, `device.revoked` and the rejected-connection cases
-  in an `AuditLog`, and that table is still not in the schema (see 2.2 above), so this acceptance line reads
-  "rejected and counted, not yet audited". The counters and the structured warnings are what exists today.
+- **No audit rows — closed for the device actions on 2026-10-06.** `BR-18.4` wants `device.secret_rotated` and
+  `device.revoked` in an `AuditLog`; that table now exists (see 2.2 above) and `DeviceProvisioningService` writes
+  both, verified live. The **rejected-connection** cases the acceptance line also names are still only counted and
+  logged: the closed vocabulary of `02-design/02` §3.18 has no verb for a refused connection, so that half needs a
+  vocabulary decision — and a row that names neither a user nor an existing device — before it can be written.
 
 The other half of that acceptance — "nothing consumes the accepted publish" — is closed by the block below.
 
@@ -261,8 +268,8 @@ integration project passes **15 of 15** against a fresh database, `TC-I-01…03`
   row — the flag is on the row, which is what the evaluator will read.
 - **`TC-I-04`'s `sensor_fault` half moved to 3.3.** The task's acceptance named it, but a `sensor_fault` arrives on
   `sr/v1/d/{id}/events`, and "humidity is `Unavailable`" needs the `SensorFault` derived signal — which is 3.3, and
-  which has no table to record it in today (`InitialSchema` has no device-event storage, the same class of gap as
-  the missing `AuditLog`). The health half of the test is green; the fault half is recorded against 3.3 where the
+  which has no table to record it in today (`InitialSchema` has no device-event storage — the same class of gap
+  that `AuditLog` had until 2026-10-06). The health half of the test is green; the fault half is recorded against 3.3 where the
   signal lives, rather than half-built here.
 - **Only the `telemetry` channel is forwarded.** `health`, `status` and `events` are part of the topic scheme but
   have no consumer yet. The broker leaves them unforwarded on purpose: accepting a status payload and then ignoring
