@@ -98,13 +98,10 @@ services:
     ports:
       - "8081:80"
     volumes:
-      # Two web surfaces, kept apart by web/nginx.conf (ADR-017; the fix for BUG-03, task 4.12):
-      #   /        -> the committed TERRAGUARD prototype build (web/dist), so the demo needs no Node
-      #   /legacy/ -> the M1 static dashboard (web/legacy), the one with the real API behind it
-      # Mounting all of ./web here is what served the prototype's Vite entry as a blank page.
-      # The mounts are siblings, not nested: a nested mountpoint inside a read-only mount fails.
-      - ./web/dist:/srv/prototype:ro
-      - ./web/legacy:/srv/legacy:ro
+      # One web surface, since the legacy dashboard was retired (ADR-019, task 4.19): the built TERRAGUARD
+      # client, which is what web/nginx.conf serves. The build is committed so the demo needs no Node.
+      # Mounting all of ./web here is what served the prototype's Vite entry as a blank page in BUG-03.
+      - ./web/dist:/srv/app:ro
       - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - api

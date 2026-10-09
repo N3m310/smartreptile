@@ -141,6 +141,39 @@ jobs:
           tail -40 /tmp/api.log
           exit 1
 
+  web:
+    name: Web client (typecheck, i18n keys, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Dependencies
+        run: npm ci
+
+      # `tsc` first: a type error in this client is a screen that renders nothing, and the build would still
+      # produce a bundle.
+      - name: Type check
+        run: npm run typecheck
+
+      # The key-parity half of TC-I-15. Both clients read `app/lib/l10n/app_*.arb`, so this job is what keeps a
+      # key that only one locale defines — or a screen naming a key nobody defined — out of a release.
+      - name: i18n key parity
+        run: npm run check:strings
+
+      - name: Build
+        run: npm run build
+
   app:
     name: Flutter app (analyze, test)
     runs-on: ubuntu-latest
