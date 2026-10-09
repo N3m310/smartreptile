@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Auditing;
@@ -13,6 +14,12 @@ namespace SmartReptile.Infrastructure.Persistence;
 /// </summary>
 public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisioningStore
 {
+    /// <summary>
+    /// The filtered unique index DI-04 is built on. Its name is what distinguishes a lost claim race from any other
+    /// constraint, because the SQL error number alone also covers the public-id and chip-id indexes.
+    /// </summary>
+    private const string TerrariumBindingIndex = "IX_Device_TerrariumId";
+
     /// <inheritdoc />
     public Task<Device?> FindDeviceByPublicIdAsync(string publicId, CancellationToken cancellationToken) =>
         db.Devices
@@ -59,4 +66,30 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
 
     /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<bool> TrySaveClaimAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsTerrariumBindingConflict(ex))
+        {
+            // Two claims of one terrarium both passed the pre-check and the database refused the second binding.
+            // That is DI-04 working, not an incident: the caller answers the documented 409 instead of a 500.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True when the failure is the DI-04 binding index and not another unique constraint. The index name is
+    /// checked rather than the error number alone, because 2601/2627 also cover the public-id and chip-id indexes —
+    /// treating one of those as "a device bound first" would hide a real bug behind a plausible answer.
+    /// </summary>
+    private static bool IsTerrariumBindingConflict(DbUpdateException exception) =>
+        exception.InnerException is SqlException sql
+        && sql.Number is 2601 or 2627
+        && sql.Message.Contains(TerrariumBindingIndex, StringComparison.Ordinal);
 }

@@ -182,4 +182,22 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
         PendingAuditEntries.Clear();
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Mirrors the adapter's translation of the DI-04 index: false means a concurrent claim bound the terrarium
+    /// first. Set <see cref="ClaimRaceLost"/> to make the fake report that, which is how the 409 is asserted without
+    /// two real writers.
+    /// </summary>
+    public Task<bool> TrySaveClaimAsync(CancellationToken cancellationToken)
+    {
+        if (ClaimRaceLost)
+        {
+            return Task.FromResult(false);
+        }
+
+        return SaveChangesAsync(cancellationToken).ContinueWith(_ => true, cancellationToken);
+    }
+
+    /// <summary>Makes the next <see cref="TrySaveClaimAsync"/> report that another claim won the terrarium.</summary>
+    public bool ClaimRaceLost { get; set; }
 }

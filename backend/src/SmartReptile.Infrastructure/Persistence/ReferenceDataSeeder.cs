@@ -6,7 +6,7 @@ using SmartReptile.Domain.Thresholds;
 namespace SmartReptile.Infrastructure.Persistence;
 
 /// <summary>
-/// Seeds the metric dictionary, the three built-in species profiles and their bands.
+/// Seeds the metric dictionary, the four built-in species profiles and their bands.
 /// Idempotent by name/metric, so re-running never duplicates rows (§03-implementation/03 §2).
 /// </summary>
 /// <remarks>
@@ -32,8 +32,11 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
     /// <c>SchemaAndSeedingTests.Bands_awaiting_verification_match_the_declared_count</c> asserts that the
     /// database agrees, so the stamp cannot outlive the checklist. Gate: ≥ 60 % of rows cited for M1 (task
     /// 1.8), 100 % for M3 (task 3.8).</para>
+    /// <para>The `Arid-cool` profile's two ambient bands joined the set on 2026-10-07 (14 → 16). They are pending
+    /// like the rest: appendix §5 row 7 names the band the variant exists for, and the other one is the humidity
+    /// band it shares in value with the Arid profile.</para>
     /// </summary>
-    public const int BandsAwaitingVerification = 14;
+    public const int BandsAwaitingVerification = 16;
 
     private const string PendingVerification =
         PendingVerificationMarker + " — typical published husbandry range, see docs/07-appendices/05 §5";
@@ -115,6 +118,29 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
                 Band(MetricCode.LightLux, ThresholdPhase.Day, 0m, 200_000m, dwellWarn: 15, dwellCrit: 15, margin: 0m,
                      source: BandSources.HusbandryPracticeLight),
                 Band(MetricCode.UvIndex, ThresholdPhase.Day, 1.0m, 3.5m, 0m, 5.0m, dwellWarn: 15, margin: 0.2m),
+            ],
+            cancellationToken)
+            .ConfigureAwait(false);
+
+        created += await EnsureProfileAsync(
+            name: "Arid-cool (bearded dragon, ambient)",
+            scientificName: "Pogona vitticeps",
+            zone: ClimateZone.Arid,
+            photoperiodHours: 12m,
+            lightsOnLocalTime: new TimeOnly(8, 0),
+            lightThresholdLux: 2000m,
+            minLightHours: 10m,
+            notes: "Cool-side variant of the Arid profile: the same species and the same enclosure, monitored from "
+                 + "the cool side rather than the basking spot, which is why the day temperature band is the "
+                 + "ambient range (28-33 °C) instead of the basking range. Only the ambient bands ship — there is "
+                 + "no SurfaceTempC band, because that probe belongs on the basking rock this variant deliberately "
+                 + "does not describe, and no UvIndex band, because the UVB gradient is a property of the basking "
+                 + "zone and a cool-side target could never be met. The accumulated light rule stays profile-level "
+                 + "(2000 lx for 10 h), exactly as the Arid profile has it.",
+            bands:
+            [
+                Band(MetricCode.TempC, ThresholdPhase.Day, 28m, 33m, 24m, 36m, margin: 1m),
+                Band(MetricCode.HumidityPct, ThresholdPhase.Any, 30m, 40m, 20m, 55m, dwellWarn: 15, margin: 3m),
             ],
             cancellationToken)
             .ConfigureAwait(false);

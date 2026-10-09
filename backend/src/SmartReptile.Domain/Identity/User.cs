@@ -72,14 +72,8 @@ public class User
     /// <summary>Push notifications enabled.</summary>
     public bool ChannelFcmEnabled { get; set; }
 
-    /// <summary>Telegram notifications enabled (the channel used in the live demo).</summary>
-    public bool ChannelTelegramEnabled { get; set; }
-
     /// <summary>Email notifications enabled.</summary>
     public bool ChannelEmailEnabled { get; set; }
-
-    /// <summary>Linked Telegram chat id, set through a one-time linking code.</summary>
-    public string? TelegramChatId { get; set; }
 
     /// <summary>FCM registration token for the mobile app.</summary>
     public string? FcmToken { get; set; }

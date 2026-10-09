@@ -29,4 +29,10 @@ public sealed class SignalRTelemetryBroadcaster(IHubContext<TelemetryHub> hub) :
                 .SendAsync("readingAdded", ReadingAddedPayload.From(sample), cancellationToken);
         }
     }
+
+    /// <inheritdoc />
+    public Task BroadcastStatusAsync(DeviceStatusChanged statusChanged, CancellationToken cancellationToken) =>
+        hub.Clients
+            .Group(TelemetryHub.GroupName(statusChanged.TerrariumId))
+            .SendAsync("statusChanged", StatusChangedPayload.From(statusChanged), cancellationToken);
 }

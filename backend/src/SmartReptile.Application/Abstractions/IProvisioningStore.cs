@@ -50,4 +50,11 @@ public interface IProvisioningStore
 
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Commits a claim, reporting a lost race on the DI-04 binding index instead of throwing. False means another
+    /// claim bound a device to that terrarium between the pre-check and this write, which is the
+    /// <c>terrarium_already_bound</c> the caller must answer rather than a 500 (TC-I-05).
+    /// </summary>
+    Task<bool> TrySaveClaimAsync(CancellationToken cancellationToken);
 }

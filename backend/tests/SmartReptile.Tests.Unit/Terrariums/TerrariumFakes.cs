@@ -93,7 +93,8 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
         Guid ownerUserId,
         string name = "Test box",
         SpeciesProfile? profile = null,
-        string timeZoneId = "UTC")
+        string timeZoneId = "UTC",
+        byte[]? rowVersion = null)
     {
         var terrarium = new Terrarium
         {
@@ -102,6 +103,9 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
             SpeciesProfileId = profile?.Id ?? Guid.Empty,
             SpeciesProfile = profile,
             TimeZoneId = timeZoneId,
+
+            // A stored row always carries one — it is the database's own token, and the update path compares it.
+            RowVersion = rowVersion ?? [1, 2, 3, 4, 5, 6, 7, 8],
         };
 
         _terrariums.Add(terrarium);
@@ -287,4 +291,23 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
         SaveCount++;
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Always commits. The adapter's false answer means "another writer moved the rowversion", which is a property
+    /// of the database; a test that wants a stale-write refusal sets <see cref="RowVersionConflict"/> instead of
+    /// pretending the fake is EF.
+    /// </summary>
+    public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken)
+    {
+        if (RowVersionConflict)
+        {
+            return Task.FromResult(false);
+        }
+
+        SaveCount++;
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Makes the next <see cref="TrySaveChangesAsync"/> report a lost optimistic-concurrency race.</summary>
+    public bool RowVersionConflict { get; set; }
 }

@@ -136,4 +136,20 @@ public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
 
     /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The row's rowversion moved between the read and this write, which is exactly what the token is for:
+            // the caller is told its copy is stale instead of clobbering an edit it never saw (FR-03).
+            return false;
+        }
+    }
 }

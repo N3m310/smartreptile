@@ -10,11 +10,11 @@ namespace SmartReptile.Application.Identity;
 /// <remarks>
 /// Two properties are deliberate and load-bearing:
 /// <list type="bullet">
-/// <item><b>Failures do not disclose whether an account exists.</b> Login answers the same way for an unknown
-/// identifier and a wrong password, registration answers the same way for a free and a taken identifier (including
-/// the recovery code it hands back, which is real only when the account was created), recovery answers the same way
-/// for an unknown identifier and a wrong code, and login pays the hashing cost even when there is no account to
-/// compare against (§02-design/06 §2).</item>
+/// <item><b>Failures disclose as little as they can.</b> Login answers the same way for an unknown identifier and a
+/// wrong password — and pays the hashing cost even when there is no account to compare against — and recovery answers
+/// the same way for an unknown identifier and a wrong code. Registration and <c>forgot-password</c> are the two
+/// deliberate exceptions (ADR-020): both are about an identifier the caller typed themselves, so both say so when it
+/// is unknown (§02-design/06 §2).</item>
 /// <item><b>Refresh is single-use.</b> A rotated token is consumed, and presenting a consumed one is treated as
 /// theft: the whole rotation family is revoked (TC-U-34).</item>
 /// </list>
@@ -36,10 +36,10 @@ public sealed class AuthService(
     /// does (§02-design/06 §2), which keeps "who is signed in" with a single implementation.
     /// </summary>
     /// <returns>
-    /// Success without a session, whether or not the account was created, plus a recovery code. On the taken
-    /// path the returned code is a decoy — generated, never stored, and therefore useless — because a response
-    /// that carried a code only when the identifier was free would disclose exactly what this design refuses to
-    /// disclose.
+    /// A session-less success plus the new account's recovery code, or <c>registration_conflict</c> with the
+    /// identifier that is already in use. Registration is the one credential path that discloses (ADR-020): the
+    /// caller typed these values themselves, and answering "accepted" for an address that was never registered is
+    /// a lie whose cost is a keeper hunting for an account that does not exist.
     /// </returns>
     public async Task<AuthOutcome> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
@@ -55,15 +55,29 @@ public sealed class AuthService(
 
         var username = AccountIdentifierPolicy.NormaliseUsername(request.Username);
         var email = AccountIdentifierPolicy.NormaliseEmail(request.Email);
-        var recoveryCode = recoveryCodes.Generate();
+        var taken = await store.FindTakenIdentifiersAsync(username, email, cancellationToken);
 
-        // A taken identifier is not disclosed: the caller gets the same answer as for a free one and simply
-        // cannot log in with it (§02-design/06 §2).
-        if (await store.UserExistsAsync(username, email, cancellationToken))
+        if (taken.Any)
         {
-            return AuthOutcome.WithRecoveryCode(recoveryCode);
+            var conflicts = new List<IdentityViolation>();
+
+            if (taken.Username)
+            {
+                conflicts.Add(new IdentityViolation(
+                    "username", "username_taken", "That username already has an account."));
+            }
+
+            if (taken.Email)
+            {
+                conflicts.Add(new IdentityViolation(
+                    "email", "email_taken", "That email address already has an account."));
+            }
+
+            return AuthOutcome.Invalid(
+                "registration_conflict", "Those account details are already in use.", conflicts);
         }
 
+        var recoveryCode = recoveryCodes.Generate();
         var hashed = passwordHasher.Hash(request.Password!);
         var recoveryHash = secretHasher.Hash(recoveryCode);
 
@@ -322,9 +336,14 @@ public sealed class AuthService(
     /// Issues a password-reset code and hands it to the delivery channel (BR-01.5).
     /// </summary>
     /// <remarks>
-    /// Always succeeds. An unknown identifier, a disabled account and a live account answer identically, so this
-    /// cannot be used to find out whether an address has an account: the difference shows only in the delivery
-    /// channel, and only to the account's owner (BR-02.2).
+    /// Unlike every other credential path, this one <b>discloses</b> whether the identifier has an account
+    /// (ADR-020): it answers <c>identifier_unknown</c> when none does, because the alternative is a keeper waiting
+    /// for a code that was never generated. A disabled account answers the same way — it cannot be recovered
+    /// either, and a third answer would tell a stranger more, not less.
+    /// <para>
+    /// The cost is recorded rather than hidden: this endpoint can now be used to ask whether a given address has
+    /// an account. Login, recovery, reset, registration's password rules and every terrarium route still do not.
+    /// </para>
     /// </remarks>
     public async Task<AuthOutcome> ForgotPasswordAsync(
         ForgotPasswordRequest request,
@@ -336,7 +355,7 @@ public sealed class AuthService(
 
         if (user is null || user.DisabledAt is not null)
         {
-            return AuthOutcome.Success();
+            return AuthOutcome.Failure("identifier_unknown", "No account uses that identifier.");
         }
 
         var now = clock.UtcNow;
@@ -359,10 +378,9 @@ public sealed class AuthService(
 
         // After the commit, so a delivery failure can never roll back — or hide — a code that now exists.
         //
-        // Guarded even though the port requires implementations not to throw: this call is the one place where a
-        // failure would become visible to the caller, and a 500 for an account that exists next to a 202 for one
-        // that does not is exactly the account-existence oracle this endpoint must not be. The channel is required
-        // to log its own failures; the response is not allowed to depend on it (BR-02.2).
+        // Guarded even though the port requires implementations not to throw: a 500 here would be indistinguishable
+        // from a broken deployment, and the keeper would be told nothing about the code that does exist. The channel
+        // is required to log its own failures; the response is not allowed to depend on it.
         try
         {
             await notifier.NotifyAsync(

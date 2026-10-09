@@ -45,6 +45,22 @@ public enum ResolvedReason
 /// </summary>
 public class Alert
 {
+    /// <summary>
+    /// The key the open-alert uniqueness rule is expressed over
+    /// (<c>{terrariumId}:{metric}:{severity}:{phase}</c>). Severity is part of it deliberately: a critical episode
+    /// that follows a resolved warning is a new row, not a reopened one, so the record shows both.
+    /// </summary>
+    /// <param name="terrariumId">Terrarium the alert belongs to.</param>
+    /// <param name="metric">Metric, or null for a device-level alert.</param>
+    /// <param name="severity">Severity the alert is at.</param>
+    /// <param name="phase">Phase the value was evaluated in.</param>
+    public static string DedupeKeyFor(
+        Guid terrariumId,
+        Metrics.MetricCode? metric,
+        AlertSeverity severity,
+        Thresholds.ThresholdPhase phase) =>
+        $"{terrariumId}:{(int?)metric ?? 0}:{(int)severity}:{(int)phase}";
+
     /// <summary>Surrogate key.</summary>
     public long Id { get; set; }
 

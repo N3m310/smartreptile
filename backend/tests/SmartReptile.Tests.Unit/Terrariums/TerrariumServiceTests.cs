@@ -380,6 +380,105 @@ public class TerrariumServiceTests
         outcome.Problem!.Code.Should().Be("not_found");
     }
 
+    // ---- effective thresholds (FR-10, BR-10.3, roadmap 3.1) ------------------------------------------
+
+    [Fact]
+    public async Task EffectiveThresholds_lists_every_configured_metric_with_the_layer_it_came_from()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 28m, 30m);
+
+        var outcome = await _service.EffectiveThresholdsAsync(terrarium.Id, _owner, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Thresholds!.TerrariumId.Should().Be(terrarium.Id);
+        outcome.Thresholds.CapturedAtUtc.Should().Be(Now);
+        outcome.Thresholds.TimeZoneId.Should().Be("UTC");
+
+        // Sorted by metric key, the same way the cards are, so the editor's rows do not shuffle between reloads.
+        outcome.Thresholds.EffectiveThresholds.Select(entry => entry.Metric)
+            .Should().Equal("humidityPct", "tempC");
+
+        var temperature = outcome.Thresholds.EffectiveThresholds[1];
+        temperature.Source.Should().Be("override");
+        temperature.Phase.Should().Be("any");
+        temperature.Unit.Should().Be("°C");
+        temperature.TargetMin.Should().Be(28m);
+        temperature.TargetMax.Should().Be(30m);
+
+        var humidity = outcome.Thresholds.EffectiveThresholds[0];
+        humidity.Source.Should().Be("profile");
+        humidity.TargetMin.Should().Be(30m);
+        humidity.TargetMax.Should().Be(40m);
+    }
+
+    [Fact]
+    public async Task EffectiveThresholds_reports_the_phase_the_card_is_being_judged_in()
+    {
+        var (terrarium, _, _) = Arrange();
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 3, 23, 0, 0, TimeSpan.Zero);
+
+        var outcome = await _service.EffectiveThresholdsAsync(terrarium.Id, _owner, CancellationToken.None);
+        var temperature = outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC");
+
+        temperature.Phase.Should().Be("night");
+        temperature.TargetMin.Should().Be(20m);
+        temperature.TargetMax.Should().Be(24m);
+    }
+
+    [Fact]
+    public async Task EffectiveThresholds_omits_a_metric_that_has_no_band_for_this_phase()
+    {
+        var profile = _store.AddProfile();
+        FakeTerrariumStore.AddBand(profile, MetricCode.TempC, 26m, 32m, ThresholdPhase.Day);
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 3, 23, 0, 0, TimeSpan.Zero);
+
+        var outcome = await _service.EffectiveThresholdsAsync(terrarium.Id, _owner, CancellationToken.None);
+
+        // Absent rather than present with null bounds: an absent row is what the editor unions with the dictionary
+        // to show as unconfigured, and the evaluator treats it as unjudged.
+        outcome.Thresholds!.EffectiveThresholds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EffectiveThresholds_of_another_accounts_terrarium_is_not_found()
+    {
+        var profile = _store.AddProfile();
+        var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+
+        var outcome = await _service.EffectiveThresholdsAsync(foreign.Id, _owner, CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task EffectiveThresholds_of_a_missing_terrarium_is_not_found()
+    {
+        var outcome = await _service.EffectiveThresholdsAsync(Guid.NewGuid(), _owner, CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task EffectiveThresholds_agrees_with_the_band_the_card_is_classified_against()
+    {
+        var (terrarium, device, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 28m, 30m);
+        _store.AddSample(terrarium.Id, device.Id, Now, default, (MetricCode.TempC, 31m));
+
+        var readings = await _service.LatestReadingsAsync(terrarium.Id, _owner, CancellationToken.None);
+        var thresholds = await _service.EffectiveThresholdsAsync(terrarium.Id, _owner, CancellationToken.None);
+
+        var card = readings.Readings!.Metrics.Single(metric => metric.Code == "tempC");
+        var resolved = thresholds.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC");
+
+        // The whole point of sharing the resolver: an editor previewing this band is previewing the band the card
+        // was coloured with, so the two cannot drift apart.
+        card.Target.Should().Be(new MetricBand(resolved.TargetMin, resolved.TargetMax));
+        card.Status.Should().Be(ReadingStatus.OutOfRange);
+    }
+
     // ---- readings (range) ---------------------------------------------------------------------------
 
     [Theory]
@@ -630,5 +729,265 @@ public class TerrariumServiceTests
         var device = FakeTerrariumStore.AddDevice(terrarium, deviceStatus, Now);
 
         return (terrarium, device, profile);
+    }
+
+    // ---- update and delete (FR-03, roadmap 2.8's remaining half) -------------------------------------
+
+    [Fact]
+    public async Task Update_changes_the_field_it_was_given_and_leaves_the_rest_alone()
+    {
+        var profile = _store.AddProfile("Leopard gecko");
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        terrarium.Location = "desk";
+        terrarium.Description = "notes";
+        var rowVersion = terrarium.RowVersion!;
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Alpha renamed", null, null, null, null),
+            _owner,
+            rowVersion,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.Name.Should().Be("Alpha renamed");
+        terrarium.Location.Should().Be("desk");
+        terrarium.Description.Should().Be("notes");
+        terrarium.UpdatedAt.Should().Be(Now);
+
+        // The response carries a token: without one the client could not make a second edit.
+        outcome.RowVersion.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Update_clears_a_free_text_field_when_it_is_sent_empty()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        terrarium.Location = "desk";
+        terrarium.Description = "notes";
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, null, string.Empty, string.Empty, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        // An omitted member means "leave it"; an empty string is the one way a JSON body can say "clear it".
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.Location.Should().BeNull();
+        terrarium.Description.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Update_leaves_the_name_alone_when_it_is_omitted()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, null, "windowsill", null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.Name.Should().Be("Alpha");
+        terrarium.Location.Should().Be("windowsill");
+    }
+
+    [Fact]
+    public async Task Update_refuses_a_stale_rowversion_and_writes_nothing()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        var savesBefore = _store.SaveCount;
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Renamed", null, null, null, null),
+            _owner,
+            [9, 9, 9, 9, 9, 9, 9, 9],
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("precondition_failed");
+
+        // The point of a concurrency token: the stale writer does not overwrite what it never read.
+        terrarium.Name.Should().Be("Alpha");
+        _store.SaveCount.Should().Be(savesBefore);
+    }
+
+    [Fact]
+    public async Task Update_accepts_the_wildcard_rowversion()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        // "If-Match: *" is existence-only, which the endpoint hands over as an empty token.
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Renamed", null, null, null, null),
+            _owner,
+            [],
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.Name.Should().Be("Renamed");
+    }
+
+    [Fact]
+    public async Task Update_reports_a_race_lost_at_commit_as_precondition_failed()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        // The token matched when the row was read, and another writer moved it before the write landed — a second
+        // window the read-time comparison cannot close, which is why the store reports it too.
+        _store.RowVersionConflict = true;
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Renamed", null, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("precondition_failed");
+    }
+
+    [Fact]
+    public async Task Update_reports_a_foreign_terrarium_as_not_found()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(Guid.NewGuid(), "Someone else's", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Stolen", null, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        // Identical to "does not exist", so the route cannot be used to enumerate ids (BR-02.2).
+        outcome.Problem!.Code.Should().Be("not_found");
+        terrarium.Name.Should().Be("Someone else's");
+    }
+
+    [Fact]
+    public async Task Update_validates_every_field_it_was_given()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(
+                string.Empty,
+                Guid.NewGuid(),
+                new string('x', 121),
+                new string('y', 1001),
+                "Middle-earth/Shire"),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("validation_failed");
+
+        outcome.Problem.Errors!.Select(violation => violation.Code).Should().BeEquivalentTo(
+        [
+            "terrarium_name_required",
+            "species_profile_not_found",
+            "terrarium_location_too_long",
+            "terrarium_description_too_long",
+            "terrarium_timezone_invalid",
+        ]);
+    }
+
+    [Fact]
+    public async Task Update_reports_a_missing_terrarium_as_not_found()
+    {
+        var outcome = await _service.UpdateAsync(
+            Guid.NewGuid(),
+            new UpdateTerrariumRequest("Renamed", null, null, null, null),
+            _owner,
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task Delete_refuses_a_bound_device_without_the_flag()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        FakeTerrariumStore.AddDevice(terrarium, DeviceStatus.Online, Now);
+
+        var outcome = await _service.DeleteAsync(terrarium.Id, _owner, allowUnboundDevice: false, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("conflict_device_bound");
+        terrarium.DeletedAt.Should().BeNull();
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Delete_with_the_flag_unbinds_the_device_and_soft_deletes()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        var device = FakeTerrariumStore.AddDevice(terrarium, DeviceStatus.Online, Now);
+
+        var outcome = await _service.DeleteAsync(terrarium.Id, _owner, allowUnboundDevice: true, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.DeletedAt.Should().Be(Now);
+        _store.SaveCount.Should().Be(1);
+
+        // The board is released rather than orphaned: it keeps its credentials and owner, but ingest refuses an
+        // unbound device, so it stops writing into an enclosure nobody can see.
+        device.TerrariumId.Should().BeNull();
+        device.Status.Should().Be(DeviceStatus.Provisioning);
+        device.ProvisionedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Delete_deletes_an_unbound_terrarium_without_the_flag()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.DeleteAsync(terrarium.Id, _owner, allowUnboundDevice: false, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.DeletedAt.Should().Be(Now);
+    }
+
+    [Fact]
+    public async Task Delete_does_not_ask_about_a_revoked_device()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        // A revoked device has already released the slot, so requiring the flag would make the owner delete twice
+        // for no reason.
+        FakeTerrariumStore.AddDevice(terrarium, DeviceStatus.Revoked, Now);
+
+        var outcome = await _service.DeleteAsync(terrarium.Id, _owner, allowUnboundDevice: false, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Delete_reports_a_missing_terrarium_as_not_found()
+    {
+        var outcome = await _service.DeleteAsync(Guid.NewGuid(), _owner, allowUnboundDevice: false, CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("not_found");
     }
 }

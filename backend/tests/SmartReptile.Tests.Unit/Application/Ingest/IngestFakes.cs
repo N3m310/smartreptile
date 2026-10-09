@@ -21,6 +21,8 @@ internal sealed class FakeTelemetryStore : ITelemetryStore
 
     public List<DeviceHealthSample> Health { get; } = [];
 
+    public List<DeviceEvent> Events { get; } = [];
+
     public int SaveCount { get; private set; }
 
     /// <summary>
@@ -46,6 +48,8 @@ internal sealed class FakeTelemetryStore : ITelemetryStore
     public void AddSample(TelemetrySample sample) => Samples.Add(sample);
 
     public void AddHealthSample(DeviceHealthSample health) => Health.Add(health);
+
+    public void AddDeviceEvent(DeviceEvent deviceEvent) => Events.Add(deviceEvent);
 
     public Task<bool> SaveChangesAsync(CancellationToken cancellationToken)
     {

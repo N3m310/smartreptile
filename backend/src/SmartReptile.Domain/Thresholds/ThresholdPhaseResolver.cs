@@ -17,6 +17,27 @@ namespace SmartReptile.Domain.Thresholds;
 public static class ThresholdPhaseResolver
 {
     /// <summary>
+    /// The phase one metric is evaluated in: <see cref="ThresholdPhase.Any"/> when the metric is configured that
+    /// way, otherwise the day/night phase of <paramref name="localTimeOfDay"/>.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the read surface (which colours a card) and the evaluator (which keys its state rows), so the two
+    /// cannot disagree about which band was in force at a given instant.
+    /// </remarks>
+    /// <param name="configuredPhases">Phases in which the metric has an enabled band.</param>
+    /// <param name="localTimeOfDay">Time of day in the terrarium's own time zone.</param>
+    /// <param name="lightsOnLocalTime">Local time the photoperiod starts (from the species profile).</param>
+    /// <param name="photoperiodHours">Window length in hours; 24 means "always day".</param>
+    public static ThresholdPhase ResolveFor(
+        IEnumerable<ThresholdPhase> configuredPhases,
+        TimeOnly localTimeOfDay,
+        TimeOnly lightsOnLocalTime,
+        decimal photoperiodHours) =>
+        configuredPhases.Contains(ThresholdPhase.Any)
+            ? ThresholdPhase.Any
+            : Resolve(localTimeOfDay, lightsOnLocalTime, photoperiodHours);
+
+    /// <summary>
     /// The phase at <paramref name="localTimeOfDay"/> for a window that opens at
     /// <paramref name="lightsOnLocalTime"/> and runs for <paramref name="photoperiodHours"/> hours.
     /// </summary>

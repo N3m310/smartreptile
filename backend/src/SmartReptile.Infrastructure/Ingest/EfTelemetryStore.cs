@@ -51,6 +51,9 @@ public sealed class EfTelemetryStore(SmartReptileDbContext db, ILogger<EfTelemet
     public void AddHealthSample(DeviceHealthSample health) => db.DeviceHealthSamples.Add(health);
 
     /// <inheritdoc />
+    public void AddDeviceEvent(DeviceEvent deviceEvent) => db.DeviceEvents.Add(deviceEvent);
+
+    /// <inheritdoc />
     public async Task<bool> SaveChangesAsync(CancellationToken cancellationToken)
     {
         try

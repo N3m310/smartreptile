@@ -213,6 +213,22 @@ public class DeviceProvisioningServiceTests
         outcome.Problem!.Code.Should().Be("terrarium_already_bound");
     }
 
+    [Fact]
+    public async Task Claim_reports_a_race_the_database_won_as_the_same_conflict()
+    {
+        var terrarium = _store.AddTerrarium(_owner);
+        var registration = (await SelfRegisterAsync()).Registration!;
+
+        // The pre-check passed because the other writer had not committed yet; the filtered unique index DI-04
+        // then refused the insert. That must read as the documented 409 rather than escaping as a 500 (TC-I-05).
+        _store.ClaimRaceLost = true;
+
+        var outcome = await _service.ClaimAsync(new ClaimRequest(registration.ClaimCode, terrarium.Id), _owner);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("terrarium_already_bound");
+    }
+
     // ---- rotate and revoke --------------------------------------------------------------------------
 
     [Fact]

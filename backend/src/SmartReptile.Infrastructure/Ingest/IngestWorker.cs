@@ -46,6 +46,15 @@ public sealed class IngestWorker(
 
     private async Task ProcessOneAsync(TelemetryEnvelope envelope, CancellationToken cancellationToken)
     {
+        // Telemetry carries samples and is judged; the other three channels carry device state, health and events
+        // and are only stored (§07-appendices/03 §3.1). Splitting the routing here is what lets both paths reuse
+        // the same worker, queue and failure policy.
+        if (envelope.Channel is not DeviceChannel.Telemetry)
+        {
+            await ProcessDeviceChannelAsync(envelope, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         IngestOutcome outcome;
 
         try
@@ -68,5 +77,39 @@ public sealed class IngestWorker(
         }
 
         await recorder.RecordAsync(outcome, envelope.DevicePublicId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one health, status or events message. The failure policy is the telemetry path's, for the same reason:
+    /// the message is already acknowledged, so there is nothing to un-ack, and one bad message must not stop the
+    /// worker.
+    /// </summary>
+    private async Task ProcessDeviceChannelAsync(TelemetryEnvelope envelope, CancellationToken cancellationToken)
+    {
+        DeviceChannelOutcome outcome;
+
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var pipeline = scope.ServiceProvider.GetRequiredService<DeviceChannelPipeline>();
+
+            outcome = await pipeline.ProcessAsync(envelope, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "The {Channel} message from device {DeviceId} was not stored",
+                envelope.Channel,
+                envelope.DevicePublicId);
+
+            return;
+        }
+
+        await recorder.RecordDeviceChannelAsync(outcome, envelope.DevicePublicId, cancellationToken).ConfigureAwait(false);
     }
 }

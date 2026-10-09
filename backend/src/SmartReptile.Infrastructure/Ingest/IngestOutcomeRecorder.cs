@@ -56,6 +56,48 @@ public sealed class IngestOutcomeRecorder(
     }
 
     /// <summary>
+    /// Counts, logs and pushes one health, status or events outcome. Refusals share the telemetry path's counter,
+    /// because "the firmware sent something we could not use" is one condition regardless of which topic it
+    /// arrived on; a stored message only has something to push when it moved the device's state.
+    /// </summary>
+    public async Task RecordDeviceChannelAsync(
+        DeviceChannelOutcome outcome,
+        string devicePublicId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+
+        if (!outcome.Succeeded)
+        {
+            metrics.BatchRejected(outcome.Problem!.Code);
+
+            logger.LogWarning(
+                "Refused a device message from {DeviceId}: {Code} — {Message}",
+                devicePublicId,
+                outcome.Problem.Code,
+                outcome.Problem.Message);
+
+            return;
+        }
+
+        if (outcome.StatusChanged is not { } statusChanged)
+        {
+            return;
+        }
+
+        try
+        {
+            await broadcaster.BroadcastStatusAsync(statusChanged, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort, like the sample push: a client that misses this polls readings/latest instead, and the
+            // stored transition is already correct.
+            logger.LogError(ex, "Broadcasting the status change of device {DeviceId} failed", devicePublicId);
+        }
+    }
+
+    /// <summary>
     /// Pushes stored samples to the two consumers. Both are best-effort and happen <b>after</b> the commit, so a
     /// failure is a lost push, never a lost measurement (FR-09). Each is caught separately: a SignalR outage must
     /// not stop the evaluator from being handed the same samples.

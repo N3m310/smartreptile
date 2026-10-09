@@ -185,7 +185,15 @@ public sealed class DeviceProvisioningService(
             now,
             afterJson: Serialize(new { terrariumId = terrarium.Id, userId = ownerUserId })));
 
-        await store.SaveChangesAsync(cancellationToken);
+        // The pre-check gives a clear message; this is the enforcement. Two claims of one terrarium can both pass
+        // it, and the filtered unique index DI-04 then refuses the second binding — which is a documented 409, not
+        // a 500 (TC-I-05).
+        if (!await store.TrySaveClaimAsync(cancellationToken))
+        {
+            return DeviceOutcome.Failure(
+                "terrarium_already_bound",
+                "That terrarium already has a device bound to it.");
+        }
 
         return DeviceOutcome.Claimed(new ClaimResult(device.PublicId, secret, terrarium.Id, now));
     }

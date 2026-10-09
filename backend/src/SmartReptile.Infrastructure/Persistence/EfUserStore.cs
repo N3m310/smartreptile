@@ -22,10 +22,22 @@ public sealed class EfUserStore(SmartReptileDbContext db) : IUserStore
         db.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 
     /// <inheritdoc />
-    public Task<bool> UserExistsAsync(string username, string email, CancellationToken cancellationToken) =>
-        db.Users.AnyAsync(
-            user => user.Username == username || user.Email == email,
-            cancellationToken);
+    public async Task<TakenIdentifiers> FindTakenIdentifiersAsync(
+        string username,
+        string email,
+        CancellationToken cancellationToken)
+    {
+        // One round trip, then two comparisons in memory: the match set is at most one account per identifier.
+        var matches = await db.Users
+            .Where(user => user.Username == username || user.Email == email)
+            .Select(user => new { user.Username, user.Email })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new TakenIdentifiers(
+            matches.Exists(match => match.Username == username),
+            matches.Exists(match => match.Email == email));
+    }
 
     /// <inheritdoc />
     public void AddUser(User user) => db.Users.Add(user);

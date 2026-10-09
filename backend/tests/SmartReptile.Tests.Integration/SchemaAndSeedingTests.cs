@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using SmartReptile.Domain.Metrics;
+using SmartReptile.Domain.Thresholds;
 using SmartReptile.Infrastructure.Persistence;
 
 namespace SmartReptile.Tests.Integration;
@@ -26,23 +28,46 @@ public sealed class SchemaAndSeedingTests(DatabaseFixture fixture)
     }
 
     [Fact]
-    public async Task Seeding_creates_the_three_built_in_species_profiles_with_their_bands()
+    public async Task Seeding_creates_the_four_built_in_species_profiles_with_their_bands()
     {
         await using var db = fixture.CreateContext();
 
         var names = await db.SpeciesProfiles.Select(p => p.Name).OrderBy(n => n).ToListAsync();
         names.Should().BeEquivalentTo(new[]
         {
-            "Arid (desert)", "Leopard gecko (semi-desert)", "Tropical (humid forest)",
+            "Arid (desert)", "Arid-cool (bearded dragon, ambient)", "Leopard gecko (semi-desert)",
+            "Tropical (humid forest)",
         });
 
         // The seeded band count is quoted in the README and docs as measured evidence, so it is pinned here.
         // Adding a band is expected to be deliberate — update the docs and this number together.
         var bands = await db.Thresholds.ToListAsync();
-        bands.Should().HaveCount(17, "the built-in profiles ship 17 bands in total");
+        bands.Should().HaveCount(19, "the built-in profiles ship 19 bands in total");
 
         bands.Select(b => b.SpeciesProfileId).Distinct().Should().HaveCount(names.Count,
             "every built-in profile must arrive with its own bands");
+    }
+
+    [Fact]
+    public async Task The_cool_side_variant_ships_the_ambient_bands_and_no_basking_ones()
+    {
+        await using var db = fixture.CreateContext();
+
+        var bands = await db.SpeciesProfiles
+            .Where(p => p.Name == "Arid-cool (bearded dragon, ambient)")
+            .SelectMany(p => p.Thresholds)
+            .ToListAsync();
+
+        // Appendix §5 row 7 verifies this band. Until 2026-10-07 the docs described the variant and the seeder did
+        // not create it, so §3 promised a band the database did not hold.
+        bands.Should().ContainSingle(b =>
+            b.Metric == MetricCode.TempC && b.Phase == ThresholdPhase.Day
+            && b.TargetMin == 28m && b.TargetMax == 33m && b.CriticalMin == 24m && b.CriticalMax == 36m);
+
+        // The surface probe sits on the basking rock and the UVB gradient belongs to the basking lamp: neither is
+        // something a cool-side profile can describe, so neither band ships.
+        bands.Should().NotContain(b => b.Metric == MetricCode.SurfaceTempC);
+        bands.Should().NotContain(b => b.Metric == MetricCode.UvIndex);
     }
 
     [Fact]
