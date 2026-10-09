@@ -19,8 +19,10 @@ session, and log out.
 
 **Rules**
 - `BR-01.1` Username: 3–32 chars, `[A-Za-z0-9._-]`, unique (case-insensitive).
-- `BR-01.2` Password: ≥ 10 chars, must contain at least one letter and one digit; hashed with
-  PBKDF2-HMAC-SHA256 (≥ 210 000 iterations, 16-byte salt) or Argon2id (m=64 MiB, t=3, p=1).
+- `BR-01.2` Password: ≥ 8 chars, must contain at least one letter, one digit, one upper-case letter
+  and one special character (a symbol that is not a letter or a digit), and must not be one of the most
+  frequently used passwords; hashed with PBKDF2-HMAC-SHA256 (≥ 210 000 iterations, 16-byte salt) or
+  Argon2id (m=64 MiB, t=3, p=1).
 - `BR-01.3` Access token JWT lifetime 15 min; refresh token 30 days, single-use with rotation.
 - `BR-01.4` After 5 failed logins for one username within 15 min, that username is throttled for 15 min.
 
@@ -259,9 +261,11 @@ overrides.
 
 **Rules**
 - `BR-10.1` Seeded profiles: `Tropical (humid forest)`, `SemiArid (semi-desert)`,
-  `Arid (desert)`, each with bands for `TempC`, `HumidityPct`, `LightLux`, `UvIndex`, with
-  optional day/night variants and a source reference per metric
-  (`SourceRef` + `SourceUrl`) — data in `07-appendices/05`.
+  `Arid (desert)` and its cool-side variant `Arid-cool (bearded dragon, ambient)`, each with bands for
+  `TempC`, `HumidityPct`, `LightLux`, `UvIndex`, with optional day/night variants and a source reference
+  per metric (`SourceRef` + `SourceUrl`) — data in `07-appendices/05`. The cool-side variant is the one
+  exception to that metric list: it ships the two ambient bands only, because the surface probe and the UVB
+  gradient belong to the basking zone it deliberately does not describe.
 - `BR-10.2` A custom profile MUST specify `TargetMin < TargetMax` and
   `CriticalMin ≤ TargetMin`, `CriticalMax ≥ TargetMax`, `CriticalMin < CriticalMax`.
 - `BR-10.3` A terrarium resolves thresholds in this order: terrarium override → assigned profile →
@@ -344,14 +348,13 @@ hysteresis, dedupe and phase rules. *The engine runs server-side only — the si
 **Priority** MUST · **Actors** Scheduler, all users
 
 **Rules**
-- `BR-13.1` Channels: in-app inbox (always), FCM push (app), Telegram bot (optional per user),
-  SMTP email (optional per user).
+- `BR-13.1` Channels: in-app inbox (always), FCM push (app), SMTP email (optional per user).
 - `BR-13.2` Per-user preferences: channel enablement, minimum severity (`Warning`/`Critical`),
   quiet hours (default 22:00–06:00 local — *Critical bypasses quiet hours*).
 - `BR-13.3` Rate limit: ≤ 10 notifications per terrarium per hour; beyond that, notifications are
   coalesced into one digest and the event is logged.
 - `BR-13.4` Every attempt is recorded in `NotificationLog` with status, attempt count and error.
-- `BR-13.5` Retry: FCM/Telegram 3 attempts with exponential backoff (5 s, 30 s, 2 min);
+- `BR-13.5` Retry: FCM/SMTP 3 attempts with exponential backoff (5 s, 30 s, 2 min);
   failures never block ingest or evaluation.
 - `BR-13.6` Notification content contains: terrarium name, metric, observed value, band, duration
   out of range, and a deep link.
@@ -361,7 +364,7 @@ hysteresis, dedupe and phase rules. *The engine runs server-side only — the si
   an FCM push is still delivered and the event is logged as `bypassed_quiet_hours`.
 - **Given** 25 warnings in one hour, **when** the 11th is produced, **then** no individual
   notification is sent, one digest is sent at the end of the hour, and the inbox still contains 25 entries.
-- **Given** a failed Telegram call, **when** the notifier retries, **then** 3 attempts are logged and
+- **Given** a failed FCM push, **when** the notifier retries, **then** 3 attempts are logged and
   the in-app notification remains available.
 
 ---

@@ -126,7 +126,7 @@ docker compose exec db /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSS
   -Q "SELECT COUNT(*) AS bands, SUM(CASE WHEN SourceRef LIKE '%PENDING VERIFICATION%' THEN 1 ELSE 0 END) AS pending FROM dbo.Threshold"
 ```
 
-`pending` must equal `ReferenceDataSeeder.BandsAwaitingVerification` (14 of 17 bands on 2026-09-23, and it is
+`pending` must equal `ReferenceDataSeeder.BandsAwaitingVerification` (16 of 19 bands on 2026-10-07, and it is
 meant to fall as checklist rows are signed — compare against the constant, do not copy the number). The same
 comparison runs in CI, which is why drift is a local-only surprise: CI always starts from an empty database.
 
@@ -170,58 +170,63 @@ demo fallback.
 
 ## 5. Web release (`web/`)
 
-The folder holds two surfaces, and **`ADR-019` (2026-10-06) changes which one ships**: the **TERRAGUARD** client
-(`web/src` → `web/dist`) is the M4 web surface, and `web/legacy/` — the M1 static dashboard that carried it under
-`ADR-018` — is retired by task 4.19. This section therefore describes the layout **in place today** (two mounts,
-task 4.12) and what the switch changes; a release cut before 4.19 still ships the old shape.
+**One surface: the TERRAGUARD client** (`web/src` → `web/dist`). `ADR-019` (2026-10-06) made it the M4 web surface
+and task 4.19 finished the switch on 2026-10-07: the M1 static dashboard (`web/legacy/`) is deleted, its compose
+mount with it, and every screen it had — sign-in, both password-recovery paths, change password, the live cards,
+the wallboard and the health diagnosis — is a React route (`/system` is the diagnosis one).
 
-**Today's serving layout (task 4.12).** Compose mounts the prototype build at `/srv/prototype` and the static
-dashboard at `/srv/legacy`; nginx sends `/` to the prototype and `/legacy/` to the dashboard, and only the
-prototype gets a SPA fallback. The two mounts are **siblings, not nested** — a nested bind mount needs its
-mountpoint created inside the read-only parent mount and fails with `mkdirat ... read-only file system`
-(defect 13 in the repository `README`).
+**Serving layout.** Compose mounts one directory, `web/dist`, at `/srv/app`; `web/nginx.conf` serves it with the
+SPA fallback (`try_files $uri $uri/ /index.html`), because a BrowserRouter client's paths are routes rather than
+files — without it a reload on `/wallboard` or any deep route answers `404`. `/assets/*` is cached immutably
+(Vite's names are content-hashed) and `index.html` is never cached.
 
-**BUG-03 regression check** (`05-release/03` §4) — run whenever the `web` service or its mounts change:
+**BUG-03 regression check** (`05-release/03` §4) — run whenever the `web` service, its mounts or the build change:
 
 ```bash
 docker compose up -d web
-curl -sI http://127.0.0.1:8081/ | head -1                       # HTTP/1.1 200 OK
-curl -sI http://127.0.0.1:8081/legacy/wallboard.html | head -1  # HTTP/1.1 200 OK
-curl -sI http://127.0.0.1:8081/legacy/health.html | head -1     # HTTP/1.1 200 OK
+curl -sI http://127.0.0.1:8081/          | head -1   # HTTP/1.1 200 OK
+curl -sI http://127.0.0.1:8081/wallboard | head -1   # HTTP/1.1 200 OK — the SPA fallback, not a 404
+curl -sI http://127.0.0.1:8081/dashboard | head -1   # HTTP/1.1 200 OK — a deep route
 curl -s  http://127.0.0.1:8081/ | grep -o 'assets/index-[^"]*\.js'   # the hashed bundle, never /src/main.tsx
 ```
 
 The last line is the one that would have caught BUG-03: the old mount answered `200` on `/` while serving the
-prototype's Vite dev entry, so a status code alone was never enough. **The pair changes with 4.19** — `/legacy/*`
-stops being checked because the files stop existing, and the SPA fallback becomes the routing rule that needs the
-proxy instead (`04-quality/03` §5.12 carries both forms).
+prototype's Vite dev entry, so a status code alone was never enough. **The pair changed with 4.19**: the old form
+checked `/legacy/wallboard.html` and `/legacy/health.html` for `200`, and those files no longer exist — under a
+single SPA mount *every* unknown path returns the app shell, so a `/legacy/` miss cannot be told apart by status
+code any more. What proves the retirement is that the directory is gone (`ls web/legacy` fails) and that the shell
+serves the hashed bundle; the two deep routes above are what replaced the old second and third lines.
 
-**The TERRAGUARD client (`web/`) — the M4 web surface from `ADR-019`.**
+**The VIVARIUMGUARD client — the web surface.**
 
 - `npm run build` writes `web/dist/`, which is **committed on purpose** so nginx can serve it without a Node
   toolchain. Rebuild it whenever `src/` changes: a stale `dist/` is invisible until someone demos from it, because
   the entry page then points at asset names that no longer exist.
-- Last rebuilt for the reference state on 2026-10-03 — `tsc && vite build` on a clean `npm ci` produced
-  `index-hjjUIssv.js` (766 kB / 214 kB gzip) and `index-DAQDTjmL.css` (40 kB). It is rebuilt again by 4.18/4.19,
-  when it stops being a reference and its bundle becomes the shipped artefact.
-- **It still renders invented values**, so until 4.16/4.20 have wired a screen it keeps `MockDataNotice` and may
-  not be the source of a number in the report. The promotion is what removes that caveat, and the notice goes when
-  the mock data does (4.18) — a label left on a surface with no mock data behind it is as misleading as mock data
-  without one.
-
-**The static dashboard (`web/legacy/`) — the surface that still ships today, retired by 4.19.**
-
-- No build step; served from `web/legacy/` under `/legacy/`. `js/api.js` takes the API base URL from a
-  `<meta name="api-base">` tag injected at container start, so the same files work on `localhost` and on the demo
-  host.
-- **Signing in.** Every terrarium route is authenticated (BR-02.2), so it cannot show a value before a session
-  exists. `js/api.js` keeps the tokens in `localStorage` and rotates once when a call answers `401`; the Live page
-  shows a sign-in form until it has a session, and the wallboard shares whatever the Live page signed in as.
-- Cache-busting by query string (`app.css?v=1.0.2`) so a stale browser cache cannot show old UI during a demo.
-- **It is the only web surface that renders real API data today**, which is why 4.15–4.19 wire the replacement
-  before 4.19 deletes this one rather than the other way round.
-- The M1 report screenshots in `06-report/snapshots/` came from here and are **not re-taken** after 4.19: they are
-  evidence of the M1 surface at the time it existed.
+- Rebuilt 2026-10-07 for the wired client: `tsc && vite build` on the committed `package-lock.json` produced
+  `index-CObCRICv.js` (793 kB / 226 kB gzip) and `index-BLifHLg9.css` (39.6 kB), and that bundle is what the
+  `curl` check above serves. The bundle is one chunk; code-splitting it is not worth the demo-time risk while
+  `recharts` is the only large dependency. The hash changes whenever the deck does — the ARB files are bundled,
+  because both clients read the same copy deck — so treat the hash as evidence of *which* build is being served
+  rather than as a stable name.
+- **Rebuilt 2026-10-09 for the brand rename: the product is `VIVARIUMGUARD`, not `TERRAGUARD`.** The wordmark in
+  the shell and on the sign-in hero, the browser title and the Flutter `MaterialApp` title all carry the new name
+  (`app.dart`'s split `TextSpan` wordmark too), so the committed `dist/` is now **`index-DX1qiJCO.js`** (same
+  793 kB) and its `index.html` carries the new title. Vite empties `outDir`, so the old `index-CObCRICv.js` is
+  gone — which is why the check above names the current hash rather than any historical one. The shell and app
+  titles read `VIVARIUM` + `GUARD` with the second half in the brand green, unchanged in structure. Internal
+  identifiers that happen to contain the old word — the `localStorage` keys `terraguard.session` and
+  `terraguard.language`, and the npm package name `terraguard-web` — are deliberately **not** renamed: they are
+  invisible to a user, and changing the two keys would sign every existing session out and forget the language
+  choice, which is a behaviour change a rename has no reason to make.
+- **The API base URL** comes from `VITE_API_BASE` at build time and defaults to `http://localhost:8080`
+  (`web/src/api/client.ts`), so the committed build works against the compose stack and on the demo host without a
+  rebuild. `web/nginx.conf` needs no `/api` proxy for the same reason: the client calls the API origin directly and
+  the API answers CORS for the web origin.
+- **Three screens still render invented values** — `Devices`, `Alerts`, `Settings` — because their endpoints do not
+  exist yet (roadmap 4.20). The shell renders `MockDataNotice` on exactly those routes and nowhere else, so a
+  wired screen never apologises for data it did not invent, and a mock screen never looks measured.
+- `npm run check:strings` and `npm run typecheck` are the client's CI gates, both in the `web` job; the key set is
+  `app/lib/l10n/app_*.arb`, shared with the Flutter app rather than duplicated.
 
 ## 6. Release runbook (the order that actually works)
 
@@ -231,11 +236,11 @@ proxy instead (`04-quality/03` §5.12 carries both forms).
 | 2 | `docker compose up -d api` (migrations + reference seed run on start-up; set `STARTUP_APPLY_MIGRATIONS=false` and use the §3 `dotnet ef` command for an explicit release step) | logs show `Applying migration '…_InitialSchema'. Done.` | ~30 s |
 | 3 | `docker compose up -d web` | `/health/ready` → `{"status":"Healthy","checks":[database Healthy, mqtt-broker Healthy]}`; dashboard on `:8081` | ~5 s |
 | 3a | Confirm the broker is TLS-only: `MQTT_DISABLE_PLAINTEXT=true` in `.env`, then `netstat -ano \| findstr :1883` → **nothing listening**, and `curl`/`paho` over TLS on `:8883` still authenticates a claimed device | BR-05.1: plaintext gone, TLS the only way in. The dev default keeps `1883` reachable **on the host's loopback only** (`127.0.0.1:1883:1883`), never on the LAN | — |
-| 4 | Verify reference data | `SELECT COUNT(*) FROM SpeciesProfile` → 3 profiles, 17 bands in `Threshold`, and the count of `SourceRef LIKE '%PENDING VERIFICATION%'` equal to `ReferenceDataSeeder.BandsAwaitingVerification` (14 on 2026-09-23) | — |
+| 4 | Verify reference data | `SELECT COUNT(*) FROM SpeciesProfile` → 4 profiles, 19 bands in `Threshold`, and the count of `SourceRef LIKE '%PENDING VERIFICATION%'` equal to `ReferenceDataSeeder.BandsAwaitingVerification` (16 on 2026-10-07) | — |
 | 5 | Power the node | OLED shows values; status `online` in the fleet view within 90 s | — |
 | 6 | Install/open the release APK | Logged in, live cards populated | — |
 | 7 | Open the wallboard on the demo display | Values update silently | — |
-| 8 | Send a test alert (induce a 5-min excursion) | Telegram + push within 90 s | ~6 min |
+| 8 | Send a test alert (induce a 5-min excursion) | inbox entry + push within 90 s | ~6 min |
 
 Total cold start ≈ 3 minutes; step 8 accounts for the dwell time and is the reason the demo script budgets
 6 minutes for it. A rehearsal must confirm the whole sequence twice.
@@ -260,7 +265,7 @@ git archive --format=zip --prefix=smartreptile/ -o smartreptile-source-v1.0.0.zi
 Final checks before submission:
 1. Extract the archive to a clean directory and follow `README.md` quick start on a machine that has never
    built the project (or a clean container): the app must build and the API must start.
-2. Confirm no secret is in the archive: `git grep -I -E "(BEGIN PRIVATE KEY|TELEGRAM_BOT_TOKEN=.|SA_PASSWORD=.)"`.
+2. Confirm no secret is in the archive: `git grep -I -E "(BEGIN PRIVATE KEY|SMTP_PASSWORD=.|SA_PASSWORD=.)"`.
 3. Report PDF contains the release-build proof, test summaries, coverage, latencies, soak results, the
    traceability matrix and the contribution table.
 4. Both `.zip` and `.pdf` submitted (the rubric requires both for the demo to be allowed).

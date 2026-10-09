@@ -175,7 +175,7 @@ positives, freshness, durability, threshold provenance, rubric readiness).
 **R11.4 v2 roadmap (AI).** Dataset readiness (feature schema, labels from `FalsePositive`/`SensorFault`
 resolutions), candidate models, the ethics of camera data, and **why no AI is in v1**.
 **R11.5 What we would do differently.** At least three concrete items (e.g. start the threshold literature
-work in week 1; build the bench-mode fake sensors before milestone 2; automate Telegram earlier).
+work in week 1; build the bench-mode fake sensors before milestone 2; automate the fake FCM channel earlier).
 
 ## R12 — Conclusion
 Three paragraphs: the problem restated, what was built and evidenced, and the honest statement of where the
@@ -193,7 +193,7 @@ system's usefulness ends (one animal, one terrarium, indicative sensors, no actu
 | # | Content | Source |
 |---|---|---|
 | R14.1 | Contribution table | `06-report/02` |
-| R14.2 | ADR log (ADR-001…016) | `07-appendices/01` |
+| R14.2 | ADR log (ADR-001…021) | `07-appendices/01` |
 | R14.3 | SQL schema reference | `07-appendices/02` |
 | R14.4 | MQTT + REST API specification | `07-appendices/03` |
 | R14.5 | Hardware BOM, pin map, bring-up sequence + QA log | `07-appendices/04`, `04-quality/03` |

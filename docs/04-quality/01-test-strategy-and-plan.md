@@ -90,13 +90,13 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 
 | Not automated | Reason | Compensating control |
 |---|---|---|
-| Real push delivery to a device | Needs a real Google Play services device and is flaky in CI | Telegram channel is automated in `TC-I-12`; FCM is checked manually in `TC-E2E-03` |
+| Real push delivery to a device | Needs a real Google Play services device and is flaky in CI | The FCM channel is faked in `TC-I-12`; a real push is checked manually in `TC-E2E-03` |
 | Sensor accuracy | Physics, not software | Manual reference comparison in `TC-E2E-04` with recorded numbers |
 | 24 h soak | Time | Manual soak with an incident log (`TC-E2E-02`) |
 | Capacitive/wear behaviour of NVS writes | Requires a long-term hardware study | Documented as an assumption with the measured write rate |
 | Usability with a real keeper | No test participants guaranteed | Heuristic review against the UX rules + accessibility checks |
 | Load beyond 50 RPS | Out of scope for a single-host demo | Trend recorded, no claim made (NFR-01 note) |
-| The **TERRAGUARD** client in `web/` — *while a screen still renders `mockData.ts`* | A screen on mock data has no behaviour to assert, and the client carries no ARB keys yet, so even `TC-I-15`'s key-parity check cannot reach it | The screen keeps the mock-data notice (`web/src/components/MockDataNotice.tsx`) and counts for nothing in the DoD. **This exclusion is temporary and shrinking**: `ADR-019` promotes the client to the M4 web surface and 4.15–4.20 remove it screen by screen — a wired screen is tested like any other client, and 4.18's key-parity gate is what ends the exclusion for good. It is stated here as a *transitional* gap, not a settled one |
+| The three TERRAGUARD screens still on `mockData.ts` (`Devices`, `Alerts`, `Settings`) | A screen on mock data has no behaviour to assert, and their endpoints do not exist yet (roadmap 4.20) | The screen keeps the mock-data notice (`web/src/components/MockDataNotice.tsx`), rendered by the shell on exactly those routes, and counts for nothing in the DoD. **The rest of the client left this table on 2026-10-07** when 4.15–4.18 wired it: it now has an API client, a shared key set checked by `TC-I-15`'s parity gate in CI, and screens whose acceptance is the walkthrough in `04-quality/03` §3. The exclusion ends completely when 4.20 can wire the last three |
 
 ## 7. Test execution plan
 

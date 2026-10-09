@@ -20,8 +20,30 @@ phase resolution:
 Precedence within one layer: an exact-phase row beats an `Any`-phase row; an override beats a profile row
 even if the profile row is phase-specific (the UI states this in the editor).
 
+**Two readings this paragraph left open, now settled and implemented (`ThresholdResolver`, built 2026-10-09).**
+Both were forced by writing the resolution down once instead of three times:
+
+1. **Precedence is applied per instant, not per metric.** The override layer is consulted first and decides
+   whenever it holds a row for the phase *in force*; the phase is resolved inside a layer rather than across both,
+   so a phase-agnostic profile row can never reach over an override that applies. The other half is deliberate too:
+   a layer holding only the *other* phase's row is **silent, not decisive** — a day-only override during the night
+   lets the profile's night band through. That is what the read surface already did, and `readings/latest`'s
+   `target` must not change because of this rewrite.
+2. **`Any` wins inside a layer.** A layer holding both an `Any` row and a phase-specific one for the same metric
+   resolves to `Any`, because "configured with an Any band" means the metric is not split day/night. The
+   phase-resolution pseudocode above says so; the precedence sentence contradicts it only if read as being about a
+   layer that has both, which is the case this settles.
+
+The third tier above, `SystemDefault`, has **no values anywhere in this doc set** and is therefore not
+implemented. A metric no layer resolves for the phase in force is reported as absent from `effectiveThresholds`
+rather than filled from a default nobody wrote down, and the evaluator leaves it unjudged. Closing this needs a
+decision on the numbers, not code.
+
 `effectiveThresholds` API response carries `source` per metric (`override` | `profile` | `default`) — so
-"why is my limit 32 and not 30?" is answerable in the app rather than in a debugger (BR-10.3).
+"why is my limit 32 and not 30?" is answerable in the app rather than in a debugger (BR-10.3). The read half of
+this is built (roadmap 3.1, 2026-10-09): `GET /terrariums/{id}/thresholds` returns one entry per metric that
+resolves for the phase in force, with its `phase`, its `source` and the full band. The write half (`PUT`/`DELETE`
+overrides) and the snapshot below are not.
 
 **Change semantics (UC-03 A4).** On any change, the server writes a `ThresholdSnapshot` with the new
 effective set. An alert that is already open keeps its original `BandMin/BandMax` for the record; the next
@@ -39,7 +61,14 @@ would create a fourth alert outcome that the data does not support.
 | Dwell | `DwellCritMinutes ≤ DwellWarnMinutes` | critical slower to fire than warning would be incoherent |
 | Recovery margin fits | `RecoveryMargin < (TargetMax − TargetMin) / 2` | margin larger than half the band would make recovery impossible |
 | Phase sanity | night band must not be *hotter* than day band for temperature | warning (non-blocking): a warmer night is almost always a data-entry mistake |
-| Climate-zone plausibility | within the zone's `[plausibleMin, plausibleMax]` from `07-appendices/05` §4 — **per metric**: `TempC` against the zone's air ceiling, `SurfaceTempC` against its own seeded band's `CriticalMax` | "desert" profile with `TargetMax < 20 °C` → non-blocking warning (BR-10.5) |
+| Climate-zone plausibility | within the zone's `[plausibleMin, plausibleMax]` from `07-appendices/05` §4 — **per metric and per monitored zone**: `TempC` against the zone's air ceiling, or against the **ambient envelope** when the profile declares itself an ambient/cool-side variant (28–33 °C for the Arid variant); `SurfaceTempC` against its own seeded band's `CriticalMax` | "desert" profile with `TargetMax < 20 °C` → non-blocking warning (BR-10.5) |
+
+**One input this rule cannot get from the API yet.** To judge an ambient-side profile, a client has to know which
+side of the zone the profile monitors. The prototype carries that as an envelope override on its own profile list
+(`ClimateRange.aridAmbient`), but `GET /species-profiles` (`07-appendices/03` §4.3) returns only `climateZone`, so a
+React or Flutter client has no way to tell `Arid (desert)` from `Arid-cool (bearded dragon, ambient)` and would
+flag the seeded cool-side band as implausible. Exposing the monitored zone on the profile is M4 work and is
+recorded here rather than worked around by hard-coding the variant's id in a client.
 
 ## 3. Worked evaluation examples
 
@@ -74,10 +103,19 @@ system for a keeper: a lid opened for four minutes does not wake anyone up.
 | 14:30 | 34.9 | still critical, no new alert (dedupe key open) |
 | 14:41 | 33.9 | inside critical, outside target → still Warning-level violation, alert stays open |
 | 14:52 | 31.5 | inside band by ≥ 0.5 → recovery tick 1 |
-| 14:53, 14:54 | 31.4, 31.6 | recovery ticks 2, 3 → **Resolved** (reason `Recovered`) |
+| 14:53, 14:54 | 31.4, 31.4 | recovery ticks 2, 3 → **Resolved** (reason `Recovered`) |
 
 One alert row, one warning push, one critical push, one recovery notice. History shows
 `TriggeredAt 14:01`, `ResolvedAt 14:54`, `PeakValue 35.0`.
+
+> **Corrected 2026-10-09 (roadmap 3.2).** The last row read `31.4, 31.6`, and 31.6 °C is not a recovery tick:
+> with a 26–32 °C band and a 0.5 °C margin, `IsRecovered` asks for **≤ 31.5**, so the third reading would have reset
+> the counter and the alert would still be open at 14:54. The table above carries a value that satisfies the rule
+> it is illustrating. The same slip is in `TC-U-15`, which describes 32.2 °C as "inside band but within margin" —
+> 32.2 is *outside* the band (it is above `TargetMax`), and the case it means to make, that the margin stops an
+> open alert closing, holds at 31.8 °C. Both are wording, not behaviour: the implementation follows the formula,
+> and `ThresholdBandTests` pins it.
+
 
 ### Example C — night phase prevents a false alarm
 

@@ -39,7 +39,7 @@ gantt
 | 1.5 | Bench bring-up: SHT31 + BH1750 (+ DS18B20) on a breadboard, serial print at 1 Hz | firmware | Serial shows plausible values; `04-quality/03` §2 checklist partially signed | **Not started** — no hardware has been connected; `main.cpp` reports placeholder values and the QA checklist is unsigned |
 | 1.6 | Sensor accuracy spot check (fridge/room/lamp, hygrometer comparison) | firmware | Numbers within datasheet tolerance, recorded in the QA log | **Not started** — depends on 1.5 |
 | 1.7 | Flutter app scaffold: routing, theme, providers wired to a stub API, `flutter test` green | app | App runs, empty screens, tests green | **Complete** — `flutter analyze` clean, 19 tests pass, provider wiring and en/vi localisation in place |
-| 1.8 | `07-appendices/05` literature pass 1 (collect sources, mark verified rows) | doc/report | ≥ 60% of threshold rows have a citation | **Partial** — every seeded band carries a `SourceRef`, but **0 of 14 rows are signed**, so 14 of the 17 bands still read `PENDING VERIFICATION` (the three light bands are inert by design and cite §5 row 12 instead). The two sides are now held together mechanically: `SourceUrl` is `null` while a range is unverified rather than a dead placeholder link, and `ReferenceDataSeeder.BandsAwaitingVerification` + `SchemaAndSeedingTests` fail CI if the checklist and the database disagree. What is missing is still a person with a book open: the page/table column, the signature and rows 12–13's two statements |
+| 1.8 | `07-appendices/05` literature pass 1 (collect sources, mark verified rows) | doc/report | ≥ 60% of threshold rows have a citation | **Partial** — every seeded band carries a `SourceRef`, but **0 of 14 rows are signed**, so 16 of the 19 bands still read `PENDING VERIFICATION` (the three light bands are inert by design and cite §5 row 12 instead). The two sides are now held together mechanically: `SourceUrl` is `null` while a range is unverified rather than a dead placeholder link, and `ReferenceDataSeeder.BandsAwaitingVerification` + `SchemaAndSeedingTests` fail CI if the checklist and the database disagree. What is missing is still a person with a book open: the page/table column, the signature and rows 12–13's two statements |
 
 **DoD:** `README` quick start reproduces the environment on a teammate's machine in ≤ 30 min; sensor data on
 serial; CI green. **Risk burn-down:** toolchain/JDK/Wi-Fi-band issues surface here, not in week 5.
@@ -66,14 +66,36 @@ what it actually delivers instead of prose claims about it.
 **Re-measured 2026-09-29:** no new gate was run, because 1.8 moved on the documentation side only. The checklist
 gained its 14th row: the seeded `Arid` **surface** band (38–45 °C) is now in §3 and in §5, closing the coverage gap
 where the database shipped a band no document described (the rule is still "pick an answer and make §3, §5 and the
-seeder agree"). The **other** gap was left open on purpose — row 7 verifies an `Arid-cool` ambient band the seeder
-never creates, and closing it means either seeding a fourth profile or deleting a row, both of which move band
-counts quoted in `README`, here and `05-release/01`. So of the three M1 tasks still short of complete, two (1.5,
+seeder agree"). The **other** gap was left open on purpose at the time — row 7 verifies an `Arid-cool` ambient band the seeder
+never created, and closing it meant either seeding a fourth profile or deleting a row, both of which move band
+counts quoted in `README`, here and `05-release/01`. **Seeded 2026-10-07** (see the re-measure below): the
+variant is now one of four profiles, so the gap is closed and the counts above read 19 bands. So of the three M1 tasks still short of complete, two (1.5,
 1.6) are short of hardware and one (1.1) is short of a mentor's dated confirmation; **1.8 is short only of a
 person with the books open**. The DoD verdict stays 2 of 3.
 
+**Re-measured 2026-10-07:** 1.8 moved on the bibliographic side only, and no row was signed. A metadata pre-pass
+against the open indexes (OpenAlex, Crossref) resolved source 3 in full (*J. Comp. Physiol. B* 175(8): 533–541,
+2005), corrected source 1's title (*"How much UVB does my reptile need?"*, DOI `10.19227/jzar.v4i1.150`, *JZAR*
+4(1), 2016), and found that sources 2, 4 and 5–8 name no edition or year. It recorded **no page number**, because
+the copies it would have to read were unreachable from the build machine (`jzar.org` unresolved, `aza.org` `403`,
+RSPCA care URLs `404`, the search engines blocked) and a guessed page is the one thing §6 forbids. The count is
+unchanged — **0 of 14 signed**, `BandsAwaitingVerification` still 14 — so what is missing is unchanged too: a
+person with the books open, plus rows 12 and 13, which now have drafted wording and need only a signature. The
+pass did make the remaining sitting cheaper: eight of the fourteen rows lean on sources 4, 6 and 7, which are the
+three copies worth borrowing first.
+
+**Arid-cool was seeded the same day**, which closes M1's last documentation gap and the oldest "we describe it,
+we do not ship it" note in the doc set. `ReferenceDataSeeder` now ships a fourth profile, `Arid-cool (bearded
+dragon, ambient)`, carrying the two ambient bands §3 describes (day temperature 28–33 °C against critical
+24–36 °C, and humidity 30–40 %RH) and deliberately neither the `SurfaceTempC` nor the `UvIndex` band, because both
+belong to the basking zone a cool-side profile does not describe. The seeded set is therefore **19 bands over four
+profiles** (Tropical 5, SemiArid 6, Arid 6, Arid-cool 2), and `BandsAwaitingVerification` rose 14 → 16 because the
+two new bands are pending exactly like the others. `SchemaAndSeedingTests` pins all of it: four names, 19 bands,
+the variant's shape, and the pending count against the constant. Every count quoted elsewhere moved with it —
+`README`, `05-release/01`, `01-product/03` (`BR-10.1`) and the Flutter prototype's own band-count tests.
+
 Beyond M1: task **2.1** (domain entities, EF Core model, `InitialSchema` migration, seeders for the metric
-dictionary, three profiles and their bands) is also complete and enforced by the `integration` CI job. The M2
+dictionary, four profiles and their bands) is also complete and enforced by the `integration` CI job. The M2
 table below is not starting from zero, and as of 2026-10-04 its backend half — FR-01, 2.2, 2.3 and 2.4 — is done,
 with the per-task evidence in the progress blocks that follow the table.
 
@@ -112,7 +134,7 @@ dashboard nobody reconciles it with, which is how one repository ends up documen
 
 | # | Task | Track | Acceptance |
 |---|---|---|---|
-| 2.1 | Domain entities + EF Core model + `InitialSchema` migration + seeders (metrics, 3 profiles, thresholds) | backend | `TC-I-01/02`; DB has seeded profiles with sources |
+| 2.1 | Domain entities + EF Core model + `InitialSchema` migration + seeders (metrics, 4 profiles, thresholds) | backend | `TC-I-01/02`; DB has seeded profiles with sources |
 | 2.2 | Device self-register + claim + credentials (hash, rotate, revoke) | backend | `TC-I-05/13`; UC-01 walkthrough on paper |
 | 2.3 | MQTT broker hosted in API; subscriber; auth against credentials; TLS on 8883 | backend | Bad credentials refused + audited; `1883` loopback-only |
 | 2.4 | `IngestWorker` + `IngestPipeline` stages + counters | backend | `TC-U-01…09`, `TC-I-01/02/03` green (TC-I-04's health half green; its `sensor_fault` half is 3.3, see the 2.4 block below) |
@@ -146,12 +168,17 @@ Run end to end against a real SQL Server and a real HTTP surface: register `202`
 11th auth call inside a minute `429 rate_limited` — all as RFC 7807 with a stable `code`. **121 backend unit tests
 pass** (was 54).
 
-**What is deliberately still open in FR-01.** `register` answers identically whether or not the identifiers were
-free, so there is no email-confirmation flow at all (limitation L-02 — there is no email infrastructure). The other
+**What is deliberately still open in FR-01.** There is no email-confirmation flow at all (limitation L-02 — there is
+no email infrastructure), and registration reports an identifier that is already in use rather than confirming an
+address (`ADR-020`, 2026-10-07 — which also made `forgot-password` answer `404 identifier_unknown`). The other
 half of L-02 is closed by the password-recovery block below: resetting a forgotten password no longer means
 recreating the account, and what remains of the limitation is the transport, not the flow.
 The common-password deny-list carries the highest-frequency subset of the documented top 1 000, to be completed in
-M5's hardening pass. The `Technician`/`Viewer` half of `TC-U-36` is no longer waiting on anything: 2.2's endpoints
+M5's hardening pass. The password policy itself is the brief's composition rule (`BR-01.2`, changed 2026-10-07):
+≥ 8 characters containing an upper-case letter and a special character, on top of the ≤ 128 cap and the deny-list.
+The floor was **10** characters with deliberately no composition rule before it, so this loosens the length
+requirement while adding the two character rules — a trade the brief asked for and one worth re-deciding if it did
+not mean to move the floor. The `Technician`/`Viewer` half of `TC-U-36` is no longer waiting on anything: 2.2's endpoints
 carry the policies, and both refusals were seen in the live run below.
 
 **Task 2.2 — self-register, claim, credentials, rotate, revoke.** Complete on the HTTP surface. The rules are
@@ -189,9 +216,12 @@ work and two stand:
   `DeviceProvisioningService`; each row is staged on the same save as the change it describes, so the change cannot
   commit without it. The login and token-reuse verbs of the vocabulary are still unwritten — they belong to the
   FR-01 path, not to this one.
-- **The last write is not guarded against a race.** Two simultaneous claims of one terrarium can both pass the
-  pre-check; the filtered unique index `IX_Device_TerrariumId` then refuses the second insert and the caller sees a
-  `500` instead of `409 terrarium_already_bound`. Correct, but unpolished until exception translation lands.
+- **The last write is not guarded against a race — closed 2026-10-09.** Two simultaneous claims of one terrarium
+  can both pass the pre-check, and the filtered unique index `IX_Device_TerrariumId` then refuses the second insert.
+  That refusal is now translated into the documented `409 terrarium_already_bound` instead of escaping as a `500`:
+  `IProvisioningStore.TrySaveClaimAsync` returns false when the index named `IX_Device_TerrariumId` rejects the
+  write, which mirrors how `EfTelemetryStore` already reports a lost dedupe race. The index name is checked rather
+  than the SQL error number alone, because 2601/2627 also cover the public-id and chip-id indexes.
 - **One address buys one registration per five minutes**, so every board behind one NAT shares the budget — on a
   home network a second board waits out the window. That is what `07-appendices/03` §2.2 specifies (a demo
   setting), but it is worth knowing before a demo with two boards.
@@ -262,18 +292,25 @@ integration project passes **15 of 15** against a fresh database, `TC-I-01…03`
 
 **What is deliberately still open in 2.4.**
 
-- **The fan-out has no consumer.** `PendingTelemetryBroadcaster` (2.9) and `PendingEvaluationQueue` (3.2/3.3) are
-  wired into the worker and do nothing, so a stored sample is broadcast to nobody and evaluated by nobody. That is
-  why `TC-I-03`'s "zero alerts created" holds *trivially* rather than because the evaluator skipped the flagged
-  row — the flag is on the row, which is what the evaluator will read.
+- **The fan-out has no consumer — closed 2026-10-09.** `PendingTelemetryBroadcaster` was replaced by
+  `SignalRTelemetryBroadcaster` in 2.9 and `PendingEvaluationQueue` by a real bounded channel plus `EvaluatorWorker`
+  (the M3 scaffolding block below). A stored sample is now handed to something: the evaluator reads its quality
+  flags and advances an `EvaluationState` watermark. That is why `TC-I-03`'s "zero alerts created" now holds for a
+  stated reason — the evaluator saw the flagged row and declined to judge it — rather than trivially, because nothing
+  consumed the queue at all.
 - **`TC-I-04`'s `sensor_fault` half moved to 3.3.** The task's acceptance named it, but a `sensor_fault` arrives on
-  `sr/v1/d/{id}/events`, and "humidity is `Unavailable`" needs the `SensorFault` derived signal — which is 3.3, and
-  which has no table to record it in today (`InitialSchema` has no device-event storage — the same class of gap
-  that `AuditLog` had until 2026-10-06). The health half of the test is green; the fault half is recorded against 3.3 where the
-  signal lives, rather than half-built here.
-- **Only the `telemetry` channel is forwarded.** `health`, `status` and `events` are part of the topic scheme but
-  have no consumer yet. The broker leaves them unforwarded on purpose: accepting a status payload and then ignoring
-  it would look like it worked.
+  `sr/v1/d/{id}/events`, and "humidity is `Unavailable`" needs the `SensorFault` derived signal — which is 3.3. What
+  was missing underneath it is no longer: `DeviceEvent` storage now exists (2026-10-09) and the broker forwards the
+  `events` channel, so the raw fault a 3.3 signal reads is stored rather than dropped. The health half of the test is
+  green; the fault half stays recorded against 3.3 where the signal lives.
+- **Only the `telemetry` channel is forwarded — closed 2026-10-09.** All four device → server channels reach the
+  ingest worker now; only `ack` does not, because command results are FR-14's and accepting one would acknowledge a
+  command this build cannot issue. The channels were left unforwarded until the consumers existed rather than
+  half-handled, and each consumer is now real: `status` sets the lifecycle state and is the source of the
+  `statusChanged` push, `health` denormalises the fleet figures and stages a health row, `events` is stored as a
+  `DeviceEvent` (`Application/Ingest/DeviceChannelPipeline.cs`, `Infrastructure/Ingest/JsonDeviceChannelParser.cs`).
+  A malformed or out-of-vocabulary payload on any of the three increments `ingest_rejected_total` under
+  `schema_invalid`, so a firmware typo is visible instead of silently becoming a new category.
 - **The HTTPS fallback endpoint shipped 2026-10-06** (`POST /api/v1/ingest/http`,
   `Api/Endpoints/IngestEndpoints.cs`); what is still open is the *firmware* half of 2.6 — the device-side switch to
   HTTPS and its back-fill loop. `ITelemetryPayloadParser`, `DeviceAuthenticator` (presented secret) and the
@@ -287,13 +324,16 @@ integration project passes **15 of 15** against a fresh database, `TC-I-01…03`
   surface. A sample from the future is therefore stored with a clamped timestamp *and* its real skew, flagged
   `ClockUnsynced` (16). `QualityFlags` has no `clock_ahead` bit, so that is where the condition lands.
 
-**Task 2.8 — the terrarium read surface (built, in part).** The six routes both clients call are implemented; the
-rest of FR-03 (`PATCH`/`DELETE`, thresholds, silences, summaries, exports) is not, and is recorded as open rather
-than implied by a green row. Contract: `07-appendices/03` §4.2.
+**Task 2.8 — the terrarium surface: reads, create, and since 2026-10-09 update and delete.** The six routes both
+clients call are implemented, and FR-03's update and delete halves have landed on top of them. What remains of the
+rest of the table — thresholds, silences, summaries, exports — belongs to 3.1, 3.4 and 3.6 and is recorded as open
+rather than implied by a green row. Contract: `07-appendices/03` §4.2.
 
 | Piece | Where | Verified by |
 |---|---|---|
 | List, create, detail | `Api/Endpoints/TerrariumEndpoints.cs`, `Application/Terrariums/TerrariumService.cs` | service tests + the live run below |
+| `PATCH` with `If-Match`, and the `ETag` on `GET`/`POST`/`PATCH` responses | `TerrariumService.UpdateAsync`, `Terrarium.RowVersion`, `EfTerrariumStore.TrySaveChangesAsync`, `TerrariumEndpoints.{SetETag,ParseIfMatch}` | service tests + a live `200`/`412`/`428`/`400` run below |
+| `DELETE` as a soft delete, refused while a live device is bound unless `?allowUnboundDevice=true` | `TerrariumService.DeleteAsync` | service tests + a live `409`/`204` run below |
 | Ownership is a query parameter: foreign, missing and soft-deleted are one `404 not_found` | `Infrastructure/Persistence/EfTerrariumStore.cs` | service tests + live `404` |
 | `readings/latest`: newest value per metric, the effective band, the device state | `TerrariumService.LatestReadingsAsync` | service tests + live run |
 | Band resolution: an override beats the profile, an exact phase beats `Any` (BR-10.3); the phase comes from the photoperiod (BR-11.2) | `TerrariumService.EffectiveBand`, `Domain/Thresholds/ThresholdPhaseResolver.cs` | `ThresholdPhaseResolverTests` + service tests |
@@ -333,9 +373,16 @@ Nguy hiểm · Ngưỡng 24.0–28.0 °C` and `Độ ẩm 50%RH · Ngoài ngư�
 
 **What is deliberately still open in 2.8.**
 
-- **`PATCH`/`DELETE`, thresholds, silences, summaries and exports are not built.** FR-03's update and delete halves
-  and FR-09's summaries are still designs. `PATCH` is blocked on a `RowVersion` column `Terrarium` does not have, so
-  it is a migration plus the optimistic-concurrency contract rather than a route.
+- **Thresholds, silences, summaries and exports are not built.** They are 3.1 (the band-resolution endpoint), 3.4
+  (silences) and 3.6 (rollups and daily summaries), and each is listed against the task that owns it rather than
+  here. `PATCH`/`DELETE`, which were blocked on a `RowVersion` column `Terrarium` did not have, shipped on
+  2026-10-09 — the column, the migration and the concurrency contract — so FR-03's update and delete halves are
+  closed.
+- **An update is not audited.** `BR-18.4` names login failures, role changes, device claim/rotate/revoke, threshold
+  edits, purge and export generation — not terrarium edits — and the vocabulary of `02-design/02` §3.18 has no
+  `terrarium.*` verb, so no row is written. The delete of a terrarium *with* a bound device does not write
+  `device.unbound` either, for the same reason: adding a verb is a vocabulary decision, and inventing one here would
+  put a string in the column that the design document does not list.
 - **`alerts` is always `[]` in a `readings` response.** BR-09.3 wants alert overlays, and there are no alert rows to
   overlay until 3.2/3.4. An empty array means "no alerts recorded" and must not be read as "no excursions happened".
 - **Hourly buckets are computed from raw samples**, because the rollup worker is 3.6. That is correct at demo scale
@@ -359,20 +406,26 @@ it is recorded the way the FR-01 prerequisite for 2.2 was. Contract: `07-appendi
 |---|---|---|
 | Backup recovery code: 31-symbol alphabet without `0/O/1/I/L`, 20 characters (≈ 99 bits), normalised so `dem2d-em2de-m2dem-2dem2` = `DEM2DEM2DEM2DEM2DEM2` | `Domain/Identity/RecoveryCode.cs` | 6 new unit tests |
 | Salted `SHA-256(secret ‖ 16-byte salt)` in one place, shared with device credentials | `Infrastructure/Security/Sha256SecretHasher.cs` | `TC-U-51` |
-| `register` returns a code on **both** paths — a decoy when the identifier is taken, so the response stays identical | `AuthService.RegisterAsync` | `TC-U-51`, live run |
+| `register` returns a 20-character code when it creates the account, and creates nothing when the identifier is taken (`ADR-020`) | `AuthService.RegisterAsync` | `TC-U-51`, live run |
+| Password policy: ≥ 8 characters with one letter, one digit, one upper-case letter and one special character (whitespace excluded), the ≤ 128 cap and the deny-list kept; one violation code per rule | `Domain/Identity/PasswordPolicy.cs` | `TC-U-58` |
 | `POST /auth/recover` spends the backup code, rotates it, ends every session | `AuthService.RecoverAsync`, `Api/Endpoints/AuthEndpoints.cs` | `TC-U-52`, live run + browser |
 | Single-use server-issued code, 30-minute TTL, **unsalted** hash so the row is found by the value presented | `Domain/Identity/PasswordResetCode.cs`, `IUserStore.FindPasswordResetCodeAsync` | `TC-U-53` |
-| `POST /auth/forgot-password` always `202` with an empty body; `POST /auth/reset-password` spends the code, rotates the backup code, ends every session | `AuthService.{ForgotPasswordAsync,ResetPasswordAsync}` | `TC-U-53/54`, live run + browser |
+| `POST /auth/forgot-password` answers `202` with an empty body when a code was issued and `404 identifier_unknown` when no account uses the identifier (`ADR-020`); `POST /auth/reset-password` spends the code, rotates the backup code, ends every session | `AuthService.{ForgotPasswordAsync,ResetPasswordAsync}` | `TC-U-53/54`, live run + browser |
+| A taken registration identifier answers `409 registration_conflict` with `errors[]` naming `email_taken` / `username_taken`, and creates nothing (`ADR-020`) | `AuthService.RegisterAsync`, `IUserStore.FindTakenIdentifiersAsync` | `TC-U-57`, live run |
 | Delivery as a port; the demo's implementation writes the code to the log behind `PasswordReset:LogCode`, which is **false** in `appsettings.json` and true only in `Development` | `Application/Abstractions/IPasswordResetNotifier.cs`, `Infrastructure/Security/LogPasswordResetNotifier.cs` | `TC-U-55` |
+| Changing a password from the dashboard: the header form re-proves the current password, and the page signs the keeper out afterwards because the server revokes every session | `web/legacy/index.html`, `web/legacy/js/{api.js,pages/live.js}` | browser run 2026-10-07: changed it, was returned to the sign-in form with the confirmation, and signed in with the new password |
 
 Three decisions carry the feature. **There are two codes because there are two moments.** Registration is the only
 time the server can hand the keeper something without a delivery channel, so it returns a backup code; the issued
-code covers the keeper who no longer has it, and it needs no mail server either — only a working sender. **Both
-paths are non-disclosing.** An unknown identifier, a disabled account, a spent code and a foreign code all answer
-with one opaque `401`, and `forgot-password` answers `202` even when it issued nothing, so neither endpoint can be
-turned into a question about whether an account exists (BR-02.2). Because a `500` on the known-account path would
-be exactly that oracle, `ForgotPasswordAsync` commits the code first and then calls the notifier inside a guard that
-tolerates a throwing implementation. **A password change is not a patch, it is a reset**: both paths rotate the
+code covers the keeper who no longer has it, and it needs no mail server either — only a working sender. **Where the
+answers differ, that is a decision rather than a leak (`ADR-020`, 2026-10-07).** Registration answers
+`409 registration_conflict` naming the taken field and `forgot-password` answers `404 identifier_unknown` when
+nobody holds the identifier: before it, a duplicate registration was told "accepted" and handed a recovery code that
+could never work, and a mistyped address produced a `202` for a code that was never generated. Every *code* failure
+still answers with one opaque `401` — an unknown identifier, a disabled account, a spent code and a foreign code are
+indistinguishable on `recover` and `reset-password` — and a `500` on the known-account path remains impossible,
+because `ForgotPasswordAsync` commits the code and then calls the notifier inside a guard that tolerates a throwing
+implementation. **A password change is not a patch, it is a reset**: both paths rotate the
 backup code and revoke every refresh token, because the person who forgot the password is not necessarily the only
 one who has it.
 
@@ -402,7 +455,10 @@ signed in with the new password.
   `appsettings.Development.json`; a production log holding a live credential is a leak, which is why the log
   implementation says plainly when it delivered nothing.
 - **The dashboard's recovery form is M4 work in every other respect.** Both paths live on the Live page, and the
-  Flutter app has no login screen yet (task 4.10), so the recovery UI exists in `web/legacy` only.
+  Flutter app has no login screen yet (task 4.10), so the recovery UI exists in `web/legacy` only. The
+  change-password form added on 2026-10-07 sits in the same place for the same reason — the API had the endpoint and
+  67-odd unit tests, but no client could call it, which is what "change password is broken" looked like from the
+  dashboard.
 
 **Task 2.9 — the SignalR push.** Complete on the client path that matters: a subscribed client is authorised on
 join and receives one event per committed sample.
@@ -420,12 +476,51 @@ after the terrarium and the id is the only secret involved.
 
 **What is deliberately still open in 2.9.** Two of the four documented events:
 
-- **`statusChanged` needs the transition surfaced.** The online/offline decision is made in `DeviceStateUpdater`,
-  but the fan-out boundary carries committed samples (`PersistedSample`), which have no status in them. Emitting it
-  is a small contract change plus a second caller, not a broadcast.
+- **`statusChanged` — closed 2026-10-09.** The transition is surfaced by the `status` channel rather than by the
+  sample path: `DeviceChannelPipeline` reports the change the `status` message caused and
+  `SignalRTelemetryBroadcaster.BroadcastStatusAsync` pushes it to the terrarium's group as the documented
+  `{terrariumId, deviceId, status, lastSeenAt}`. This is the reason the second broadcast method exists instead of a
+  second use of `BroadcastAsync` — a status message commits no samples, so there is nothing to carry but the state.
+  What is still **not** pushed is the `Provisioning → Online` transition that a sample or health message causes:
+  that boundary carries `PersistedSample`, which has no status in it, so it stays open and is named rather than
+  implied.
 - **`alertChanged` belongs to M3**, which owns alerts; nothing can emit it yet.
 
 `commandChanged` is not in 2.9 either — commands arrive with FR-14.
+
+---
+
+## M3 scaffolding — the evaluation queue, its worker, and the two tables M3 needs (built 2026-10-09)
+
+M3 is not started, but the two boundary pieces that M2 deliberately left as placeholders are now real, and the two
+tables the design specifies for it exist. The point of doing this before the engine is that the engine then has one
+place to be written rather than a fan-out, a queue, a worker and three migrations at once.
+
+> **Superseded in part, same day.** M3 has since started: 3.1's read half (the shared resolution rule and the
+> `effectiveThresholds` endpoint) was built immediately after this pass, and 3.2 followed it — see the two blocks
+> after the M3 table. The queue and `SampleEvaluator` are unchanged by either; what changed is that the evaluator no
+> longer stops at the watermark, since 3.2 gave it the decision rule it was waiting for.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| A real bounded queue replacing the no-op `PendingEvaluationQueue` (deleted) | `Infrastructure/Evaluation/InProcessEvaluationQueue.cs` | unit tests + a live ingest that produced state rows |
+| The consumer: one batch at a time, single reader, ordered | `Infrastructure/Evaluation/EvaluatorWorker.cs` | the live run below |
+| The one decision rule that needs no band — §02-design/03 §4.2's "faulted or implausible: return" — plus the `LastEvaluatedSampleId` watermark per `(terrarium, metric, phase)` | `Application/Evaluation/SampleEvaluator.cs` | 14 `SampleEvaluatorTests` cases |
+| `EvaluationState` exactly as `07-appendices/02` §3.9 specifies it: PK `(TerrariumId, Metric, Phase)`, `rowversion`, every decision field present and unset | `Domain/Evaluation/EvaluationState.cs`, `SmartReptileDbContext.ConfigureEvaluation` | the live run + a `PK_EvaluationState` violation asserted against real SQL Server |
+| `DeviceEvent` storage, which 3.3's derived signals read | `Domain/Devices/DeviceEvent.cs`, the `events` channel consumer | the live run below |
+
+Three decisions worth reading back. **The queue does not back-pressure.** `InProcessTelemetryBus` deliberately
+withholds an MQTT acknowledgement when it is full, because the device retrying is the right answer; the evaluation
+queue must not, because evaluation is a derived opinion and a stalled opinion may not stop measurements being
+stored. A full queue therefore drops the batch and logs an error — reaching the capacity means the evaluator is
+stuck, which is a defect to be found rather than load to be absorbed. **The watermark advances one way only**: a
+re-delivered or back-filled sample carries a lower `SampleId` than the evaluator has already seen, and taking it
+would make the next pass re-read history. **The state fields are written as "nothing decided yet"**, so the rows 3.2
+inherits say exactly that rather than a plausible-looking default that a later reader would have to distrust.
+
+**What is deliberately still open here.** No dwell, no hysteresis, no alert, no escalation: `ThresholdDecision.Decide`
+is 3.2 and this block does not pre-empt it. The evaluator also keys only the `(metric, phase)` pairs an enabled band
+covers, which is the same set the read surface resolves a card's band from — a metric nothing judges gets no row.
 
 ---
 
@@ -435,11 +530,11 @@ after the terrarium and the id is the only secret involved.
 
 | # | Task | Track | Acceptance |
 |---|---|---|---|
-| 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified |
-| 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green |
+| 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Read half done 2026-10-09** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `TC-U-21…25` are green; the override write path and `ThresholdSnapshot` (`TC-U-26`) are open. See the block below |
+| 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green. **Decision engine done 2026-10-09** — the pure function, the evaluator that writes open/escalate/touch/resolve, and a live excursion through a real broker (see the block after this table); the per-device reorder window of §7 is open |
 | 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09` |
 | 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36` |
-| 3.5 | `NotificationDispatcher` + policy matrix + FCM + Telegram + inbox + retries | backend | `TC-U-37…45` (policy matrix), live Telegram message demoed |
+| 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push) |
 | 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`) |
 | 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15` |
 | 3.8 | `07-appendices/05` literature pass 2 — every shipped row cited | doc/report | 100% citation gate met |
@@ -447,19 +542,132 @@ after the terrarium and the id is the only secret involved.
 **DoD:** inducing a real excursion (lamp on / ice pack) produces exactly one alert and one notification,
 and a 4-minute disturbance produces nothing. **This is the milestone to demo to the mentor.**
 
+> **Note (2026-10-07) — open decision for 3.5, left open on purpose.** `ADR-021` dropped Telegram, which was
+> `R-13`'s mitigation for a failed FCM push on demo day. The runnable alternatives today are the in-app inbox
+> (always works, but it renders on the same screen as the alert, so it demonstrates the policy rather than a
+> second-device delivery) and SMTP (off by default, and no relay exists in the demo environment — the same gap as
+> `L-02`). **Decided at M3, not before:** either add a local SMTP sink to compose (Mailpit/MailHog) as its own task
+> with its own `TC-I-12` coverage, or accept the inbox as the demo's notification proof and leave `R-13` as rewritten.
+> Until this is settled, 3.5's acceptance is "live notification demoed (inbox + a real FCM push)" and no claim of an
+> out-of-band channel is made anywhere.
+
+---
+
+## M3 task 3.1, read half — the resolution rule and `effectiveThresholds` (built 2026-10-09)
+
+M3 started with the cheapest thing in it, chosen because it is a prerequisite of two later tasks rather than
+because it is convenient: the resolution order was living inside `TerrariumService` as a private method that
+returned the band and threw away *why* it was that band. Adding an endpoint that has to report `source` would have
+made a second copy of the rule, and 3.2's evaluator would then have become a third. So the rule moved to the
+domain as one pure function and the read surface was built on top of it.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `ThresholdResolver.Resolve(metric, overrides, profileBands, localTimeOfDay, lightsOn, photoperiod)` and the `EffectiveThreshold(metric, phase, source, band)` it returns | `Domain/Thresholds/ThresholdResolution.cs` | 10 `ThresholdResolverTests` cases |
+| `TerrariumService.EffectiveThresholdsAsync` — resolves the metric dictionary at `clock.UtcNow` in the terrarium's own zone | `Application/Terrariums/TerrariumService.cs` | 6 `TerrariumServiceTests` cases |
+| `GET /terrariums/{id}/thresholds` (role `U`, scoped to the caller, `404 not_found` for a foreign id) | `Api/Endpoints/TerrariumEndpoints.cs` | the live run below |
+| `ThresholdNames` / `EffectiveThresholdView` / `TerrariumThresholds` — the wire vocabulary | `Application/Terrariums/TerrariumContracts.cs` | the live run below |
+
+**`TerrariumService` now calls the resolver twice, and that is the point of it.** `readings/latest`'s
+`EffectiveBand` and this endpoint both go through `ResolveEffective`, so an editor previewing a band is previewing
+the band the card was *judged* against — `EffectiveThresholds_agrees_with_the_band_the_card_is_classified_against`
+asserts the two are equal rather than assuming it. The old private method kept as a thin wrapper rather than
+deleted, because the two call sites want different shapes of the same answer.
+
+**Two ambiguities in `03-implementation/06` §1 were settled here**, since writing the rule down once forces the
+question. Precedence is applied **per instant**: the override layer decides whenever it holds a row for the phase
+in force, so a phase-agnostic profile row cannot reach over an override; but a layer holding only the *other*
+phase's row is **silent rather than decisive**, so a day-only override at night lets the profile's night band
+through — which is what `readings/latest` already did, and its `target` had to not change. And **`Any` wins inside
+a layer** when a layer holds both an `Any` row and a phase-specific one, which is what the phase-resolution
+pseudocode says and the only reading under which the two sentences in that section agree. Both are now stated in
+the document itself rather than only in the code's remarks.
+
+**What this deliberately does not include.** No override write path — `PUT`/`DELETE /terrariums/{id}/thresholds` is
+the other half of 3.1, so the live check had to insert its override rows with `sqlcmd` and says so. No
+`ThresholdSnapshot` table, because its natural writer is the change path (3.2/3.4) and a table nothing writes is
+just a promise. And no `SystemDefault` tier: the specification names it as tier 3 of the resolution order and
+then **never gives it a value anywhere in the doc set**, so it is unbuilt rather than invented — a metric no layer
+resolves for the current phase is *absent* from the response, and absent is what the editor needs to show
+"configured nowhere" honestly.
+
+**Verification.** 513 unit tests (10 + 6 new), 19 integration tests against SQL Server Express, `dotnet format
+--verify-no-changes --severity error` clean, and a live run of 34 checks through the real API and database on the
+seeded **Tropical (humid forest)** profile: an anonymous read `401`; **both phases observed**, because the endpoint
+resolves the phase in the terrarium's own zone — a terrarium created in `Europe/London` (local 15:00) listed four
+metrics with the day band `24–28 °C`, one in `Pacific/Auckland` (local 03:00) listed two with the night band
+`20–24 °C`, and each reported the phase it was judged in; humidity reported `phase: "any"` / `source: "profile"`
+with the profile's own `60–80` band in both; an inserted day-only override correctly **silent** at night, so the
+profile band came back; an override for the night phase reported `source: "override"` with its own bounds while
+every other metric kept `source: "profile"` and the metric list was unchanged; a missing terrarium `404 not_found`;
+and `readings/latest` still `200` beside it. The check deletes what it created.
+
+---
+
+## M3 task 3.2 — the threshold engine (built 2026-10-09)
+
+The engine is the reason the product exists: everything before it stored measurements, and this is the first thing
+that has an opinion about them. It was built as one pure function plus the wiring around it, because the decision
+is the only part that can be exhaustively tested and the wiring is the only part that can be wrong in a way tests
+cannot see.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `ThresholdDecision.Decide(band, value, observedAt, state, nowUtc, openAlertSeverity)` — dwell, hysteresis and escalation as one static method with no dependency at all | `Domain/Evaluation/ThresholdDecision.cs` | 19 `ThresholdDecisionTests` cases (the `TC-U-10…20` matrix) |
+| `ThresholdAlertWriter` — the four field-level writes the lifecycle needs, with no I/O | `Application/Evaluation/ThresholdAlertWriter.cs` | the evaluator's tests, which assert the row's fields |
+| `SampleEvaluator` — resolves the band through `ThresholdResolver`, applies the decision, keeps `EvaluationState` and the alert row in step | `Application/Evaluation/SampleEvaluator.cs` | 18 cases, including the pointer/row reconciliation |
+| `IEvaluationStore` extended: the configured bands, the still-open alerts, `AddAlert`, and the dwell window's readings | `Infrastructure/Evaluation/EfEvaluationStore.cs` | 19 integration cases + the live run |
+| `alerts_opened_total` wired, by severity, from the outcome | `Infrastructure/Evaluation/EvaluatorWorker.cs` | the live run's counter assertion |
+
+**Five readings of the design were settled here, and each is now stated where it belongs** rather than only in the
+code: the dwell is measured against the evaluation instant while everything recorded is the sample's own instant
+(so a back-filled excursion opens for the record, back-dated, and the notification rule is what stops the burst);
+a reading inside the target band ends the excursion even if it has not cleared the recovery margin, because the
+margin gates closing an alert rather than re-arming the dwell; escalation happens once per episode and needs the
+severity the alert already carries, which lives on the alert row because `EvaluationState` has no severity column;
+the critical window is consecutive, so one reading back inside the critical band clears it; and the alert's
+triggering value and peak are read back from the stored readings of the dwell window instead of being kept in two
+more columns.
+
+**Two pieces of the design are deliberately absent.** Delivery: evaluation writes alerts and the dispatcher sends
+them (3.5), and `alertChanged` arrives with the lifecycle API in 3.4, so nothing is emitted to a client that could
+not act on it. And the per-device reorder window of `03-implementation/03` §5 / `02-design/03` §7 — a 30-second
+buffer ordered by `RecordedAt`: samples are evaluated in ingest order, which for a single node *is* `RecordedAt`
+order, but a second publisher or a broker redelivery could still arrive out of order and the id watermark cannot
+detect it. It is named here as open rather than implied, because building it would delay every evaluation by 30
+seconds and no test case demands it yet.
+
+**Verification.** 545 unit tests (19 + 26 new; the scaffolding's evaluator tests were replaced by the ones that now
+cover the engine), 19 integration tests against SQL Server Express, `dotnet format
+--verify-no-changes --severity error` clean, and a live run of 48 checks in which a **scripted node** drove a real
+excursion through the broker, the ingest pipeline, the evaluator and SQL Server: a faulted reading opened nothing
+and created no state row; an out-of-band reading opened nothing while the dwell window was open; when it elapsed,
+exactly one Warning opened, back-dated to the first out-of-band reading, with its `TriggeringValue` from that
+reading and its `PeakValue` from the window's *worst* reading rather than the one that opened it (32.6 °C opened
+the alert and 33.0 °C was the peak — a value the engine only knows because it reads the window back); a critical
+reading short of its own dwell touched the row without escalating; when that dwell elapsed the same alert
+escalated, keeping its id and its back-dated start, and did not escalate twice; three readings inside the band by
+the margin resolved it as `Recovered` and cleared the state's pointer and excursion; a later excursion opened a
+**second** row while the first stayed resolved; and the counters moved by exactly the two openings and the ten
+published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard
+gecko band asks for five) and deleted everything it created.
+
 ---
 
 ## M4 — Clients (10 days, overlaps M2/M3)
 
 **Goal:** everything the backend knows is visible in a way a keeper would accept using.
 
-**One web surface, and it is TERRAGUARD — wired.** M4 opened with two web surfaces: `web/legacy/` (static, real API)
-and the mock-data TERRAGUARD prototype in `web/` (ADR-017). Task 4.13 named legacy the milestone's surface
+**One web surface, and it is VIVARIUMGUARD — wired.** M4 opened with two web surfaces: `web/legacy/` (static, real
+API) and the mock-data prototype in `web/` (ADR-017), which was called TERRAGUARD until the brand was renamed
+**VIVARIUMGUARD** on 2026-10-09 (revision notes and ADR titles keep the old name — past records are not rewritten).
+Task 4.13 named legacy the milestone's surface
 (`ADR-018`), and **`ADR-019` (2026-10-06) revokes it**: the prototype is promoted to the M4 web surface, and it
 carries the obligations it was previously excused from — real data, server-side verdicts, vi+en, §3 tokens and CI
-coverage. Tasks 4.15–4.20 are that promotion, staged by endpoint availability; `web/legacy/` is retired by 4.19.
-4.12–4.14 stay closed as the work that produced the decision and the labelled reference. Until a screen is wired it
-keeps its mock-data notice, and that notice goes when the mock data does — not before.
+coverage. Tasks 4.15–4.20 are that promotion, staged by endpoint availability. **4.15–4.19 are done as of
+2026-10-07**: the client talks to the API, `web/legacy/` is deleted, and its compose mount with it. The three
+screens 4.20 still owes — `Devices`, `Alerts`, `Settings` — keep the mock-data notice, and that notice goes when
+the mock data does, not before.
 
 | # | Task | Track | Acceptance |
 |---|---|---|---|
@@ -477,12 +685,12 @@ keeps its mock-data notice, and that notice goes when the mock data does — not
 | 4.12 | Fix the web serving layout: point compose's `web` service at the prototype build and keep the M1 pages reachable at `/legacy/*` | web | `:8081/` serves a working page; `/legacy/wallboard.html` + `/legacy/health.html` still `200`; **BUG-03** closed, with that `curl` pair written down as its regression check |
 | 4.13 | Decide the prototype's fate in an ADR: wire TERRAGUARD to the real API and retire `web/legacy/`, or keep it as a mock-data reference and finish the static dashboard | web/doc | ADR appended; `02-design/04` §1.2, `05-release/01` §5 and this table agree with the decision |
 | 4.14 | Prototype honesty and single-source pass: mark the UI as mock data, reconcile `web/src/index.css`'s status→colour palette with `02-design/04` §3 (or state why it differs), and decide the Vietnamese-only copy | web | `TC-I-15` either covers the prototype or its exclusion is written into `04-quality/01`; no second palette is left undocumented |
-| 4.15 | **Promotion, stage 1 — API client, session and auth screens** (`ADR-019`): an `api` module owning the base URL, token storage, refresh-on-401 and typed errors; `Login.tsx` plus both recovery forms wired to `/auth/*`; a route guard on the shell | web | Sign in, sign out and recover against the real API; a reload keeps the session and a `401` rotates it once; each failure the API can return is rendered from its stable `code`, not a generic message; no invented value on any auth screen |
-| 4.16 | **Promotion, stage 2 — wire the read surface**: `Dashboard.tsx`, `History.tsx`, `Terrariums.tsx`, `TerrariumDetail.tsx` against `/terrariums`, `/terrariums/{id}`, `readings/latest`, `readings` and `coverage`, polling until 2.9; delete `mockData.ts`'s `Terrarium`/`Device`/`HistoryDataPoint` shapes | web | Every number on those screens equals the API's; staleness is shown; an empty account, an unbound device and an unreachable API each render their own honest state instead of a plausible number; `04-quality/03` §3 (functional walkthrough) and §5.11 (diagnosis is not wrong) |
-| 4.17 | **Promotion, stage 3 — the verdict comes from the server, not the screen (ADR-005)**: card status and band from `readings/latest`; no threshold comparison anywhere in TSX | web | Every card's status, target and phase-resolved band equal the payload's; a search of `web/src` finds no comparison of a metric value against a bound outside displaying what the server sent |
-| 4.18 | **Promotion, stage 4 — make it shippable**: vi+en key set shared with the app, `02-design/04` §3 tokens at ≥ 4.5:1, `tsc`/`vite build`/key-parity in CI, and `MockDataNotice` removed | web | `TC-I-15`'s key-parity half passes for the web key set; contrast ratios measured and recorded; the CI job fails on a missing key or a type error; the notice is gone because no screen renders mock data |
-| 4.19 | **Promotion, stage 5 — switch the surface and retire `web/legacy/`**: single nginx mount, wallboard rebuilt as a React route, BUG-03 regression pair replaced, `web/legacy/` and its compose mount deleted | web | `:8081/` serves the wired app; `/wallboard` and a deep route both `200` through the SPA fallback; the wallboard renders real values with timestamps and recovers after an outage; `web/legacy/` is gone and no doc or script still points at it |
-| 4.20 | **Promotion, stage 6 — wire the remaining screens as their endpoints land**: `Devices.tsx` (device read routes), `Alerts.tsx` (3.4), the threshold editor (3.1), `Settings.tsx` (`PATCH /auth/me`), report/export (3.6), and the live subscription of 2.9 | web | Each screen's acceptance is the matching M2/M3 task's; no screen is wired ahead of its endpoint, and a screen still on mock data carries the notice |
+| 4.15 | **Promotion, stage 1 — API client, session and auth screens** (`ADR-019`): an `api` module owning the base URL, token storage, refresh-on-401 and typed errors; `Login.tsx` plus both recovery forms wired to `/auth/*`; a route guard on the shell | web | **Done 2026-10-07.** `web/src/api/{client,endpoints,types}.ts` (single-flight refresh-on-401, `ApiError` carrying `code`/`status`/`detail`/`errors[]`), `state/session.tsx` (profile re-read from `GET /auth/me`, not trusted from storage), the four auth modes in one `Login.tsx`, and `RequireSession` around the shell. Every refusal renders from a code via `lib/messages.ts`; a session the transport could not rotate reports `sessionExpired` instead of bouncing silently; the three invented statistics and the `alert()` "contact an administrator" placeholder are gone |
+| 4.16 | **Promotion, stage 2 — wire the read surface**: `Dashboard.tsx`, `History.tsx`, `Terrariums.tsx`, `TerrariumDetail.tsx` against `/terrariums`, `/terrariums/{id}`, `readings/latest`, `readings` and `coverage`, polling until 2.9; delete `mockData.ts`'s `Terrarium`/`Device`/`HistoryDataPoint` shapes | web | **Done 2026-10-07** for the four screens, verified live: 5 metric cards, coverage `0.42%` (6 of 1440 expected) and a gap-aware history chart, all from the API on a terrarium created and fed through `/ingest/http` for the check. `mockData.ts` keeps `Device`/`AlertItem` for the three 4.20 screens; its `Terrarium`/`ThresholdConfig`/`HistoryDataPoint` shapes are deleted. **Create is not wired**: `POST /terrariums` needs a `speciesProfileId` and the species-profile catalogue route does not exist, so the list says so rather than inventing one |
+| 4.17 | **Promotion, stage 3 — the verdict comes from the server, not the screen (ADR-005)**: card status and band from `readings/latest`; no threshold comparison anywhere in TSX | web | **Done 2026-10-07.** `components/MetricCard.tsx` renders `status`, `target` and `capturedAt` as sent; `lib/status.ts` maps the five API values to a label and a colour and holds the only vocabulary. `grep -rn "target\|status" web/src --include=*.tsx` finds no comparison of a value against a bound; the one comparison left is §6's staleness age against `3 × samplingIntervalSec`, which is a comparison of *ages* |
+| 4.18 | **Promotion, stage 4 — make it shippable**: vi+en key set shared with the app, `02-design/04` §3 tokens at ≥ 4.5:1, `tsc`/`vite build`/key-parity in CI, and `MockDataNotice` removed | web | **Done 2026-10-07, with one part deferred and said so.** Both clients now read `app/lib/l10n/app_{en,vi}.arb` (164 keys, vi+en identical, checked by `web/scripts/check-strings.mjs` in the new CI `web` job with `tsc` and `vite build`); the palette is §3's four roles with hues measured on this client's surfaces (`web/src/index.css` records both sets, including §3's failing 3.30/3.01/2.73); the notice is rendered only on the three screens still on mock data. "The notice is gone because no screen renders mock data" cannot be true while 4.20 is blocked by missing endpoints — it goes when the mock data does |
+| 4.19 | **Promotion, stage 5 — switch the surface and retire `web/legacy/`**: single nginx mount, wallboard rebuilt as a React route, BUG-03 regression pair replaced, `web/legacy/` and its compose mount deleted | web | **Done 2026-10-07.** `web/nginx.conf` serves one mount (`/srv/app`) with the SPA fallback; `docker-compose.yml` mounts only `web/dist`; `web/legacy/` (8 files) is deleted; `web/dist` is rebuilt and committed. Verified through the real nginx config: `/` 200 with the hashed bundle, `/wallboard` 200 and `/dashboard` 200 through the fallback, assets 200, and no runtime error on any page. **The wallboard page was new work** (W1 was not one of the prototype's eight screens) and the legacy `health.html` diagnosis became `/system`, because a retirement that loses a function is a regression |
+| 4.20 | **Promotion, stage 6 — wire the remaining screens as their endpoints land**: `Devices.tsx` (device read routes), `Alerts.tsx` (3.4), the threshold editor (3.1 — its read half landed 2026-10-09, so the editor can now show the effective band per metric and where it came from; saving still waits for the write half), `Settings.tsx` (`PATCH /auth/me`), report/export (3.6), and the live subscription of 2.9 | web | Each screen's acceptance is the matching M2/M3 task's; no screen is wired ahead of its endpoint, and a screen still on mock data carries the notice |
 
 **DoD:** the demo can be given entirely from the phone, with the wallboard on a second screen; every screen
 shows real data; no screen renders a value without a timestamp. 4.13 is closed (`ADR-018`, since revoked by

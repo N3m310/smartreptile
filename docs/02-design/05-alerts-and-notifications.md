@@ -28,10 +28,9 @@ biology does not support. `Info` exists only for system events.
 |---|---|---|---|---|
 | **In-app inbox** | `NotificationLog` rows rendered in S6 | user session | none needed | Always on; the audit trail of "what was sent" |
 | **FCM push** | Firebase Admin SDK from `NotificationDispatcher` | service account JSON mounted read-only | 3 retries (5 s / 30 s / 2 min), token invalidation on `UNREGISTERED` | Android only in v1 |
-| **Telegram** | Bot API `sendMessage` to a chat id the user links via a one-time code | bot token in `.env` | 3 retries, 429 `retry_after` respected | **Primary demo channel** — fastest to show live in a demo |
-| **SMTP email** | `System.Net.Mail` (optional) | SMTP credentials in `.env` | 3 retries, failures logged | Off by default; useful for a "daily digest" |
+| **SMTP email** | `System.Net.Mail` (optional) | SMTP credentials in `.env` | 3 retries, failures logged | Off by default; the out-of-band channel, useful for a "daily digest" |
 
-Duplicate-channel control: if the same alert would be sent to both Telegram and FCM within 30 s, both are
+Duplicate-channel control: if the same alert would be sent to both email and FCM within 30 s, both are
 sent (different devices, different urgency), but the *digest* path collapses them.
 
 ## 4. Notification decision flow
@@ -82,7 +81,7 @@ For **Critical** alerts only:
 | 0 min | Push to all users who enabled Critical |
 | 30 min, unacknowledged | Repeat push; if a `Technician` exists and was not notified, notify them |
 | 60 min, unacknowledged | Notify the `Owner` with an explicit "unacknowledged for 60 min" body |
-| 120 min, unacknowledged | Telegram message (out-of-band channel, likely read on a different device) + a permanent banner in the app |
+| 120 min, unacknowledged | Email (out-of-band channel, likely read on a different device) + a permanent banner in the app |
 
 Escalation stops at the first acknowledgement. Escalation events are logged as `NotificationLog` rows
 with the same `AlertId`, so the report can show the full response timeline of one incident.
@@ -109,9 +108,10 @@ Because channels are behind `INotificationChannel`, they are unit-testable with 
 ```
 TC-U-*: policy matrix tests — (severity, quietHours, minSeverity, silenced, maintenance, rateLimit)
         → expected SuppressedReason or Send. One test per cell of the matrix (12 cells).
-TC-I-*: dispatcher integration with a fake FCM/Telegram client, asserting retry counts and logs.
-TC-E2E-03: real Telegram message received within 90 s of an induced excursion.
+TC-I-*: dispatcher integration with a fake FCM client and a local SMTP sink, asserting retry counts and logs.
+TC-E2E-03: real FCM push received within 90 s of an induced excursion.
 ```
 
 The *only* non-deterministic part of the system (a third-party push service) is therefore isolated to
-one seam — which is also why the demo can fall back to Telegram if FCM delivery is flaky on the day.
+one seam — which is also why the demo can fall back to the in-app inbox (and email) if FCM delivery is
+flaky on the day.

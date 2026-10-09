@@ -46,7 +46,7 @@ void test_median_rejects_single_glitch(void) {
 
 ---
 
-## B. Backend unit tests (TC-U-01…56)
+## B. Backend unit tests (TC-U-01…58)
 
 ### B1. Ingest: validation, plausibility, calibration
 
@@ -75,12 +75,29 @@ and asserts the returned `DecisionKind` plus the mutated state.
 | TC-U-12 | Sustained excursion does not open a second alert | open alert + 10 more out-of-band samples | `Touch` only, `PeakValue` updated, one alert id | 1 | FR-11 |
 | TC-U-13 | Critical crossing escalates the same alert | open Warning, value 34.9 for 2 min | `Escalate`, severity Critical, alert id unchanged | 1 | FR-11 |
 | TC-U-14 | Critical dwell not met → no escalation | value 34.9 for 1 min then 34.0 | no `Escalate` | 1 | FR-11 |
-| TC-U-15 | Recovery requires margin inside the band | value 32.2 (inside band but within margin) for 3 min | no `Resolve` | 1 | FR-11 |
+| TC-U-15 | Recovery requires margin inside the band | value 31.8 (inside band but within margin) for 3 min | no `Resolve` | 1 | FR-11 |
 | TC-U-16 | Recovery after 3 ticks resolves | value 31.5 for 3 min | `Resolve(Recovered)` | 1 | FR-11 |
 | TC-U-17 | Recovery counter resets on a single excursion | in-limit, out-limit, in-limit ×3 | no `Resolve` until 3 *consecutive* ticks | 2 | FR-11 |
 | TC-U-18 | Cold excursion uses `TargetMin` | value 24.0 with target 26–32 | `Open(Warning)`, direction = cold, peak tracking minimises | 1 | FR-11 |
 | TC-U-19 | Quality flag excludes evaluation | sample with quality bit 2 and value 40 | `None` — no alert from a bad reading | 1 | FR-11 |
 | TC-U-20 | Any-phase metric ignores the day/night split | `Phase = Any`, night time | evaluates with the Any band | 2 | FR-11 |
+
+> **Built 2026-10-09 — `TC-U-10…20` are green, 19 cases in `ThresholdDecisionTests`.** `ThresholdDecision.Decide`
+> is the procedure of `02-design/03` §4.2 and nothing else: `SampleEvaluator` resolves the band, calls it, and writes
+> what it returns. The matrix is exhausted rather than sampled — four minutes out of band produces nothing, five
+> opens one back-dated Warning, a sustained excursion only touches, a critical window that does not hold never
+> escalates and one that does escalates once, recovery needs three consecutive readings inside the band by the
+> margin (and a value still hovering at the edge never closes an alert), cold mirrors hot, and no decision looks at
+> the clock at all because the band arrives already resolved. Two rows of this table were worded in a way the rule
+> does not support: `TC-U-15`'s input read 32.2 °C, which is *outside* a 26–32 °C band (above `TargetMax`) and so
+> never tested the margin at all — it now reads 31.8 °C, and `A_value_still_just_outside_the_band_does_not_recover`
+> keeps the 32.2 °C case as the separate rule it is. `03-implementation/06` §3's Example B had the mirror slip and
+> records it there.
+> **`TC-U-19` is the evaluator's guard, not the engine's**: a faulted or implausible sample is skipped before any
+> band is resolved, and `SampleEvaluatorTests` asserts that it opens no alert and creates no state row. `TC-U-20` is
+> `ThresholdPhaseResolver`'s, whose `Any`-wins rule the decision matrix exercises by passing a band it did not
+> choose. The engine's live proof is the 48-check scripted excursion recorded in `03-implementation/07`; what is
+> still open from 3.2 is the per-device reorder window, and the notification half of the lifecycle is 3.5.
 
 ```csharp
 [Fact]
@@ -123,6 +140,21 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-25 | Phase + local-day bucketing | photoperiod 12 h from 07:00 in `Asia/Ho_Chi_Minh` (UTC+7) | 07:00 local = Day, 19:30 local = Night; a day summary uses local midnight boundaries, not UTC midnight | 1 | FR-10, NFR-10 |
 | TC-U-26 | Snapshot on change; open alert keeps its band | change target while an alert is open | new `ThresholdSnapshot` row; alert `BandMin/Max` unchanged; next sample evaluated against the new band | 1 | FR-10, FR-12 |
 
+> **Partly built 2026-10-09 — `TC-U-21…25` are green, `TC-U-26` is not.** `TC-U-21…23` were already covered by
+> `ThresholdBandTests`; `TC-U-24` now has an author. `ThresholdResolver` (Domain) is the resolution order as one
+> pure function, `ThresholdResolverTests` pins it against hand-built rows, and
+> `TerrariumService.EffectiveThresholdsAsync` + `GET /terrariums/{id}/thresholds` expose it with `source` per
+> metric — verified live against SQL Server on the seeded Tropical profile, with **both phases observed** by
+> creating one terrarium in a zone whose local clock is inside the photoperiod and one outside: four metrics with
+> the day band `24–28 °C`, two with the night band `20–24 °C`, `source = profile` throughout, an override that
+> applies reported as `source = override` / the phase in force, and an override for the other phase correctly
+> silent. Two readings of §1 that the document left ambiguous were settled there and are now stated in
+> `03-implementation/06` §1 (precedence applied per instant, and `Any` winning inside a layer).
+> **`TC-U-24`'s "→ default" half is not testable and is not claimed:** no `SystemDefault` values exist anywhere in
+> the doc set, so the resolver's third tier is unbuilt rather than invented, and an unresolvable metric is reported
+> as *absent* instead. `TC-U-26` needs the `ThresholdSnapshot` table and the write path (3.2/3.4); `TC-U-25`'s
+> phase half is green (`ThresholdPhaseResolverTests`), its local-day-summary half is 3.6.
+
 ### B4. Derived signals and device health
 
 | Id | Case | Input | Expected | P | FR |
@@ -145,8 +177,10 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-51 | Backup recovery code shape and storage | register | 20 characters from the 31-symbol claim-code alphabet (no `0`/`O`/`1`/`I`/`L`), stored as `SHA-256(code ‖ 16-byte salt)`, plaintext absent from the row | 1 | FR-01 |
 | TC-U-52 | Recovery with the backup code rotates everything | register, sign in, then recover with the code and a new password | code consumed and replaced, every refresh token revoked, the old password and the spent code both refused | 1 | FR-01 |
 | TC-U-53 | Server-issued reset code is single-use and time-boxed | `forgot-password`, then `reset-password` | the row holds only the SHA-256 and expires `PasswordReset:CodeMinutes` ahead; the code works once (case and separators ignored) and a replayed or expired one → `401 invalid_reset_code` | 1 | FR-01 |
-| TC-U-54 | Reset cannot be used to probe for accounts | `forgot-password`/`reset-password` with an identifier that has no account | `202` with an empty body and `401 invalid_reset_code` — identical to the known-account answers, including for a code issued to a different account | 1 | FR-01, BR-02.2 |
-| TC-U-55 | A failing delivery channel cannot change the answer | channel throws while issuing a code | `202` still returned and the code row still committed, so a known account is never a `500` next to an unknown one's `202` | 2 | FR-01 |
+| TC-U-54 | Reset discloses an unknown identifier, and nothing else (`ADR-020`) | `forgot-password` with an identifier that has no account, then `forgot-password`/`reset-password` with a real one | the unknown identifier → `404 identifier_unknown` with no code row created; a spent code, an expired code and another account's code → one identical `401 invalid_reset_code`; no failure distinguishes the *code* cases from each other | 1 | FR-01, ADR-020 |
+| TC-U-55 | A failing delivery channel cannot change the answer | channel throws while issuing a code | `202` still returned and the code row still committed, so a keeper is never told the code failed when it exists | 2 | FR-01 |
+| TC-U-57 | Registration names the identifier that is taken | register twice, once with the username reused and once with the email reused (`ADR-020`) | `409 registration_conflict` with `errors[]` carrying `username_taken` and/or `email_taken` for exactly the field at fault; no second account and no recovery code; login afterwards still works only for the account that exists | 1 | FR-01, ADR-020 |
+| TC-U-58 | Password policy shape (`BR-01.2`) | `PasswordPolicy.Validate` over the boundary cases: exactly 8 characters, 7 characters, a lower-case-only password, one with no special character, one with only a space as its "symbol", a 129-character one, a deny-listed one | each refusal names the rule it broke (`password_too_short`, `password_uppercase_required`, `password_special_required`, …) and every rule that fails is reported at once; the deny-list and the ≤ 128 cap still apply | 1 | FR-01 |
 | TC-U-56 | Issuing a second code closes the first | two `forgot-password` requests, then reset with the first code | the first code → `401 invalid_reset_code`; at most one code is ever live for an account | 1 | FR-01 |
 
 ### B6. Notification policy, retries and content
@@ -205,10 +239,10 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-I-09 | Silence watchdog raises and auto-resolves | stop publishing for 5 min, then resume | `DeviceSilent` Warning then auto-resolve; no metric alerts from missing data | 1 | FR-07 |
 | TC-I-10 | Range query bucketing | `daily` + `monthly` fixtures | 1 h → raw; 24 h → 5-min; 30 d → hourly with ≤ 720 points and `bucket` echoed in the response | 1 | FR-09 |
 | TC-I-11 | Live push and freshness | subscribe SignalR, ingest a batch | event < 1 s; `readings/latest` p95 ≤ 300 ms over 200 calls on the 30-day dataset; chart payload ≤ 200 KB | 1 | FR-08, NFR-01, NFR-02 |
-| TC-I-12 | Notification integration with fakes | WireMock Telegram + fake FCM | one send, correct body/localisation, retries counted, `NotificationLog` rows per attempt, quiet-hours behaviour as in TC-U-38 | 2 | FR-13 |
+| TC-I-12 | Notification integration with fakes | fake FCM client + a local SMTP sink | one send, correct body/localisation, retries counted, `NotificationLog` rows per attempt, quiet-hours behaviour as in TC-U-38 | 2 | FR-13 |
 | TC-I-13 | Security/auth integration | anonymous MQTT publish, wrong secret, revoked device, expired claim code, foreign terrarium read, Viewer mutation, token reuse | each rejected with the documented status; audit rows written; revoked device blocked within 60 s | 1 | FR-01, FR-02, FR-04, FR-05, NFR-04 |
 | TC-I-14 | Retention sweep and purge | 91-day-old raw + rollups; snapshot 8 days old; export older than 24 h | raw deleted with count logged, rollups retained, snapshot deleted, export file removed and job `Expired`; a 7-day late back-fill recomputes rollups and the summary | 2 | FR-15, NFR-11 |
-| TC-I-15 | Ops endpoints and counters | scrape `/metrics` before and after 1 000 ingests; stop the broker and call `/ready` | counters increase exactly by the expected amounts; `/ready` → 503 with `broker:false` while reads still work; i18n key sets of the app and of the web client are identical. *(`ADR-019` moves this half: the key set starts as `web/legacy/js/i18n.js` and becomes the TERRAGUARD client's when task 4.18 gives it a shared key set, at which point `web/legacy/` is gone. Either way the check is against the surface that ships, and the mock-data screens are outside it until they are wired — see the caveat below.)* | 2 | FR-18, NFR-12 |
+| TC-I-15 | Ops endpoints and counters | scrape `/metrics` before and after 1 000 ingests; stop the broker and call `/ready` | counters increase exactly by the expected amounts; `/ready` → 503 with `broker:false` while reads still work; i18n key sets of the app and of the web client are identical. *(Task 4.18 landed on 2026-10-07: `web/legacy/` is gone and there is one deck — `app/lib/l10n/app_{en,vi}.arb` — read by both clients, with `web/scripts/check-strings.mjs` (`npm run check:strings`) as the gate. The mock-data screens are outside it until their endpoints exist — see the caveat below.)* | 2 | FR-18, NFR-12 |
 
 > **Implementation status (measured 2026-10-06, roadmap task 2.8).** `TC-I-10` is green at the unit level:
 > `RangeQueryRulesTests` asserts the bucket for every offered width (1 h → `raw`, 24 h → `5min`, 30 d → `hourly`),
@@ -226,7 +260,24 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 > Server after a live claim → rotate → revoke, and a second revoke wrote nothing. Its login and token-reuse verbs
 > are still unwritten: `AuditLog` exists, but nothing on the FR-01 path writes to it (see 2.2 and 2.3 above).
 
-> **Caveat on `TC-I-15`'s i18n half.** The app and dashboard key sets are **not** identical today, and were not
+> **Re-measured 2026-10-09 — 19 integration cases, and `TC-I-03`'s "zero alerts" now has an author.** The suite
+> grew by three cases, each asserting something only SQL Server can: a stale `rowversion` makes an update affect
+> zero rows (`DbUpdateConcurrencyException`, the mechanism behind `TC-I-13`-adjacent `412`s), `PK_EvaluationState`
+> refuses a second state row for one `(terrarium, metric, phase)` while a different phase is accepted, and a
+> `DeviceEvent` inserts with a null terrarium so unbinding cannot erase a board's fault history. `TC-I-03` itself
+> is unchanged and still green, but *why* it is green changed: the queue has a consumer now
+> (`EvaluatorWorker` → `SampleEvaluator`), so the implausible row is read, its quality bit is checked and it is
+> declined — `SampleEvaluatorTests` asserts exactly that — rather than the "zero alerts" holding because nothing
+> consumed the queue at all. `TC-I-04`'s health half is green over a live broker (a `health` message wrote both
+> the device denorms and a `DeviceHealthSample` row); its `sensor_fault` half is still 3.3, but the raw event it
+> needs is now stored rather than dropped.
+
+> **Resolved 2026-10-07 — `TC-I-15`'s i18n half now passes for the surface that ships.** The React client reads
+> `app/lib/l10n/app_{en,vi}.arb` directly (`web/src/i18n/strings.ts`, via Vite's `?raw`), so there is one key list
+> and the comparison is structural rather than a check of two hand-maintained sets. `web/scripts/check-strings.mjs`
+> — in the new CI `web` job — fails the build if a screen names a key no locale defines or the two locales disagree
+> (164 keys, identical, verified on 2026-10-07). The paragraphs below are kept as the record of the gap this closed:
+> before the promotion the app and dashboard key sets were **not** identical, and were not
 > before this change: the dashboard carries strings the ARB set does not (`brokerDown`, `databaseDown`,
 > `errorEndpointMissing`, `lastUpdated`, …) and the ARB carries app-only ones (`tabHome`, `retry`,
 > `maintenanceNotice`, …). The dashboard side of that gap grew by 28 keys with the sign-in and password-recovery
@@ -235,15 +286,20 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 > (`forgotPassword`, `backToSignIn`, `recoverPrompt`, `recoveryCode`, `newPassword`, `recoverButton`, `recovering`,
 > `recoveryFailed`, `passwordPolicyViolation`, `accountLocked`, `recoveryIssued`, `recoveryDone`) and the seven the
 > server-issued path added (`recoverHintBackup`, `recoverHintIssued`, `resetCodeLabel`, `sendResetCode`,
-> `sendingResetCode`, `resetCodeRequested`, `resetCodeLogHint`). Reconciling the two sets is a client-set task, and
-> `TC-I-15` cannot pass until it is done — the case is a real gate, not a formality.
+> `sendingResetCode`, `resetCodeRequested`, `resetCodeLogHint`). The password-policy change added eight more — the
+> hint under both new-password fields plus one sentence per rule (`passwordHint`, `passwordTooShort`,
+> `passwordTooLong`, `passwordNeedsLetter`, `passwordNeedsDigit`, `passwordNeedsUppercase`,
+> `passwordNeedsSpecial`, `passwordTooCommon`) — taking the dashboard to 36 strings the ARB set does not carry.
+> Reconciling the two sets was the client-set task `ADR-019` called for, and task 4.18 did it by deleting the
+> second set rather than by comparing them — including the strings the retired dashboard had that the app did not
+> (`brokerDown` and `databaseDown` went into the ARB with the `/system` page that needed them). `TC-I-15`'s i18n
+> half now covers the shipped client and passes in CI.
 
-> **Which surface that gate applies to is changing (`ADR-019`).** The key set described above is
-> `web/legacy/js/i18n.js`, and `web/legacy/` is retired by task 4.19 in favour of the TERRAGUARD React client. So
-> the fix is not "the dashboard catches up with the app": task 4.18 gives the React client a key set shared with
-> the app and puts key parity in CI, and from then on `TC-I-15`'s i18n half covers *that* set. Until 4.18 lands the
-> case still fails, and it should — a gate waived for the surface being promoted would be waived exactly when it
-> starts to matter.
+> **Which surface that gate applies to changed on 2026-10-07 (`ADR-019`).** It used to be
+> `web/legacy/js/i18n.js`, which `web/legacy/` carried until task 4.19 retired it in favour of the TERRAGUARD React
+> client. Task 4.18 gave that client the app's key set instead of its own, and put the parity check in CI, so the
+> case now covers the surface that ships — a gate waived for the surface being promoted would be waived exactly when
+> it started to matter.
 
 ---
 
@@ -311,7 +367,7 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 |---|---|---|
 | Firmware native (TC-U-FW-*) | 12 | all green before flashing a release build |
 | Backend unit (TC-U-*) | 56 | ≥ 70% line coverage on Domain + Application |
-| Backend integration | 15 | all green in CI |
+| Backend integration | 19 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
 | E2E | 6 | executed per milestone, results recorded |
 | **Total** | **107** | |
