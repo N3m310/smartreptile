@@ -419,8 +419,10 @@ class ThresholdBand {
 /// rejects a target that is hotter than the zone can be, and the lower value rejects BR-10.5's own example — a desert
 /// profile with a 19 °C target maximum.
 ///
-/// The ceiling is an **air** ceiling and applies to the **day** band: a night drop is expected, and `SurfaceTempC` is
-/// judged against the profile's own seeded surface band instead (`07-appendices/05` §4, clarified 2026-09-29).
+/// The ceiling is an **air** ceiling and applies to the **day** band: a night drop is expected, `SurfaceTempC` is
+/// judged against the profile's own seeded surface band instead (`07-appendices/05` §4, clarified 2026-09-29), and a
+/// profile that monitors the **ambient/cool side** is judged against that zone's ambient envelope (`aridAmbient`),
+/// because §4's Arid ceiling describes the basking zone.
 class ClimateRange {
   /// Creates a range.
   const ClimateRange({
@@ -493,6 +495,22 @@ class ClimateRange {
     photoperiodHours: 12,
     lightThresholdLux: 2000,
     surfaceCriticalMaxC: 50,
+  );
+
+  /// The **ambient/cool side** of an Arid enclosure (`07-appendices/05` §3, seeded 2026-10-07).
+  ///
+  /// §4's Arid ceiling (40–44 °C) describes the basking zone, so a profile monitoring the cool side would be flagged
+  /// by the very band the docs give it — the mirrored version of the `SurfaceTempC` problem §4 already carves out.
+  /// This envelope carries the ambient day range from §3's `Arid-cool` row, and leaves `surfaceCriticalMaxC` null
+  /// because the variant ships no surface band to judge.
+  static const aridAmbient = ClimateRange(
+    zone: ClimateZone.arid,
+    airMinC: 28,
+    airMaxC: 33,
+    humidityMinPct: 40,
+    humidityMaxPct: 40,
+    photoperiodHours: 12,
+    lightThresholdLux: 2000,
   );
 
   /// Envelope for a zone.

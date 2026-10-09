@@ -1,276 +1,127 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Plus,
-  Thermometer,
-  Droplets,
-  Sun,
-  Cpu,
-  ChevronRight,
-  X,
-  Check,
-} from 'lucide-react';
-import { initialTerrariums, Terrarium } from '../data/mockData';
+import { Box, ExternalLink, History as HistoryIcon, Info } from 'lucide-react';
+import * as api from '../api/endpoints';
+import type { TerrariumList } from '../api/types';
+import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
+import { useI18n } from '../i18n';
+import { formatDateTime, formatRelative } from '../lib/format';
+import { deviceStatusLabel } from '../lib/status';
+import { usePolled } from '../lib/usePolled';
+
+/**
+ * W2's terrarium list (roadmap 4.16).
+ *
+ * Create is deliberately absent. `POST /terrariums` exists (2.8) but it takes a `speciesProfileId`, and the route
+ * that lists species profiles is specified and unbuilt — so a create form here would need the keeper to type a
+ * GUID, and the alternative (hard-coding one of the four seeded profile ids) would put an invented value on the
+ * screen. It waits for the catalogue route, which is the roadmap's own rule for 4.20: a screen is wired when its
+ * endpoints exist, and not before.
+ */
+
+const POLL_MS = 30_000;
 
 export const Terrariums: React.FC = () => {
-  const [terrariums, setTerrariums] = useState<Terrarium[]>(initialTerrariums);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newTerrarium, setNewTerrarium] = useState({
-    name: '',
-    species: '',
-    description: '',
-  });
-
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTerrarium.name || !newTerrarium.species) return;
-
-    const added: Terrarium = {
-      id: `T0${terrariums.length + 1}`,
-      name: newTerrarium.name,
-      species: newTerrarium.species,
-      image:
-        'https://images.unsplash.com/photo-1548767797-d8c844163c4c?auto=format&fit=crop&w=800&q=80',
-      status: 'normal',
-      currentTemp: 28.5,
-      currentHumidity: 50.0,
-      currentLight: 400,
-      thresholds: {
-        tempMin: 24,
-        tempMax: 32,
-        humidityMin: 40,
-        humidityMax: 60,
-        lightMin: 200,
-        lightMax: 800,
-      },
-      description: newTerrarium.description || 'Terrarium mới được tạo.',
-      deviceCount: 3,
-    };
-
-    setTerrariums([...terrariums, added]);
-    setShowAddModal(false);
-    setNewTerrarium({ name: '', species: '', description: '' });
-  };
-
-  const getStatusBadge = (status: 'normal' | 'warning' | 'danger') => {
-    switch (status) {
-      case 'normal':
-        return (
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#4a9e6a] text-white shadow-md shadow-[#4a9e6a]/20">
-            Bình thường
-          </span>
-        );
-      case 'warning':
-        return (
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#e8a832] text-black shadow-md shadow-[#e8a832]/20">
-            Cảnh báo
-          </span>
-        );
-      case 'danger':
-        return (
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#e05530] text-white shadow-md shadow-[#e05530]/20 animate-pulse">
-            Nguy hiểm
-          </span>
-        );
-    }
-  };
+  const { t, lang } = useI18n();
+  const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), POLL_MS);
+  const items = terrariums.data?.items ?? [];
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-heading font-extrabold text-[#dcd5c4]">
-            Danh sách Terrarium
-          </h1>
-          <p className="text-sm text-[#8e9e8f] mt-1">
-            Quản lý và theo dõi môi trường vi khí hậu theo từng loài bò sát
-          </p>
-        </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2.5 bg-[#4a9e6a] hover:bg-[#3d8558] text-white text-xs font-semibold rounded-xl shadow-lg shadow-[#4a9e6a]/25 transition-all flex items-center gap-2 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>+ Thêm Terrarium</span>
-        </button>
-      </div>
+    <div className="space-y-6">
+      <header>
+        <h1 className="font-heading text-2xl font-bold text-ink">{t('terrariumsTitle')}</h1>
+      </header>
 
-      {/* Terrarium Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {terrariums.map((item) => (
-          <div
-            key={item.id}
-            className="bg-[#112016] border border-[#1e3825] hover:border-[#4a9e6a]/50 rounded-3xl overflow-hidden shadow-xl transition-all duration-300 flex flex-col group"
-          >
-            {/* Image & Status Badge */}
-            <div className="relative h-48 w-full overflow-hidden">
-              <img
-                src={item.image}
-                alt={item.species}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#112016] via-transparent to-black/40"></div>
-              <div className="absolute top-4 right-4">
-                {getStatusBadge(item.status)}
-              </div>
-              <div className="absolute bottom-3 left-4 right-4">
-                <span className="text-xs font-bold text-[#4a9e6a] tracking-wider uppercase">
-                  {item.id}
-                </span>
-                <h3 className="text-xl font-heading font-bold text-[#dcd5c4] drop-shadow-md">
-                  {item.name}
-                </h3>
-                <p className="text-xs text-[#8e9e8f] italic">{item.species}</p>
-              </div>
-            </div>
+      {terrariums.error?.isNetworkFailure ? (
+        <UnreachableBanner onRetry={() => terrariums.reload()} />
+      ) : null}
+      {!terrariums.error?.isNetworkFailure && terrariums.error ? (
+        <ErrorPanel error={terrariums.error} onRetry={() => terrariums.reload()} />
+      ) : null}
 
-            {/* Body */}
-            <div className="p-5 flex-1 flex flex-col justify-between space-y-5">
-              <p className="text-xs text-[#8e9e8f] line-clamp-2">
-                {item.description}
-              </p>
+      {terrariums.loading ? <LoadingPanel label={t('signingIn')} /> : null}
 
-              {/* 3 Mini Stats */}
-              <div className="grid grid-cols-3 gap-2.5 p-3 rounded-2xl bg-[#0b1a0d] border border-[#1e3825]">
-                {/* Temp */}
-                <div className="text-center">
-                  <span className="text-[10px] text-[#8e9e8f] flex items-center justify-center gap-1">
-                    <Thermometer className="w-3 h-3 text-[#e05530]" />
-                    Nhiệt độ
-                  </span>
-                  <p className="text-sm font-mono font-bold text-[#dcd5c4] mt-0.5">
-                    {item.currentTemp}°C
-                  </p>
+      {!terrariums.loading && items.length === 0 && !terrariums.error ? (
+        <EmptyPanel title={t('emptyStateTitle')} body={t('emptyStateBody')} />
+      ) : null}
+
+      {items.length > 0 ? (
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="flex flex-col justify-between rounded-2xl border border-hairline bg-surface p-5"
+            >
+              <div>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-heading text-lg font-semibold text-ink">{item.name}</h2>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {item.speciesName}
+                      {item.location ? ` · ${item.location}` : ''}
+                    </p>
+                  </div>
+                  <Box className="h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
                 </div>
 
-                {/* Humidity */}
-                <div className="text-center border-x border-[#1e3825]">
-                  <span className="text-[10px] text-[#8e9e8f] flex items-center justify-center gap-1">
-                    <Droplets className="w-3 h-3 text-[#4a9e6a]" />
-                    Độ ẩm
-                  </span>
-                  <p className="text-sm font-mono font-bold text-[#dcd5c4] mt-0.5">
-                    {item.currentHumidity}%
-                  </p>
-                </div>
-
-                {/* Light */}
-                <div className="text-center">
-                  <span className="text-[10px] text-[#8e9e8f] flex items-center justify-center gap-1">
-                    <Sun className="w-3 h-3 text-[#c87f3a]" />
-                    Ánh sáng
-                  </span>
-                  <p className="text-sm font-mono font-bold text-[#dcd5c4] mt-0.5">
-                    {item.currentLight} Lx
-                  </p>
-                </div>
+                <dl className="mt-4 space-y-1.5 text-xs">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">{t('device')}</dt>
+                    <dd className="truncate text-ink">
+                      {item.device ? item.device.deviceName : t('deviceUnbound')}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">{t('navLive')}</dt>
+                    <dd className="text-ink">{deviceStatusLabel(t, item.device?.status ?? null)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">{t('lastSampleAt')}</dt>
+                    <dd className="text-right text-ink">
+                      {item.latestSampleAt ? (
+                        <>
+                          <span>{formatDateTime(item.latestSampleAt, lang)}</span>
+                          <span className="block text-[11px] text-muted">
+                            {formatRelative(t, item.latestSampleAt)}
+                          </span>
+                        </>
+                      ) : (
+                        t('never')
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">{t('openAlerts')}</dt>
+                    <dd className="text-ink">{item.openAlertCount}</dd>
+                  </div>
+                </dl>
               </div>
 
-              {/* Action Link */}
-              <div className="flex items-center justify-between pt-2 border-t border-[#1e3825]/60 text-xs text-[#8e9e8f]">
-                <span className="flex items-center gap-1.5">
-                  <Cpu className="w-3.5 h-3.5 text-[#4a9e6a]" />
-                  <span>{item.deviceCount} thiết bị IoT</span>
-                </span>
+              <div className="mt-5 flex items-center gap-4 text-xs">
                 <Link
                   to={`/terrariums/${item.id}`}
-                  className="font-semibold text-[#4a9e6a] hover:text-[#3d8558] flex items-center gap-1 group-hover:translate-x-1 transition-transform"
+                  className="inline-flex items-center gap-1 text-accent hover:underline"
                 >
-                  <span>Vào chi tiết</span>
-                  <ChevronRight className="w-4 h-4" />
+                  {t('terrariumDetail')}
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </Link>
+                <Link
+                  to={`/history?terrarium=${item.id}`}
+                  className="inline-flex items-center gap-1 text-accent hover:underline"
+                >
+                  <HistoryIcon className="h-3 w-3" aria-hidden="true" />
+                  {t('navHistory')}
                 </Link>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
-      {/* Add Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-[#112016] border border-[#1e3825] rounded-3xl w-full max-w-lg p-6 sm:p-8 space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-heading font-bold text-[#dcd5c4]">
-                Thêm Terrarium Mới
-              </h3>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-[#8e9e8f] hover:text-[#dcd5c4]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#8e9e8f] mb-1.5 uppercase">
-                  Tên chuồng Terrarium
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ví dụ: Terrarium #04"
-                  value={newTerrarium.name}
-                  onChange={(e) =>
-                    setNewTerrarium({ ...newTerrarium, name: e.target.value })
-                  }
-                  className="w-full px-4 py-2.5 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-sm text-[#dcd5c4] outline-none focus:border-[#4a9e6a]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#8e9e8f] mb-1.5 uppercase">
-                  Tên loài bò sát
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ví dụ: Trăn Cây Xanh (Green Tree Python)"
-                  value={newTerrarium.species}
-                  onChange={(e) =>
-                    setNewTerrarium({ ...newTerrarium, species: e.target.value })
-                  }
-                  className="w-full px-4 py-2.5 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-sm text-[#dcd5c4] outline-none focus:border-[#4a9e6a]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#8e9e8f] mb-1.5 uppercase">
-                  Mô tả đặc điểm sinh học
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Yêu cầu vi khí hậu, độ ẩm, chu kỳ chiếu sáng..."
-                  value={newTerrarium.description}
-                  onChange={(e) =>
-                    setNewTerrarium({ ...newTerrarium, description: e.target.value })
-                  }
-                  className="w-full px-4 py-2.5 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-sm text-[#dcd5c4] outline-none focus:border-[#4a9e6a]"
-                ></textarea>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#8e9e8f] hover:bg-[#162a1d]"
-                >
-                  Hủy bỏ
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-[#4a9e6a] hover:bg-[#3d8558] text-white flex items-center gap-1.5 shadow-md shadow-[#4a9e6a]/20"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Xác nhận thêm</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <p className="flex items-start gap-2 text-[11px] text-muted">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{t('createTerrariumNotBuilt')}</span>
+      </p>
     </div>
   );
 };
-

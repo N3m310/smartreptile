@@ -307,6 +307,11 @@ class PrototypeState extends ChangeNotifier {
   /// The demo password; the prototype does not store credentials anywhere (NFR-04).
   static const demoPassword = 'demo1234';
 
+  /// The characters the API's password policy insists on (BR-01.2), mirrored here so the demo cannot accept a
+  /// password the server would refuse. Whitespace does not count as a special character, as on the server.
+  static final _hasUppercase = RegExp(r'[A-Z]');
+  static final _hasSpecial = RegExp(r'[^A-Za-z0-9\s]');
+
   /// Signs in when the credentials match the demo account. Returns an error message, or an empty string.
   String signIn({required String email, required String password}) {
     if (email.trim().isEmpty || password.isEmpty) {
@@ -328,6 +333,9 @@ class PrototypeState extends ChangeNotifier {
   }
 
   /// Creates an account. The prototype accepts any valid-looking input and signs the same demo user in.
+  ///
+  /// The password rules mirror the API's policy (BR-01.2) so a demo cannot accept something the server would
+  /// refuse: at least 8 characters with an upper-case letter and a special character among them.
   String register({
     required String name,
     required String email,
@@ -341,6 +349,12 @@ class PrototypeState extends ChangeNotifier {
     }
     if (password.length < 8) {
       return 'Use at least 8 characters for the password.';
+    }
+    if (!_hasUppercase.hasMatch(password)) {
+      return 'Add at least one upper-case letter to the password.';
+    }
+    if (!_hasSpecial.hasMatch(password)) {
+      return 'Add at least one special character to the password.';
     }
     _signedInUser = _world.users.first;
     _activeTerrariumId = _world.activeTerrariumId;

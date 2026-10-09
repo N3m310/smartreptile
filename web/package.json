@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --port 8081 --host",
     "build": "tsc && vite build",
-    "preview": "vite preview --port 8081"
+    "preview": "vite preview --port 8081",
+    "typecheck": "tsc --noEmit",
+    "check:strings": "node scripts/check-strings.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -303,7 +303,6 @@ class SettingsScreen extends StatelessWidget {
                     title: Text(switch (channel) {
                       Channel.inApp => Labels.settingsChannelInApp,
                       Channel.push => Labels.settingsChannelPush,
-                      Channel.telegram => Labels.settingsChannelTelegram,
                       Channel.email => Labels.settingsChannelEmail,
                     }, style: theme.textTheme.bodySmall),
                     contentPadding: EdgeInsets.zero,

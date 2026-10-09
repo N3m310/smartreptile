@@ -421,21 +421,24 @@ void main() {
       expect(bare.resolve('uvIndex', start).hasBand, isFalse);
     });
 
-    test('the seeded band counts match the backend seeder: 5 + 6 + 6 = 17', () {
+    test('the seeded band counts match the backend seeder: 5 + 6 + 6 + 2 = 19', () {
       expect(SpeciesProfiles.tropical.bands, hasLength(5));
       expect(SpeciesProfiles.semiArid.bands, hasLength(6));
       expect(SpeciesProfiles.arid.bands, hasLength(6));
+      expect(SpeciesProfiles.aridCool.bands, hasLength(2));
     });
 
-    test('the three light bands are inert, which is why 17 bands means 14 to verify', () {
-      final inert = [
-        ...SpeciesProfiles.tropical.bands,
-        ...SpeciesProfiles.semiArid.bands,
-        ...SpeciesProfiles.arid.bands,
-      ].where((band) => band.accumulatedOnly && band.metric == 'lightLux');
+    test('the three light bands are inert, which is why 19 bands means 16 to verify', () {
+      final all = SpeciesProfiles.all
+          .expand((profile) => profile.bands)
+          .toList();
+      final inert = all.where(
+        (band) => band.accumulatedOnly && band.metric == 'lightLux',
+      );
 
       expect(inert, hasLength(3));
-      expect(17 - inert.length, 14);
+      expect(all, hasLength(19));
+      expect(19 - inert.length, 16);
     });
 
     test('26 °C at 20:00 is inside the night band and raises nothing', () {

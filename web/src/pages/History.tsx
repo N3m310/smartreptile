@@ -1,216 +1,246 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Download } from 'lucide-react';
 import {
-  History as HistoryIcon,
-  Download,
-  Filter,
-  Calendar,
-  Thermometer,
-  Droplets,
-  Sun,
-  FileSpreadsheet,
-} from 'lucide-react';
-import {
-  initialTerrariums,
-  generateHistoryData,
-  HistoryDataPoint,
-} from '../data/mockData';
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import * as api from '../api/endpoints';
+import { METRIC_CODES, type RangeSeries, type TerrariumList } from '../api/types';
+import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
+import { useI18n } from '../i18n';
+import { formatDateTime, metricLabel } from '../lib/format';
+import { usePolled } from '../lib/usePolled';
+
+/**
+ * W3 — history (roadmap 4.16).
+ *
+ * The chart is gap-aware because the API is: an empty bucket arrives as `{count: 0, min: null, …}` rather than as
+ * an interpolated value, and `connectNulls={false}` is what makes that visible instead of drawing a straight line
+ * across an outage. That is FR-09 BR-09.5 rendered rather than re-implemented.
+ *
+ * The bucket width is the server's choice (BR-09.1) and is displayed as sent — the screen does not decide that a
+ * 24-hour window is "5min", it asks for the window and prints what came back. Coverage is requested for the same
+ * window and shown beside the chart, because §6 refuses a summary without it.
+ */
+
+const RANGES = [
+  { key: 'range6h', hours: 6 },
+  { key: 'range24h', hours: 24 },
+  { key: 'range7d', hours: 24 * 7 },
+  { key: 'range30d', hours: 24 * 30 },
+] as const;
+
+const BUCKET_KEY: Record<string, string> = {
+  raw: 'bucketRaw',
+  '5min': 'bucket5min',
+  hourly: 'bucketHourly',
+};
 
 export const History: React.FC = () => {
-  const [selectedTerrariumId, setSelectedTerrariumId] = useState('T01');
-  const [selectedSensor, setSelectedSensor] = useState<'all' | 'temp' | 'humidity' | 'light'>('all');
-  const [selectedRange, setSelectedRange] = useState<'today' | '24h' | '7d'>('24h');
+  const { t, lang } = useI18n();
+  const [params, setParams] = useSearchParams();
+  const [hours, setHours] = useState<number>(24);
+  const [metric, setMetric] = useState<string>(METRIC_CODES[0]);
 
-  const terrariums = initialTerrariums;
-  const currentTerrarium =
-    terrariums.find((t) => t.id === selectedTerrariumId) || terrariums[0];
-  const historyList = generateHistoryData(selectedTerrariumId);
+  const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), 60_000);
+  const items = terrariums.data?.items ?? [];
+  const fromQuery = params.get('terrarium');
+  const selectedId =
+    (fromQuery && items.some((item) => item.id === fromQuery) ? fromQuery : null) ?? items[0]?.id ?? null;
 
-  // Xuất file CSV
-  const handleExportCSV = () => {
-    const headers = ['Thời gian', 'Nhiệt độ (°C)', 'Độ ẩm (%)', 'Ánh sáng (Lux)', 'Trạng thái'];
-    const rows = historyList.map((item) => [
-      item.time,
-      item.temperature,
-      item.humidity,
-      item.light,
-      item.status === 'normal' ? 'Bình thường' : item.status === 'warning' ? 'Cảnh báo' : 'Nguy hiểm',
-    ]);
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,\uFEFF' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `terraguard_history_${selectedTerrariumId}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const getStatusBadge = (status: HistoryDataPoint['status']) => {
-    switch (status) {
-      case 'normal':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#4a9e6a]/20 text-[#4a9e6a]">
-            Bình thường
-          </span>
-        );
-      case 'warning':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#e8a832]/20 text-[#e8a832]">
-            Cảnh báo
-          </span>
-        );
-      case 'danger':
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#e05530]/20 text-[#e05530]">
-            Nguy hiểm
-          </span>
-        );
+  // Keep the URL honest: the selected terrarium is linkable, so a screenshot of a chart names its terrarium.
+  useEffect(() => {
+    if (selectedId && selectedId !== fromQuery) {
+      const next = new URLSearchParams(params);
+      next.set('terrarium', selectedId);
+      setParams(next, { replace: true });
     }
+  }, [selectedId, fromQuery, params, setParams]);
+
+  const window = useMemo(() => {
+    const to = new Date();
+    const from = new Date(to.getTime() - hours * 60 * 60 * 1000);
+    return { from: from.toISOString(), to: to.toISOString() };
+  }, [hours]);
+
+  const series = usePolled<RangeSeries | null>(
+    () => (selectedId ? api.readings(selectedId, metric, window.from, window.to) : Promise.resolve(null)),
+    60_000,
+    [selectedId, metric, window.from, window.to]
+  );
+
+  const data = series.data;
+  const points = data?.points ?? [];
+  const withValues = points.filter((point) => point.avg !== null);
+
+  /** The CSV the retired dashboard offered, built from what the API sent — gaps included as empty buckets. */
+  const downloadCsv = () => {
+    if (!data) {
+      return;
+    }
+    const rows = [
+      ['t', 'min', 'max', 'avg', 'count'].join(','),
+      ...data.points.map((point) =>
+        [point.t, point.min ?? '', point.max ?? '', point.avg ?? '', point.count].join(',')
+      ),
+    ];
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${metric}-${data.bucket}-${data.fromUtc.slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-heading font-extrabold text-[#dcd5c4]">
-            Lịch sử Dữ liệu Vi khí hậu
-          </h1>
-          <p className="text-sm text-[#8e9e8f] mt-1">
-            Tra cứu log đo đạc chu kỳ cảm biến và xuất báo cáo lưu trữ
-          </p>
-        </div>
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="font-heading text-2xl font-bold text-ink">{t('historyTitle')}</h1>
 
-        <button
-          onClick={handleExportCSV}
-          className="px-4 py-2.5 bg-[#4a9e6a] hover:bg-[#3d8558] text-white text-xs font-semibold rounded-xl shadow-lg shadow-[#4a9e6a]/20 transition-all flex items-center gap-2 cursor-pointer self-start sm:self-auto"
-        >
-          <Download className="w-4 h-4" />
-          <span>Xuất dữ liệu CSV</span>
-        </button>
-      </div>
-
-      {/* Filter Toolbar */}
-      <div className="p-5 rounded-3xl bg-[#112016] border border-[#1e3825] grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Chọn Terrarium */}
-        <div>
-          <label className="block text-xs font-semibold uppercase text-[#8e9e8f] mb-2">
-            Chọn Terrarium
-          </label>
-          <select
-            value={selectedTerrariumId}
-            onChange={(e) => setSelectedTerrariumId(e.target.value)}
-            className="w-full bg-[#0b1a0d] border border-[#1e3825] text-xs font-medium text-[#dcd5c4] rounded-xl px-3.5 py-2.5 outline-none focus:border-[#4a9e6a]"
-          >
-            {terrariums.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name} – {t.species}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Lọc loại cảm biến */}
-        <div>
-          <label className="block text-xs font-semibold uppercase text-[#8e9e8f] mb-2">
-            Loại cảm biến hiển thị
-          </label>
-          <select
-            value={selectedSensor}
-            onChange={(e) => setSelectedSensor(e.target.value as any)}
-            className="w-full bg-[#0b1a0d] border border-[#1e3825] text-xs font-medium text-[#dcd5c4] rounded-xl px-3.5 py-2.5 outline-none focus:border-[#4a9e6a]"
-          >
-            <option value="all">Tất cả thông số (Nhiệt / Ẩm / Sáng)</option>
-            <option value="temp">Chỉ Nhiệt độ (°C)</option>
-            <option value="humidity">Chỉ Độ ẩm (%)</option>
-            <option value="light">Chỉ Cường độ Ánh sáng (Lux)</option>
-          </select>
-        </div>
-
-        {/* Khoảng thời gian */}
-        <div>
-          <label className="block text-xs font-semibold uppercase text-[#8e9e8f] mb-2">
-            Khoảng thời gian
-          </label>
-          <select
-            value={selectedRange}
-            onChange={(e) => setSelectedRange(e.target.value as any)}
-            className="w-full bg-[#0b1a0d] border border-[#1e3825] text-xs font-medium text-[#dcd5c4] rounded-xl px-3.5 py-2.5 outline-none focus:border-[#4a9e6a]"
-          >
-            <option value="today">Hôm nay</option>
-            <option value="24h">24 giờ qua</option>
-            <option value="7d">7 ngày qua</option>
-          </select>
-        </div>
-      </div>
-
-      {/* History Data Table */}
-      <div className="bg-[#112016] border border-[#1e3825] rounded-3xl overflow-hidden shadow-xl">
-        <div className="p-5 border-b border-[#1e3825] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5 text-[#4a9e6a]" />
-            <h3 className="text-sm font-heading font-bold text-[#dcd5c4]">
-              Nhật ký mẫu đo: {currentTerrarium.name} ({historyList.length} điểm ghi nhận)
-            </h3>
-          </div>
-          <span className="text-xs text-[#8e9e8f] font-mono">
-            Chu kỳ đo: 60 giây / mẫu
-          </span>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[#1e3825] bg-[#0e1d11] text-[#8e9e8f] uppercase">
-                <th className="py-3.5 px-6 font-semibold">Thời gian đo</th>
-                {(selectedSensor === 'all' || selectedSensor === 'temp') && (
-                  <th className="py-3.5 px-6 font-semibold">Nhiệt độ (°C)</th>
-                )}
-                {(selectedSensor === 'all' || selectedSensor === 'humidity') && (
-                  <th className="py-3.5 px-6 font-semibold">Độ ẩm (%)</th>
-                )}
-                {(selectedSensor === 'all' || selectedSensor === 'light') && (
-                  <th className="py-3.5 px-6 font-semibold">Ánh sáng (Lux)</th>
-                )}
-                <th className="py-3.5 px-6 font-semibold">Đánh giá ngưỡng</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#1e3825]">
-              {historyList.map((row, index) => (
-                <tr
-                  key={index}
-                  className="hover:bg-[#162a1d]/50 transition-colors"
-                >
-                  <td className="py-3.5 px-6 font-mono font-medium text-[#dcd5c4]">
-                    {row.time}
-                  </td>
-                  {(selectedSensor === 'all' || selectedSensor === 'temp') && (
-                    <td className="py-3.5 px-6 font-mono font-bold text-[#e05530]">
-                      {row.temperature}°C
-                    </td>
-                  )}
-                  {(selectedSensor === 'all' || selectedSensor === 'humidity') && (
-                    <td className="py-3.5 px-6 font-mono font-bold text-[#4a9e6a]">
-                      {row.humidity}%
-                    </td>
-                  )}
-                  {(selectedSensor === 'all' || selectedSensor === 'light') && (
-                    <td className="py-3.5 px-6 font-mono font-bold text-[#c87f3a]">
-                      {row.light} Lux
-                    </td>
-                  )}
-                  <td className="py-3.5 px-6">{getStatusBadge(row.status)}</td>
-                </tr>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="text-xs uppercase tracking-wider text-muted">
+            <span className="mb-1 block">{t('terrariumsTitle')}</span>
+            <select
+              value={selectedId ?? ''}
+              onChange={(event) => setParams({ terrarium: event.target.value })}
+              className="rounded-xl border border-hairline bg-field px-3 py-2 text-sm normal-case tracking-normal text-ink outline-none focus:border-brand"
+            >
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
-            </tbody>
-          </table>
+            </select>
+          </label>
+
+          <label className="text-xs uppercase tracking-wider text-muted">
+            <span className="mb-1 block">{t('metricLabel')}</span>
+            <select
+              value={metric}
+              onChange={(event) => setMetric(event.target.value)}
+              className="rounded-xl border border-hairline bg-field px-3 py-2 text-sm normal-case tracking-normal text-ink outline-none focus:border-brand"
+            >
+              {METRIC_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {metricLabel(t, code)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex items-center gap-1">
+            {RANGES.map((range) => (
+              <button
+                key={range.key}
+                type="button"
+                onClick={() => setHours(range.hours)}
+                aria-pressed={hours === range.hours}
+                className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+                  hours === range.hours
+                    ? 'border-brand text-brand'
+                    : 'border-hairline text-muted hover:text-ink'
+                }`}
+              >
+                {t(range.key)}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={downloadCsv}
+            disabled={!data || withValues.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 text-xs text-ink transition-colors hover:bg-raised disabled:opacity-40"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('downloadCsv')}
+          </button>
         </div>
-      </div>
+      </header>
+
+      {terrariums.error?.isNetworkFailure || series.error?.isNetworkFailure ? (
+        <UnreachableBanner onRetry={() => series.reload()} />
+      ) : null}
+
+      {items.length === 0 && !terrariums.loading ? (
+        <EmptyPanel title={t('emptyStateTitle')} body={t('emptyStateBody')} />
+      ) : null}
+
+      {series.error && !series.error.isNetworkFailure ? (
+        <ErrorPanel error={series.error} onRetry={series.reload} />
+      ) : null}
+
+      {series.loading && !data ? <LoadingPanel label={t('signingIn')} /> : null}
+
+      {data ? (
+        <section className="rounded-2xl border border-hairline bg-surface p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="font-heading text-lg font-semibold text-ink">
+              {metricLabel(t, data.metric)}
+              <span className="ml-2 text-sm font-normal text-muted">{data.unit}</span>
+            </h2>
+            <p className="text-xs text-muted">
+              {t('band')}: {BUCKET_KEY[data.bucket] ? t(BUCKET_KEY[data.bucket]) : data.bucket} ·{' '}
+              {formatDateTime(data.fromUtc, lang)} → {formatDateTime(data.toUtc, lang)}
+            </p>
+          </div>
+
+          {withValues.length === 0 ? (
+            <div className="py-6">
+              <EmptyPanel title={t('emptyHistoryTitle')} body={t('emptyHistoryBody')} />
+            </div>
+          ) : (
+            <div className="mt-4 h-80 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={points} margin={{ top: 8, right: 12, bottom: 8, left: 0 }}>
+                  <CartesianGrid stroke="#1e3825" strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="t"
+                    tick={{ fill: '#8e9e8f', fontSize: 11 }}
+                    tickFormatter={(value: string) => formatDateTime(value, lang)}
+                    minTickGap={40}
+                    stroke="#1e3825"
+                  />
+                  <YAxis
+                    tick={{ fill: '#8e9e8f', fontSize: 11 }}
+                    domain={['auto', 'auto']}
+                    stroke="#1e3825"
+                    width={48}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: '#112016',
+                      border: '1px solid #1e3825',
+                      borderRadius: 12,
+                      fontSize: 12,
+                    }}
+                    labelFormatter={(value) => formatDateTime(String(value), lang)}
+                  />
+                  {/* connectNulls={false}: an empty bucket is a gap, not a value (BR-09.5). */}
+                  <Line
+                    type="monotone"
+                    dataKey="avg"
+                    name={metricLabel(t, data.metric)}
+                    stroke="#4a9e6a"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <p className="mt-3 text-[11px] text-muted">{t('chartGapNote')}</p>
+        </section>
+      ) : null}
     </div>
   );
 };
-

@@ -1,8 +1,8 @@
 /// Seeded species profiles and the override → profile → default resolution (FR-10, BR-10.1/BR-10.3).
 ///
 /// The numbers are transcribed from `docs/07-appendices/05-species-threshold-reference.md` §1–§3, including the
-/// band counts the backend seeder ships (**17 bands**: Tropical 5, SemiArid 6, Arid 6 — of which the three `LightLux`
-/// bands are inert per `03-implementation/06` §4).
+/// band counts the backend seeder ships (**19 bands**: Tropical 5, SemiArid 6, Arid 6, Arid-cool 2 — of which the
+/// three `LightLux` bands are inert per `03-implementation/06` §4).
 ///
 /// **Honesty note carried from the docs:** these are *typical published husbandry ranges*, not measured physiology,
 /// and every row still owes a page reference (`07-appendices/05` §5). The prototype shows the citation on every band
@@ -25,6 +25,7 @@ class SpeciesProfile {
     required this.minLightHoursPerDay,
     this.uvFitted = true,
     this.surfaceProbeFitted = false,
+    this.climateRangeOverride,
     this.note,
   });
 
@@ -61,8 +62,13 @@ class SpeciesProfile {
   /// Profile-level caveat shown in the thresholds editor.
   final String? note;
 
-  /// Plausibility envelope for this profile's climate zone.
-  ClimateRange get climateRange => ClimateRange.of(climateZone);
+  /// Zone envelope to use when this profile does not monitor the zone's usual side — an ambient/cool-side variant of
+  /// a zone whose §4 numbers describe the basking zone. Null means the plain zone envelope.
+  final ClimateRange? climateRangeOverride;
+
+  /// Plausibility envelope for this profile: the override when one is declared, otherwise its climate zone.
+  ClimateRange get climateRange =>
+      climateRangeOverride ?? ClimateRange.of(climateZone);
 
   /// Bands for one metric, in declaration order.
   List<ThresholdBand> bandsFor(String metric) =>
@@ -72,7 +78,7 @@ class SpeciesProfile {
   bool measuresNothingFor(String metric) => bandsFor(metric).isEmpty;
 }
 
-/// The three seeded profiles (BR-10.1). Counts match the backend seeder: 5 + 6 + 6 = 17 bands.
+/// The four seeded profiles (BR-10.1). Counts match the backend seeder: 5 + 6 + 6 + 2 = 19 bands.
 class SpeciesProfiles {
   const SpeciesProfiles._();
 
@@ -347,7 +353,7 @@ class SpeciesProfiles {
     ],
   );
 
-  /// An `Arid-cool` ambient variant that the docs describe and the seeder does not create (open decision 2026-09-29).
+  /// An `Arid-cool` ambient variant that the docs describe and the seeder creates (seeded 2026-10-07).
   ///
   /// Only the ambient air band differs; the other bands are shared with [arid] so the two profiles cannot drift.
   static const aridCool = SpeciesProfile(
@@ -358,9 +364,11 @@ class SpeciesProfiles {
     phaseTimeline: PhaseTimeline(),
     lightThresholdLux: 2000,
     minLightHoursPerDay: 10,
+    climateRangeOverride: ClimateRange.aridAmbient,
     note:
-        'Described in `07-appendices/05` §3 and row 7 of the verification checklist, but **not seeded by the '
-        'backend**. Either seed it or drop the row: both move counts quoted in the docs.',
+        'Described in `07-appendices/05` §3 and verified by row 7 of the checklist; seeded by the backend on '
+        '2026-10-07, so both sides carry the same 19 bands. No surface or UV band ships with it: both belong to '
+        'the basking zone this variant does not describe.',
     bands: [
       ThresholdBand(
         metric: 'tempC',

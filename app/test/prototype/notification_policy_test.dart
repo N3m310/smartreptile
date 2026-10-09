@@ -37,7 +37,6 @@ void main() {
       expect(decision.send, isTrue);
       expect(decision.reason, SuppressedReason.none);
       expect(decision.channels, contains(Channel.inApp));
-      expect(decision.channels, contains(Channel.telegram));
       expect(decision.ruleId, 'BR-13.1');
     });
 

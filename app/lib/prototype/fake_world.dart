@@ -45,7 +45,6 @@ class FakeUser {
     required this.email,
     required this.role,
     required this.preferences,
-    this.telegramChatId,
   });
 
   /// Stable id.
@@ -63,9 +62,6 @@ class FakeUser {
   /// Notification preferences (BR-13.2), identical to the ones the engine consumes.
   final NotificationPreferences preferences;
 
-  /// Telegram chat the user linked, when they did.
-  final String? telegramChatId;
-
   /// Returns a copy with different preferences.
   FakeUser withPreferences(NotificationPreferences preferences) => FakeUser(
     id: id,
@@ -73,7 +69,6 @@ class FakeUser {
     email: email,
     role: role,
     preferences: preferences,
-    telegramChatId: telegramChatId,
   );
 }
 
@@ -552,7 +547,6 @@ class FakeWorldFactory {
           name: 'Linh Trần',
           email: 'linh@example.com',
           role: UserRole.owner,
-          telegramChatId: '184920117',
           preferences: NotificationPreferences(),
         ),
         FakeUser(

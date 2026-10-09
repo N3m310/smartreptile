@@ -21,7 +21,7 @@ class SmartReptileApp extends StatelessWidget {
     final settings = context.watch<SettingsProvider>();
 
     return MaterialApp(
-      title: 'TERRAGUARD',
+      title: 'VIVARIUMGUARD',
       debugShowCheckedModeBanner: false,
       locale: settings.locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -84,7 +84,7 @@ class _RootShellState extends State<_RootShell> {
                   color: AppColors.textMain,
                 ),
                 children: [
-                  TextSpan(text: 'TERRA'),
+                  TextSpan(text: 'VIVARIUM'),
                   TextSpan(
                     text: 'GUARD',
                     style: TextStyle(color: AppColors.primary),
