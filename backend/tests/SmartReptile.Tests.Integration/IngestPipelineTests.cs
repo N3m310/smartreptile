@@ -2,10 +2,12 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Infrastructure.Devices;
 using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Infrastructure.Persistence;
 using SmartReptile.Infrastructure.Security;
@@ -21,7 +23,9 @@ namespace SmartReptile.Tests.Integration;
 /// <remarks>
 /// Every test runs inside a transaction that is rolled back, exactly like <see cref="DatabaseInvariantTests"/>, so
 /// the database under test is left as it was found. The pipeline shares the test's context, which is what makes
-/// that possible — its commit is a save inside this transaction, not a second connection.
+/// that possible — its commit is a save inside this transaction, not a second connection. The derived-signal
+/// recorder is wired to that same context, and the fixtures below put the device's own timestamp 30 s behind the
+/// receive instant, so no clock-skew entry is opened alongside the assertions.
 /// </remarks>
 [Collection(DatabaseCollection.Name)]
 public sealed class IngestPipelineTests(DatabaseFixture fixture)
@@ -201,6 +205,7 @@ public sealed class IngestPipelineTests(DatabaseFixture fixture)
             new CalibrationApplier(),
             new TelemetryWriter(store),
             new DeviceStateUpdater(store),
+            new DeviceSignalRecorder(new EfDeviceSignalStore(db)),
             store);
     }
 
