@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Evaluation;
 using SmartReptile.Domain.Metrics;
@@ -99,6 +100,13 @@ public sealed record EvaluationOutcome(
 {
     /// <summary>Nothing to do.</summary>
     public static readonly EvaluationOutcome None = new(0, 0);
+
+    /// <summary>
+    /// Alerts this pass opened, escalated or resolved, to push after the pass commits (<c>alertChanged</c> of
+    /// `07-appendices/03` §6). A touch is not one of them: the documented event reports lifecycle moves, and the
+    /// same notice arriving once per sample would be noise rather than news.
+    /// </summary>
+    public IReadOnlyList<AlertChange> AlertChanges { get; init; } = [];
 
     /// <summary>Of the alerts opened, the ones that were warnings.</summary>
     public int WarningAlertsOpened => AlertsOpened - CriticalAlertsOpened;

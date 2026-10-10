@@ -353,10 +353,10 @@ Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of de
 - **Delivery is a port with a log implementation.** `LogPasswordResetNotifier` writes the code when
   `PasswordReset:LogCode` is true (development only) and otherwise warns that it reached nobody — a production log
   holding a live credential is a leak, so the default is off and the release note says so (limitation L-02).
-| `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage` · **planned:** `PATCH/DELETE {id}`, `GET/PUT {id}/thresholds`, `POST {id}/silences`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` + `ITerrariumStore`), not a filter applied afterwards |
+| `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `PATCH {id}`, `DELETE {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage`, `GET {id}/thresholds`, `POST {id}/silences`, `GET {id}/silences`, `DELETE {id}/silences/{silenceId}` · **planned:** `PUT {id}/thresholds`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` / `ITerrariumStore`), not a filter applied afterwards |
 | `/api/v1/devices` | `GET`, `GET {id}`, `POST self-register`, `POST claim`, `PATCH {id}`, `POST {id}/rebind`, `POST {id}/rotate-secret`, `POST {id}/revoke`, `POST {id}/calibration`, `POST {id}/commands`, `POST {id}/snapshots` | `self-register` anonymous + rate-limited |
 | `/api/v1/ingest` | **built:** `POST http` | Device-auth header (`Device {id}.{secret}`); the HTTP fallback path, 6 requests/min/device |
-| `/api/v1/alerts` | `GET`, `GET {id}`, `POST {id}/ack`, `POST {id}/resolve` | Role-gated ack/resolve |
+| `/api/v1/alerts` | **built:** `GET`, `GET {id}`, `GET {id}/timeline`, `POST {id}/ack`, `POST {id}/resolve` | Ack and resolve name the `Technician` policy (Owner or Technician), so a Viewer reads the same list and cannot change it; a foreign alert is a `404`, a closed one a `409 alert_not_open` |
 | `/api/v1/species-profiles` | `GET`, `POST`, `PATCH {id}`, `DELETE {id}`, `POST {id}/duplicate` | Built-ins immutable |
 | `/api/v1/notifications` | `GET`, `POST {id}/read`, `POST read-all` | In-app inbox |
 | `/api/v1/exports` | `GET {jobId}`, `GET {jobId}/download` | Token-based download |
@@ -366,9 +366,41 @@ Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of de
 Implementation notes:
 - Minimal APIs grouped per file with `RequireAuthorization()` + `AddEndpointFilter<ValidationFilter>()`.
 - `ProblemDetails` (RFC 7807) with `code`, `title`, `detail`, `traceId` and optional `errors[]` per field.
-- Pagination: `?cursor=&pageSize=` (default 50, max 200); responses always include `nextCursor`.
+- Pagination: `?cursor=&pageSize=` (default 50, max 200); responses always include `nextCursor`. As built,
+  `GET /alerts` is the only endpoint that implements it — it is the first list in the product that grows without
+  bound — and the cursor is `triggeredAt|id` in base64, so paging over a table that keeps receiving rows neither
+  repeats nor skips one.
 - `Idempotency-Key` support on `POST` mutations (24 h cache table) — matters on flaky mobile networks.
 - CORS: allow-list of the dashboard origins; the Flutter app is not affected by CORS.
+
+**The alert lifecycle as built (roadmap 3.4, 2026-10-10).** `Application/Alerts/` holds two services over two ports,
+and the split is by feature rather than by table: an alert can be acknowledged with no silence in sight, and a silence
+outlives every alert it suppresses.
+
+- **One class owns the rules, and it is pure.** `AlertLifecycle` (domain) decides whether a transition is allowed and
+  writes the four fields it touches; `AlertService` does the ordering around it — look the alert up *scoped to the
+  caller*, apply, stage one audit row, commit, then push. `Acknowledge` succeeds only from `Open`, and a refusal is
+  `alert_not_open` for the second acknowledgement and for a resolved alert alike: in both cases the request changed
+  nothing.
+- **Resolution re-arms the dwell key.** `IAlertStore.FindExcursionStateAsync` finds the `EvaluationState` row of
+  `(terrarium, metric, phase)` and `EvaluationState.Rearm()` clears the excursion window without touching the
+  watermark — samples before this instant have been judged and must not be judged twice. That is what stops a value
+  that never returned inside its band from re-opening the alert on the next sample; a longer quiet period is the
+  silence window's job (`ADR-023`).
+- **A device-level alert has no key to re-arm**, which is why the rule is a domain predicate
+  (`AlertLifecycle.RearmsItsKey`) rather than a branch in the service.
+- **The audit row is the note's home.** The alert row keeps `ResolvedReason` (machine-readable, grouped by the
+  report) and has no column for prose; the keeper's `note` is written into the `alert.resolved` entry and read back by
+  the timeline.
+- **Silences follow §02-design/05 §5, and the read side is what 3.5 needs.**
+  `MetricSilenceService.CreateAsync` validates through `MetricSilencePolicy` (reason required, window in the future,
+  at most 24 h) and stages the window with its audit row; `CancelAsync` is idempotent, because a `DELETE` that failed
+  on a retry would leave a keeper believing a suppression was still in force. The dispatcher of 3.5 reads the same
+  `IsActiveAt`/`Covers` pair the list endpoint renders — a window with no metric covers every metric of the
+  terrarium, device-level alerts included.
+- **Nothing in either service can reach another account's data.** Reads start from the terrarium's owner
+  (`EfAlertStore`'s joins, `IMetricSilenceStore.IsMemberAsync`), so a foreign id answers `404 not_found` exactly like
+  a missing one; the only `403` in the group is the policy refusing a Viewer before a handler runs.
 
 ## 7. SignalR hub
 
@@ -403,19 +435,28 @@ details:
   WebSocket handshake. Accepted on `/hubs` only: a token in a URL reaches logs, proxies and referrer headers, which
   is worth paying for the one route that cannot avoid it and nowhere else.
 
-`statusChanged` and `alertChanged` are still unwritten — see the 2.9 block in `07-implementation-roadmap`.
+`statusChanged` and `alertChanged` are both written now: `statusChanged` since 2.9 and `alertChanged` since 3.4 (see
+the 2.9 and 3.4 blocks in `07-implementation-roadmap`).
+
+**`alertChanged` as built (roadmap 3.4).** One event per move, to the terrarium's group, after the commit that wrote
+it — by whichever layer owns that commit: `EvaluatorWorker` (threshold alerts), `SilenceWatchdogWorker` (silence),
+`IngestOutcomeRecorder` (the clock-skew entry and the sensor fault, which the pipelines stage and this class pushes
+once the commit has given them identities) and `AlertService` itself for ack and resolve. The producers do not depend
+on the hub: each outcome carries `AlertChange` records and the fan-out step turns them into
+`AlertChangedPayload`. A touch is not announced — the documented event reports lifecycle moves — and a failed push is
+logged and dropped, never retried into a failed request, which is the same rule the sample push follows.
 
 ## 8. Background workers
 
 | Worker | Schedule | Idempotency | Failure behaviour |
 |---|---|---|---|
 | `IngestWorker` | continuous | `(deviceId, seq)` unique index | Stop acking → broker holds → device retries |
-| `EvaluatorWorker` | continuous (ordered queue) | `EvaluationState` per key | Log + counter, next sample retries; never blocks ingest |
+| `EvaluatorWorker` | continuous (ordered queue) | `EvaluationState` per key | Log + counter, next sample retries; never blocks ingest. Pushes `alertChanged` for every alert the pass opened, escalated or resolved, after the commit |
 | `NotificationWorker` | continuous | notification job id | 3 retries with backoff, then `Failed` |
 | `RollupWorker` | every minute + nightly 48 h recompute | Upsert on `(terrarium, metric, hour)` | Recompute later; raw data still present |
 | `SummaryWorker` | local midnight + 5 min per terrarium timezone | Upsert on `(terrarium, localDate)` | Recompute on late data |
 | `RetentionSweeperWorker` | nightly 02:00 local | Batched deletes ≤ 10 000 rows/tx | Partial progress is safe; resumes next run |
-| `SilenceWatchdogWorker` | every 30 s | One open alert per device | Creates `DeviceSilent` alerts, moves the device `Offline` and escalates at 30 min; a failed sweep is logged and the next tick retries |
+| `SilenceWatchdogWorker` | every 30 s | One open alert per device | Creates `DeviceSilent` alerts, moves the device `Offline` and escalates at 30 min; a failed sweep is logged and the next tick retries. Pushes `alertChanged` after its own commit |
 
 All workers derive from `BackgroundService`, resolve scoped services from a scope factory, and log with a
 correlation id. Each exposes a counter so a stuck worker is visible on `/metrics` (NFR-12).

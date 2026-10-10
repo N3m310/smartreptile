@@ -222,7 +222,8 @@ budgets, and a device coming back from an outage is the one that needs to back-f
 
 Legend: `A` = anonymous, `U` = any authenticated role, `T` = Technician or Owner, `O` = Owner only.
 All timestamps are ISO-8601 UTC. All list endpoints support `?cursor=&pageSize=` (default 50, max 200) and
-return `nextCursor`.
+return `nextCursor` — as built, `GET /alerts` is the one endpoint that does; `GET /terrariums` says why it does not
+(§4.2).
 
 ### 4.1 Auth
 
@@ -286,6 +287,7 @@ the as-built table.
 | GET | `/terrariums/{id}/coverage?from=&to=` | U | expected vs received samples |
 | GET | `/terrariums/{id}/summaries?from=&to=` | U | daily summaries with coverage |
 | POST | `/terrariums/{id}/silences` | T | `{metricId?, untilUtc, reason}` (≤ 24 h) |
+| GET | `/terrariums/{id}/silences` | T | windows still in force — an addition, §4.5 |
 | DELETE | `/terrariums/{id}/silences/{silenceId}` | T | cancel early |
 | POST | `/terrariums/{id}/exports` | U | `{format, from, to, metricIds?}` → job |
 
@@ -303,12 +305,14 @@ Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5). A
 every bucket in the window, empty ones included. A `raw` series carries one point per sample instead: a sample's own
 timestamp is its bucket, so a gap shows up as absent points rather than as nulls.
 
-**Built so far (roadmap 2.8).** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
+**Built so far (roadmap 2.8, 3.1, 3.4).** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
 `GET /terrariums/{id}/readings/latest`, `GET /terrariums/{id}/readings` and `GET /terrariums/{id}/coverage`; plus,
 since 2026-10-09, `PATCH /terrariums/{id}` and `DELETE /terrariums/{id}` — FR-03's update and delete halves — and
-`GET /terrariums/{id}/thresholds` — 3.1's read half. The rest of this table — threshold write, silences,
-summaries, exports — is specified and not built; the threshold write half is 3.1's remainder, silences 3.4 and
-summaries 3.6.
+`GET /terrariums/{id}/thresholds` — 3.1's read half. Since 2026-10-10 the three silence routes are built too (3.4;
+see §4.5), including one this table did not have: `GET /terrariums/{id}/silences`, because the contract asks for a
+silence to be "visible on the dashboard" and the client has no other way to learn the id it must cancel. The rest of
+this table — threshold write, summaries, exports — is specified and not built; the threshold write half is 3.1's
+remainder and summaries are 3.6.
 
 **`GET /terrariums/{id}/thresholds` as built.** Authenticated, not role-gated (`U`), scoped to the caller like
 every other route here, and read-only:
@@ -479,6 +483,54 @@ be probed (BR-02.2).
 | GET | `/health`, `/ready`, `/metrics` | A | no secrets; `/ready` → `503` when a dependency is down |
 | GET | `/version` | A | `{api, schema, minFirmware}` |
 
+**As built (roadmap 3.4, 2026-10-10).** Every alert route above and all three silence routes are implemented;
+notifications, exports and `/audit` are 3.5, 3.7 and the export task. Eight readings this build settles, stated here
+because they are contract rather than implementation:
+
+- **`GET /alerts` is the first endpoint to implement the documented paging convention** (`?cursor=&pageSize=`,
+  default 50, max 200, `nextCursor`). The cursor is opaque — base64 of `triggeredAt|id` — and the order is
+  `TriggeredAt DESC, Id DESC`: newest first by *when the excursion started*, so a back-filled alert appears where it
+  happened, not where the system learned of it. The pair is what makes the order total; an identity alone would not
+  say which of two alerts that share an instant came first.
+- **Filters are the contract's four**, and their vocabulary is the response's: `state` is `Open`, `Acknowledged` or
+  `Resolved`, `severity` is `Info`, `Warning` or `Critical` (case-insensitive), `metric` is the REST key (`tempC`),
+  and `from`/`to` filter on `TriggeredAt`. An unknown value is a `400` naming the alternatives rather than an empty
+  page.
+- **The detail carries no snapshot reference**, although the table above lists one: `Alert.ThresholdSnapshotId`
+  exists in `07-appendices/02` §3.8's sketch and in no built table, so a field named after it would promise
+  something the database cannot keep. The band the alert denormalises is what explains it today, and the reference
+  arrives with 3.1's remaining half.
+- **The series excerpt is capped at the newest 240 readings** of the episode, oldest first, with `seriesTruncated`
+  when the episode was longer — an hour at the default 15-second interval, which is what "excerpt" can mean without
+  a cap that depends on the deployment. A device-level alert (silence, sensor fault, clock skew) is not about a
+  value and carries an empty series.
+- **The resolution note lives on the audit entry, not on the alert.** The contract has `{reason, note?}` while the
+  alert row has five fields that would have to grow a sixth; `Alert.Message` is reserved for render-time text
+  (`07-appendices/02` §3.8), so the note is written into the `alert.resolved` audit row and read back by the
+  timeline. The reason stays a column, because it is machine-readable and the report groups by it.
+- **A second acknowledgement is `409 alert_not_open`**, the same answer a resolved alert gives: in both cases the
+  request changed nothing, and one code is one thing for a client to handle. Resolution is allowed straight from
+  `Open` and deliberately does not fabricate an acknowledgement — the timeline should say what happened.
+- **Resolving a threshold alert re-arms its dwell key.** The alert is closed, the `EvaluationState` window for
+  `(terrarium, metric, phase)` is cleared, and the alert may only return after the band has been left for the dwell
+  again. Without that, a value that never came back into band would re-open the very next sample, and a keeper who
+  chose `Accepted` would be told the same thing one interval later. A longer quiet period is what a **silence** is
+  for; the two features are deliberately different mechanisms (`02-design/05` §5).
+- **The timeline's vocabulary is the hub event's** — `opened`, `acknowledged`, `resolved` — with the actor, the
+  reason and the note. Escalation entries are absent until 3.5, exactly as the design arranges them: §02-design/05
+  §6 records escalations as `NotificationLog` rows carrying the alert id, and the alert row keeps no escalation
+  instant because escalation edits it in place (one row per episode is what DI-01's unique index is for).
+
+**Silences as built.** `POST` answers `200` with the created window rather than `201` with a `Location`, because
+there is no read-by-id route to point at; `GET` returns only the windows that are still in force, since an expired
+one is history and history is the audit trail's job. `metric` may be omitted, and `null` means **every metric of the
+terrarium including its device-level alerts** — a keeper going away for the weekend silences the box, not five
+metrics one at a time. The cap is 24 hours and the reason is mandatory, both from §02-design/05 §5, and
+`DELETE` is idempotent: a second cancel changes nothing, writes no second audit row and still answers `204`, because
+a `DELETE` that failed on a retry would leave a keeper believing a suppression was still in force. A silence
+suppresses **notification and not detection** — alerts are still raised, counted, touched and resolved during one,
+and the dispatcher of 3.5 reads the same `IsActiveAt`/`Covers` rule that the list endpoint renders.
+
 ---
 
 ## 5. Error model (RFC 7807 + stable `code`)
@@ -553,11 +605,21 @@ join**, otherwise the hub would become a cross-tenant leak (`03-implementation/0
 `HubException` carrying one message for both "not yours" and "does not exist", so the hub cannot be used to find
 out whether an id exists (BR-02.2).
 
-**Emitted so far.** `readingAdded` (after a sample commits, since 2.9) and, since 2026-10-09, `statusChanged` —
-from the device's own `status` topic, so the transition is the device's declaration rather than an inference from
-silence. What is **not** pushed yet is the `Provisioning → Online` transition a sample or health message causes: the
-fan-out boundary for samples carries committed readings, which have no status in them. `alertChanged` arrives with
-3.4 and `commandChanged` with FR-14.
+**Emitted so far.** `readingAdded` (after a sample commits, since 2.9), `statusChanged` — from the device's own
+`status` topic, so the transition is the device's declaration rather than an inference from silence (2026-10-09) —
+and, since 2026-10-10, `alertChanged` (roadmap 3.4). What is **not** pushed yet is the `Provisioning → Online`
+transition a sample or health message causes: the fan-out boundary for samples carries committed readings, which have
+no status in them. `commandChanged` arrives with FR-14.
+
+**`alertChanged` as built.** One event per move, pushed to the terrarium's group **after the commit that wrote it**,
+by whichever layer owns that commit: the evaluator's worker, the silence watchdog's worker, the ingest outcome
+recorder (the clock-skew entry and the sensor fault) and the lifecycle API itself. `event` is one of `opened`,
+`escalated`, `acknowledged`, `resolved` — lower case, because it names a move — while `state`, `severity` and
+`metric` keep the REST surface's vocabulary (`Open`/`Acknowledged`/`Resolved`, `Info`/`Warning`/`Critical`, `tempC`),
+so one client parsing `GET /alerts` and one handling this event are reading the same words. A touch is deliberately
+**not** announced: the documented event reports lifecycle moves, and re-sending the same open alert once per sample
+would be noise rather than news. A push that fails is logged and dropped, never retried into a failed request — the
+row is committed, so a SignalR outage is a lost push.
 
 **Auth:** the JWT travels in the query string (`/hubs/telemetry?access_token=…`), because a browser cannot set a
 header on the WebSocket handshake. It is accepted on `/hubs` only — nowhere else does a token belong in a URL.

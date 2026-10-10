@@ -684,3 +684,47 @@ rather than on an attacker. **Rotating the caller's token as well** (a fresh pai
 parts — the response shape, the client's session write, the single-use invariants — for a session nobody questioned.
 **Identifying the caller's session by a claim in the access token** (a `sid` beside `sub`): a token-format change
 that lands on every client, when the refresh token that names the session is already in the caller's hand.
+
+---
+
+## ADR-023 — A resolved threshold alert re-arms its dwell key, and silence stays a separate mechanism
+**Status:** Accepted · **Date:** 2026-10-10 · **Related:** FR-12, FR-13, BR-11.4, `02-design/02` §4.2, `02-design/05` §4/§5, `07-appendices/03` §4.5, `07-appendices/02` §3.8/§3.15, roadmap 3.4, `TC-I-07`
+
+**Context.** Task 3.4 gives a keeper two ways to end an alert: resolve it (`Recovered`, `FalsePositive`,
+`SensorFault`, `Accepted`) or silence the metric for a while. The first is a state change with an actor and a reason;
+the second is time-boxed suppression with a reason, capped at 24 hours, visible on the dashboard. Until now nothing
+wrote either, so the question the evaluator needs answered had never been asked: when a human closes a threshold
+alert while the value is **still outside the band**, what happens next?
+
+The engine's state for `(terrarium, metric, phase)` holds `FirstOutOfBandAt` — the start of the current excursion —
+and the alert pointer. Resolution through the API writes the alert row, and the evaluator's next pass finds no *open*
+alert (`Adopt` reconciles the pointer, which 3.2 built for exactly this case) but does find an excursion whose dwell
+expired long ago. Left alone, the decision is `Open`: the alert the keeper just closed reappears on the next sample,
+one interval later. A keeper who chose `Accepted` — "this is real and I am handling it" — would be told the same
+thing until they learned to ignore the product.
+
+**Decision.** Resolving a threshold alert **clears the excursion window** for its key
+(`EvaluationState.Rearm()`: `Violation`, `FirstOutOfBandAt`, `CriticalSinceAt`, recovery ticks and the alert pointer;
+the watermark stays). A new alert can therefore only be raised once the band has been left for the dwell *again*.
+Suppression that lasts longer than that is what a **silence window** is for, and the two are not interchangeable: a
+resolve ends an episode, a silence stops the telling while detection continues.
+
+**Consequences.**
+- "Resolved" means resolved for both the record and the engine, which is what a keeper expects when they close
+  something by hand.
+- A condition that persists re-alerts after one dwell window rather than one sample — the same latency the engine
+  gives a fresh excursion, and the flapping control `02-design/05` §5 already relies on.
+- A keeper who wants quiet for hours has a mechanism that says so: a silence with a reason, a visible end instant and
+  an audit row, all of which an endless stream of re-alerts cannot express.
+- Detection is untouched. During a silence the evaluator keeps opening, touching and resolving alerts, so the
+  dashboard, the counts and the report show exactly what happened while nobody was being told.
+- The re-arm is a domain predicate (`AlertLifecycle.RearmsItsKey`), so it applies to threshold alerts only: the
+  device-level families (`DeviceSilent`, `SensorFault`, `DeviceClockSkew`) keep their own state — a device row, an
+  open alert, the event stream — and have no dwell key to clear.
+
+**Rejected.** **Leaving the window alone** (the alert returns at the next sample): the cheapest change, and it makes
+manual resolution a button that does nothing for a condition that is still true. **Treating a resolve as a silence
+for the same metric and duration**: it would hide the alert *and* the evidence, and it fakes a window nobody set —
+the dashboard would show a suppression the keeper never asked for. **Suppressing new alerts while an
+`Accepted`-resolved alert's condition continues** (a permanent "accepted" state on the key): that is a suppression
+with no end, which is the one thing a silence explicitly may not be.

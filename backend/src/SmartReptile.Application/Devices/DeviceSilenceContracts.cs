@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Devices;
 
@@ -40,6 +41,13 @@ public sealed record DeviceSilenceOutcome(
 {
     /// <summary>Nothing to do.</summary>
     public static readonly DeviceSilenceOutcome None = new(0);
+
+    /// <summary>
+    /// Moves to push after the commit (<c>alertChanged</c> of `07-appendices/03` §6). The sweep commits itself, so
+    /// the worker that runs it is the one that fans these out — after the rows exist, which is when their identities
+    /// do.
+    /// </summary>
+    public IReadOnlyList<AlertChange> AlertChanges { get; init; } = [];
 
     /// <summary>Of the alerts opened, the ones that were warnings.</summary>
     public int WarningAlertsOpened => AlertsOpened - CriticalAlertsOpened;

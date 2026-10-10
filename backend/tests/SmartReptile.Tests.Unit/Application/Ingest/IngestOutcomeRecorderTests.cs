@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Ingest;
+using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Ingest;
@@ -120,11 +122,78 @@ public class IngestOutcomeRecorderTests
         Counter("ingest_samples_total").Should().Be(1);
     }
 
+    [Fact]
+    public async Task GivenABatchThatSignalledAClockSkew_ThenTheAlertMoveIsPushed()
+    {
+        var alert = Signalled();
+
+        await _recorder.RecordAsync(
+            IngestOutcome.Accepted([Stored(9)], duplicates: 0, droppedKeys: null, alertChanges:
+            [
+                new AlertChange(alert, AlertEvent.Opened),
+            ]),
+            "sr-3f9a2c",
+            CancellationToken.None);
+
+        var pushed = _broadcaster.ReceivedAlerts.Should().ContainSingle().Subject;
+
+        pushed.TerrariumId.Should().Be(alert.TerrariumId);
+        pushed.AlertId.Should().Be(alert.Id);
+        pushed.Event.Should().Be(AlertEvent.Opened);
+        pushed.State.Should().Be(nameof(AlertState.Open));
+        pushed.Severity.Should().Be(nameof(AlertSeverity.Info));
+        pushed.Metric.Should().BeNull("a clock-skew notice is about the device's clock, not about a value");
+    }
+
+    [Fact]
+    public async Task GivenAnEventsMessageThatSignalledASensorFault_ThenTheAlertMoveIsPushed()
+    {
+        var alert = Signalled();
+        alert.Metric = MetricCode.TempC;
+
+        await _recorder.RecordDeviceChannelAsync(
+            DeviceChannelOutcome.Stored(statusChanged: null, alertChanges: [new AlertChange(alert, AlertEvent.Resolved)]),
+            "sr-3f9a2c",
+            CancellationToken.None);
+
+        _broadcaster.ReceivedAlerts.Should().ContainSingle()
+            .Which.Metric.Should().Be("tempC", "the payload spells a metric the way the REST surface does");
+    }
+
+    [Fact]
+    public async Task GivenABroadcasterThatThrows_ThenAStoredAlertMoveIsNotReportedAsAFailure()
+    {
+        _broadcaster.Failure = new InvalidOperationException("hub closed");
+
+        var act = async () => await _recorder.RecordAsync(
+            IngestOutcome.Accepted([Stored(10)], duplicates: 0, droppedKeys: null, alertChanges:
+            [
+                new AlertChange(Signalled(), AlertEvent.Opened),
+            ]),
+            "sr-3f9a2c",
+            CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        Counter("ingest_samples_total").Should().Be(1);
+    }
+
+    private static Alert Signalled() => new()
+    {
+        Id = 812,
+        TerrariumId = Guid.NewGuid(),
+        DeviceId = Guid.NewGuid(),
+        Source = AlertSource.DeviceClockSkew,
+        Severity = AlertSeverity.Info,
+        TriggeredAt = IngestTestData.Now,
+    };
+
     private sealed class RecordingBroadcaster : ITelemetryBroadcaster
     {
         public List<PersistedSample> Received { get; } = [];
 
         public List<DeviceStatusChanged> ReceivedStatuses { get; } = [];
+
+        public List<AlertChangedPayload> ReceivedAlerts { get; } = [];
 
         public Exception? Failure { get; set; }
 
@@ -147,6 +216,19 @@ public class IngestOutcomeRecorderTests
             }
 
             ReceivedStatuses.Add(statusChanged);
+            return Task.CompletedTask;
+        }
+
+        public Task BroadcastAlertsAsync(
+            IReadOnlyList<AlertChangedPayload> changes,
+            CancellationToken cancellationToken)
+        {
+            if (Failure is not null)
+            {
+                return Task.FromException(Failure);
+            }
+
+            ReceivedAlerts.AddRange(changes);
             return Task.CompletedTask;
         }
     }

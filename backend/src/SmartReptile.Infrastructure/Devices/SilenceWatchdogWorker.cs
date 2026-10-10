@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Devices;
+using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Infrastructure.Observability;
 
@@ -22,6 +24,7 @@ namespace SmartReptile.Infrastructure.Devices;
 public sealed class SilenceWatchdogWorker(
     IServiceScopeFactory scopes,
     SmartReptileMetrics metrics,
+    ITelemetryBroadcaster broadcaster,
     ILogger<SilenceWatchdogWorker> logger) : BackgroundService
 {
     /// <summary>
@@ -83,6 +86,8 @@ public sealed class SilenceWatchdogWorker(
                     outcome.AlertsEscalated,
                     outcome.AlertsResolved);
             }
+
+            await PushAlertsAsync(outcome, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -93,6 +98,33 @@ public sealed class SilenceWatchdogWorker(
             // A missed sweep is not a missed sample: the silence is still there next time and the alert it deserves
             // is opened then. Retrying inside the sweep would only stack against a database that is already unhappy.
             logger.LogError(ex, "The silence sweep threw; the next sweep retries");
+        }
+    }
+
+    /// <summary>
+    /// Pushes the alerts this sweep moved, best-effort and after the commit the sweep itself performed: the rows
+    /// exist, so a SignalR outage is a lost push and never a lost alert.
+    /// </summary>
+    /// <param name="outcome">What the sweep did.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task PushAlertsAsync(DeviceSilenceOutcome outcome, CancellationToken cancellationToken)
+    {
+        if (outcome.AlertChanges.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await broadcaster
+                .BroadcastAlertsAsync(
+                    outcome.AlertChanges.Select(AlertChangedPayload.From).ToArray(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Broadcasting {Count} alert move(s) failed", outcome.AlertChanges.Count);
         }
     }
 }

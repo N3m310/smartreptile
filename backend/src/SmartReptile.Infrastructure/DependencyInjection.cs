@@ -4,10 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Evaluation;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Infrastructure.Alerts;
 using SmartReptile.Infrastructure.Devices;
 using SmartReptile.Infrastructure.Evaluation;
 using SmartReptile.Infrastructure.Health;
@@ -158,6 +160,14 @@ public static class DependencyInjection
         // sweep, and they stage into the ingest unit of work their caller already owns.
         services.AddScoped<IDeviceSignalStore, EfDeviceSignalStore>();
         services.AddScoped<DeviceSignalRecorder>();
+
+        // The alert lifecycle API and the silence windows (roadmap 3.4). Two scopes rather than one because the two
+        // features share a screen and nothing else: an alert can be acknowledged with no silence in sight, and a
+        // silence outlives every alert it suppresses.
+        services.AddScoped<IAlertStore, EfAlertStore>();
+        services.AddScoped<AlertService>();
+        services.AddScoped<IMetricSilenceStore, EfMetricSilenceStore>();
+        services.AddScoped<MetricSilenceService>();
 
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();

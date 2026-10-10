@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Devices;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Readings;
@@ -68,11 +69,13 @@ public sealed class IngestPipeline(
         // The clock-skew rule is applied here, before the commit, so the notice it may raise lands in the same unit
         // of work as the samples that evidenced it — a batch that fails to save fails to signal too, which is the
         // right order. Staged once rather than per attempt: the retry below re-stages the samples, not the signals.
+        IReadOnlyList<AlertChange> alertChanges = [];
+
         if (device.TerrariumId is { } terrariumId)
         {
             var skewed = batch.Samples.Any(sample => DeviceClockSkewPolicy.IsSkewed(sample.Flags));
 
-            await signals
+            alertChanges = await signals
                 .RecordBatchClockAsync(device, terrariumId, skewed, envelope.ReceivedAt, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -88,7 +91,13 @@ public sealed class IngestPipeline(
         // samples and the exception from the store decides what happens next (NFR-03: the device keeps its buffer).
         var duplicates = committed ? write.Duplicates : batch.Samples.Count;
 
-        return IngestOutcome.Accepted(stored, duplicates, validation.DroppedMetricKeys);
+        // Nothing is announced unless the commit happened: a batch that lost the dedupe race twice wrote its
+        // samples earlier and its clock notice not at all, so a push here would name a row nobody can read.
+        return IngestOutcome.Accepted(
+            stored,
+            duplicates,
+            validation.DroppedMetricKeys,
+            committed ? alertChanges : []);
     }
 
     /// <summary>

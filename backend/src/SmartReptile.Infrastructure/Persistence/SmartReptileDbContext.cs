@@ -59,6 +59,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Alerts and their lifecycle.</summary>
     public DbSet<Alert> Alerts => Set<Alert>();
 
+    /// <summary>Time-boxed silence windows (FR-13).</summary>
+    public DbSet<MetricSilence> MetricSilences => Set<MetricSilence>();
+
     /// <summary>Dwell/hysteresis state of the threshold evaluator, one row per (terrarium, metric, phase).</summary>
     public DbSet<EvaluationState> EvaluationStates => Set<EvaluationState>();
 
@@ -76,6 +79,7 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         ConfigureDevices(modelBuilder);
         ConfigureTelemetry(modelBuilder);
         ConfigureAlerts(modelBuilder);
+        ConfigureSilences(modelBuilder);
         ConfigureEvaluation(modelBuilder);
         ConfigureAuditing(modelBuilder);
     }
@@ -384,6 +388,32 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Ignore(a => a.Duration);
 
             entity.ToTable("Alert");
+        });
+    }
+
+    /// <summary>
+    /// The silence windows of FR-13 (§07-appendices/02 §3.15). Created by 3.4, which is also the only writer: the
+    /// dispatcher of 3.5 reads them, and nothing deletes them — a window that expired is history, and history is
+    /// what the audit trail is for.
+    /// </summary>
+    private static void ConfigureSilences(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MetricSilence>(entity =>
+        {
+            entity.HasKey(silence => silence.Id);
+            entity.Property(silence => silence.Reason).HasMaxLength(MetricSilence.ReasonMaxLength).IsRequired();
+            entity.Property(silence => silence.UntilUtc).HasPrecision(3);
+            entity.Property(silence => silence.CreatedAt).HasPrecision(3);
+            entity.Property(silence => silence.CancelledAt).HasPrecision(3);
+
+            // "What is suppressing this terrarium right now" is the query the dashboard renders and the dispatcher
+            // asks before every notification, so the window's end is part of the index.
+            entity.HasIndex(silence => new { silence.TerrariumId, silence.UntilUtc });
+
+            entity.HasOne<Terrarium>().WithMany().HasForeignKey(silence => silence.TerrariumId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("MetricSilence");
         });
     }
 

@@ -533,7 +533,7 @@ covers, which is the same set the read surface resolves a card's band from — a
 | 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Read half done 2026-10-09** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `TC-U-21…25` are green; the override write path and `ThresholdSnapshot` (`TC-U-26`) are open. See the block below |
 | 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green. **Decision engine done 2026-10-09** — the pure function, the evaluator that writes open/escalate/touch/resolve, and a live excursion through a real broker (see the block after this table); the per-device reorder window of §7 is open |
 | 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) belong with 3.6. See the block below |
-| 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36` |
+| 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36`. **Built 2026-10-10** — the list, the detail, the timeline, ack and resolve, the three silence routes and the `alertChanged` push; `TC-U-36`'s role matrix holds because ack, resolve and both silence writes name the `Technician` policy, and `TC-I-07` is covered from the service side (the project has no HTTP host). See the block below |
 | 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push) |
 | 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`) |
 | 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15` |
@@ -699,6 +699,75 @@ behaviour §02-design/03 §8 asks for: one unhappy sweep does not stop the watch
 (stop a node for five minutes, watch the Warning open and the badge go offline, resume, watch both close) and of
 `TC-U-28`/`TC-U-29` over a broker (publish a `sensor_fault`, publish a batch with a ten-minute skew) need the broker
 and SQL Server together and are the next run to record.
+
+---
+
+## M3 task 3.4 — the alert lifecycle, the silence windows and `alertChanged` (built 2026-10-10)
+
+FR-12's API and FR-13's suppression are built: an alert can be listed, paged, read with an excerpt of the values it
+was judged on, acknowledged, resolved and followed on a timeline; a keeper can silence a metric — or the whole
+terrarium — for at most a day with a reason on record; every one of those actions writes an audit row in the same
+transaction as the change; and every alert that opens, escalates, is acknowledged or is resolved is pushed to the
+clients watching that terrarium.
+
+**What is where.** `Domain/Alerts/AlertLifecycle.cs` decides the transitions and `AlertService` orders them around
+the decision; `Domain/Alerts/MetricSilence.cs` + `MetricSilencePolicy.cs` hold the window and its cap, with
+`MetricSilenceService` creating, listing and cancelling; `IAlertStore` and `IMetricSilenceStore` are the ports and
+`Infrastructure/Alerts/` the EF adapters; `Api/Endpoints/AlertEndpoints.cs` maps the five alert routes and the three
+silence routes, with ack, resolve and both silence writes naming the `Technician` policy. `alertChanged` is pushed
+from four places, each **after** the commit that wrote the alert: `EvaluatorWorker`, `SilenceWatchdogWorker`,
+`IngestOutcomeRecorder` (the clock-skew entry and the sensor fault, whose producers return moves on their outcomes
+instead of holding a hub) and `AlertService` itself.
+
+**The readings this build settles**, each stated in the document that owns it rather than only in the code:
+
+1. **A hand resolution re-arms the dwell key.** Closing a threshold alert clears the `EvaluationState` window for
+   `(terrarium, metric, phase)` without touching the watermark. Without that step a value that never came back inside
+   its band would satisfy a dwell that had already expired and re-open the alert on the very next sample — a keeper
+   who chose `Accepted` would be told the same thing one interval later. Deliberate, longer suppression is the
+   silence window's job (`ADR-023`), and the two mechanisms stay explicitly different: a resolve ends an episode, a
+   silence stops the telling.
+2. **A silence suppresses notification, not detection.** Alerts are still raised, touched and resolved during one;
+   what a window removes is the telling (`02-design/05` §4's `silenced_metric`), which the dispatcher of 3.5 reads
+   through the same `IsActiveAt`/`Covers` pair the list endpoint renders.
+3. **The keeper's note lives on the audit entry.** `{reason, note?}`: the reason is a column the report groups by, the
+   note is prose the alert row has no column for — `Alert.Message` is reserved for render-time notification text.
+4. **A second acknowledgement is `409 alert_not_open`**, the same answer a resolved alert gives: in both cases the
+   request changed nothing, and one code is one thing for a client to handle.
+5. **`GET /alerts` is the first endpoint to implement the documented paging convention** (`?cursor=&pageSize=`,
+   default 50, max 200, `nextCursor`), ordered `TriggeredAt DESC, Id DESC` with an opaque `triggeredAt|id` cursor, so
+   paging over a table that keeps receiving rows neither repeats nor skips one.
+6. **The detail carries no snapshot reference**, although §4.5 lists one: `Alert.ThresholdSnapshotId` is a sketch that
+   no built table has (`07-appendices/02` §3.8 now says so) and the band the alert denormalised is what explains it
+   today.
+7. **`MetricSilence.Id` is a `Guid`** rather than an identity column, because the key is known before the insert and
+   that is what lets the audit row name the window in the same unit of work.
+8. **`alertChanged` speaks the REST vocabulary** (`Open`, `Warning`, `tempC`) with lower-case move names
+   (`opened`, `escalated`, `acknowledged`, `resolved`), and a *touch* is not announced at all — the documented event
+   reports lifecycle moves, and once per sample would be noise rather than news.
+
+**Deliberately not built.** Notification delivery (3.5), the audit query endpoint (3.7) and every export: this task
+writes the trail, it does not read it. Escalation entries are absent from the timeline for the design's own reason —
+§02-design/05 §6 records escalations as `NotificationLog` rows, so they arrive with 3.5 — and the alert row keeps no
+escalation instant because escalation edits it in place (DI-01 keeps one row per episode).
+
+**Evidence.** 638 unit tests (50 new: 9 lifecycle transitions, 11 silence-window rules, 18 alert-service, 13
+silence-service, plus the assertions the new outcome fields made necessary), five new integration cases over real SQL
+Server — EF scoping across accounts, the soft-delete filter reaching an alert through its terrarium, the cursor
+predicate, one transaction that leaves row + re-arm + audit together, and the silence round trip — a `Release` build
+with no warnings and `dotnet format --verify-no-changes --severity error` clean on both projects.
+
+**Live checks (2026-10-10; the API started headlessly against no SQL Server, which is what makes these route checks
+rather than data checks).** `GET /api/v1/alerts` without a token → `401 unauthenticated`. With a **Viewer** token,
+`POST /alerts/1/ack`, `POST /alerts/1/resolve`, `POST /terrariums/{id}/silences` and
+`DELETE /terrariums/{id}/silences/{id}` all answer `403 insufficient_role` — the RBAC half of `TC-U-36`, measured
+rather than assumed. A bad `state` filter, a made-up cursor and an unknown resolve reason answer `400`
+(`validation_failed`, `invalid_cursor`, `validation_failed`) **before** any database call, which is why they are
+provable without one. With a Technician token every handler runs and fails only on the absent SQL Server
+(`500 internal_error`, not the `404` a missing route would give). `swagger.json` now carries **35 operations, 22 of
+them requiring the bearer scheme** — the 14 that already did plus all eight new ones — and the seven new paths are
+documented with the right verbs. The data halves of `TC-I-07` (ack, then resolve, then a second ack refused, with the
+audit rows) need SQL Server and join the 3.3 live runs as the next thing to record.
 
 ---
 

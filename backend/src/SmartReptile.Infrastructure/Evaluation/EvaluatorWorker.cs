@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Evaluation;
+using SmartReptile.Application.Ingest;
 using SmartReptile.Infrastructure.Observability;
 
 namespace SmartReptile.Infrastructure.Evaluation;
@@ -28,6 +30,7 @@ public sealed class EvaluatorWorker(
     InProcessEvaluationQueue queue,
     IServiceScopeFactory scopes,
     SmartReptileMetrics metrics,
+    ITelemetryBroadcaster broadcaster,
     ILogger<EvaluatorWorker> logger) : BackgroundService
 {
     /// <inheritdoc />
@@ -47,6 +50,7 @@ public sealed class EvaluatorWorker(
                     var outcome = await evaluator.EvaluateAsync(batch, stoppingToken).ConfigureAwait(false);
 
                     Record(outcome);
+                    await PushAlertsAsync(outcome, stoppingToken).ConfigureAwait(false);
 
                     logger.LogDebug(
                         "Evaluated {Count} sample(s): {Advanced} reading(s) advanced a state key, {Skipped} skipped, "
@@ -79,6 +83,33 @@ public sealed class EvaluatorWorker(
         }
 
         logger.LogInformation("Evaluator worker stopped");
+    }
+
+    /// <summary>
+    /// Pushes the alerts this pass moved, best-effort and after the commit — the same rule the ingest fan-out
+    /// follows: the rows exist, so a SignalR outage is a lost push and never a lost alert.
+    /// </summary>
+    /// <param name="outcome">What the pass did.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task PushAlertsAsync(EvaluationOutcome outcome, CancellationToken cancellationToken)
+    {
+        if (outcome.AlertChanges.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await broadcaster
+                .BroadcastAlertsAsync(
+                    outcome.AlertChanges.Select(AlertChangedPayload.From).ToArray(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Broadcasting {Count} alert move(s) failed", outcome.AlertChanges.Count);
+        }
     }
 
     private void Record(EvaluationOutcome outcome)

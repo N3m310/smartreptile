@@ -1,4 +1,5 @@
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Devices;
 
@@ -40,6 +41,7 @@ public sealed class DeviceSilenceMonitor(
         var critical = 0;
         var escalated = 0;
         var resolved = 0;
+        var changes = new List<AlertChange>();
 
         foreach (var (device, openAlert) in watched)
         {
@@ -62,6 +64,7 @@ public sealed class DeviceSilenceMonitor(
                 if (openAlert is not null)
                 {
                     DeviceSilenceAlertWriter.Resolve(openAlert, lastSeenAt);
+                    changes.Add(new AlertChange(openAlert, AlertEvent.Resolved));
                     resolved++;
                 }
 
@@ -79,14 +82,17 @@ public sealed class DeviceSilenceMonitor(
 
             if (openAlert is null)
             {
-                store.AddAlert(DeviceSilenceAlertWriter.Open(
+                var raised = DeviceSilenceAlertWriter.Open(
                     device,
                     terrariumId,
                     severity.Value,
                     DeviceSilencePolicy.SilenceStartedAt(
                         lastSeenAt,
                         device.SamplingIntervalSec,
-                        settings.SilentAfterIntervals)));
+                        settings.SilentAfterIntervals));
+
+                store.AddAlert(raised);
+                changes.Add(new AlertChange(raised, AlertEvent.Opened));
                 opened++;
 
                 if (severity.Value == AlertSeverity.Critical)
@@ -97,6 +103,7 @@ public sealed class DeviceSilenceMonitor(
             else if (severity.Value == AlertSeverity.Critical && openAlert.Severity != AlertSeverity.Critical)
             {
                 DeviceSilenceAlertWriter.Escalate(openAlert);
+                changes.Add(new AlertChange(openAlert, AlertEvent.Escalated));
                 escalated++;
             }
         }
@@ -105,6 +112,9 @@ public sealed class DeviceSilenceMonitor(
         // commit is how a staged change gets left behind on the path nobody exercised.
         await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-        return new DeviceSilenceOutcome(judged, offline, opened, critical, escalated, resolved);
+        return new DeviceSilenceOutcome(judged, offline, opened, critical, escalated, resolved)
+        {
+            AlertChanges = changes,
+        };
     }
 }

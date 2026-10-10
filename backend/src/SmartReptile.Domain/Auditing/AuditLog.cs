@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace SmartReptile.Domain.Auditing;
 
 /// <summary>
@@ -15,6 +17,18 @@ public static class AuditAction
 
     /// <summary>Every credential a device holds was invalidated (BR-18.4).</summary>
     public const string DeviceRevoked = "device.revoked";
+
+    /// <summary>A keeper took ownership of an alert without closing it (FR-12).</summary>
+    public const string AlertAcknowledged = "alert.acknowledged";
+
+    /// <summary>A keeper closed an alert, with the reason they gave (FR-12).</summary>
+    public const string AlertResolved = "alert.resolved";
+
+    /// <summary>A metric — or every metric of a terrarium — was silenced for a time-boxed window (FR-13).</summary>
+    public const string MetricSilenced = "silence.created";
+
+    /// <summary>A silence window was cancelled before it expired (FR-13).</summary>
+    public const string SilenceCancelled = "silence.cancelled";
 }
 
 /// <summary>
@@ -106,13 +120,91 @@ public class AuditLog
         DateTimeOffset occurredAt,
         string? beforeJson = null,
         string? afterJson = null) =>
+        Build(
+            action,
+            "Device",
+            devicePublicId,
+            deviceId,
+            userId,
+            actor,
+            occurredAt,
+            beforeJson,
+            afterJson);
+
+    /// <summary>
+    /// Builds a row for an action a keeper took on an alert. The entity id is the alert's own identity, spelled the
+    /// way the routes spell it (<c>/alerts/{id}</c>), so a row can be matched to a request without a join.
+    /// </summary>
+    /// <param name="action">Verb from <see cref="AuditAction"/>.</param>
+    /// <param name="alertId">Identity of the alert.</param>
+    /// <param name="deviceId">Device the alert concerned; the column exists and the alert names one.</param>
+    /// <param name="userId">Acting user.</param>
+    /// <param name="actor">Request provenance; <see cref="AuditActor.Unknown"/> when there is none.</param>
+    /// <param name="occurredAt">When the change happened.</param>
+    /// <param name="beforeJson">State before the change, when worth keeping.</param>
+    /// <param name="afterJson">State after the change.</param>
+    /// <returns>The staged row.</returns>
+    public static AuditLog ForAlert(
+        string action,
+        long alertId,
+        Guid? deviceId,
+        Guid? userId,
+        AuditActor actor,
+        DateTimeOffset occurredAt,
+        string? beforeJson = null,
+        string? afterJson = null) =>
+        Build(
+            action,
+            "Alert",
+            alertId.ToString(CultureInfo.InvariantCulture),
+            deviceId,
+            userId,
+            actor,
+            occurredAt,
+            beforeJson,
+            afterJson);
+
+    /// <summary>Builds a row for an action a keeper took on a silence window.</summary>
+    /// <param name="action">Verb from <see cref="AuditAction"/>.</param>
+    /// <param name="silenceId">Identity of the silence.</param>
+    /// <param name="userId">Acting user.</param>
+    /// <param name="actor">Request provenance; <see cref="AuditActor.Unknown"/> when there is none.</param>
+    /// <param name="occurredAt">When the change happened.</param>
+    /// <param name="beforeJson">State before the change, when worth keeping.</param>
+    /// <param name="afterJson">State after the change.</param>
+    /// <returns>The staged row.</returns>
+    public static AuditLog ForSilence(
+        string action,
+        Guid silenceId,
+        Guid? userId,
+        AuditActor actor,
+        DateTimeOffset occurredAt,
+        string? beforeJson = null,
+        string? afterJson = null) =>
+        Build(action, "MetricSilence", silenceId.ToString(), null, userId, actor, occurredAt, beforeJson, afterJson);
+
+    /// <summary>
+    /// The one place the row is built, so every entity's entry truncates, defaults and dates the same way.
+    /// Truncating rather than rejecting: these arrive as client-supplied headers of unbounded length, and a refused
+    /// insert would turn a valid action into a 500 (§07-appendices/02 §3.11).
+    /// </summary>
+    private static AuditLog Build(
+        string action,
+        string entityName,
+        string entityId,
+        Guid? deviceId,
+        Guid? userId,
+        AuditActor actor,
+        DateTimeOffset occurredAt,
+        string? beforeJson,
+        string? afterJson) =>
         new()
         {
             Action = action,
+            EntityName = entityName,
+            EntityId = entityId,
             DeviceId = deviceId,
             UserId = userId,
-            EntityName = "Device",
-            EntityId = devicePublicId,
             BeforeJson = beforeJson,
             AfterJson = afterJson,
             IpAddress = actor.IpAddress ?? "unknown",

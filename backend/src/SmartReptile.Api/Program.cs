@@ -405,6 +405,7 @@ app.MapOpsEndpoints(applicationVersion);
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
 app.MapTerrariumEndpoints();
+app.MapAlertEndpoints();
 app.MapIngestEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
@@ -422,6 +423,9 @@ app.MapGet("/", () => Results.Ok(new
         "/api/v1/terrariums", "/api/v1/terrariums/{terrariumId}",
         "/api/v1/terrariums/{terrariumId}/readings/latest", "/api/v1/terrariums/{terrariumId}/readings",
         "/api/v1/terrariums/{terrariumId}/coverage",
+        "/api/v1/terrariums/{terrariumId}/silences", "/api/v1/terrariums/{terrariumId}/silences/{silenceId}",
+        "/api/v1/alerts", "/api/v1/alerts/{alertId}", "/api/v1/alerts/{alertId}/ack",
+        "/api/v1/alerts/{alertId}/resolve", "/api/v1/alerts/{alertId}/timeline",
     },
     docs = "docs/README.md",
 })).WithTags("ops");

@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Devices;
 
@@ -22,7 +23,11 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
     /// <param name="draft">The event as parsed, with the failure count the payload carried.</param>
     /// <param name="recordedAt">Instant to date the decision from — the device's own timestamp.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task RecordEventAsync(
+    /// <returns>
+    /// The alert that opened or closed, empty when the event moved nothing. The caller pushes it after its commit,
+    /// which is the only moment the row has an identity to name in a payload.
+    /// </returns>
+    public async Task<IReadOnlyList<AlertChange>> RecordEventAsync(
         Device device,
         Guid terrariumId,
         DeviceEventDraft draft,
@@ -36,7 +41,7 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
         // still stored by the caller, which is the evidence rule a later replay would read.
         if (draft.Metric is not { } metric)
         {
-            return;
+            return [];
         }
 
         switch (draft.Type)
@@ -45,7 +50,10 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
                 if (await store.FindOpenFaultAlertAsync(device.Id, metric, cancellationToken).ConfigureAwait(false)
                     is null)
                 {
-                    store.AddAlert(DeviceSignalAlertWriter.OpenSensorFault(device, terrariumId, metric, recordedAt));
+                    var opened = DeviceSignalAlertWriter.OpenSensorFault(device, terrariumId, metric, recordedAt);
+                    store.AddAlert(opened);
+
+                    return [new AlertChange(opened, AlertEvent.Opened)];
                 }
 
                 break;
@@ -55,6 +63,8 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
                     is { } recovered)
                 {
                     DeviceSignalAlertWriter.ResolveSensorFault(recovered, recordedAt);
+
+                    return [new AlertChange(recovered, AlertEvent.Resolved)];
                 }
 
                 break;
@@ -64,6 +74,8 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
                 // are nobody's alert today. Naming them here is what keeps this switch from reading as an omission.
                 break;
         }
+
+        return [];
     }
 
     /// <summary>Applies the clock-skew rule to one accepted batch.</summary>
@@ -75,7 +87,8 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
     /// </param>
     /// <param name="observedAt">Instant the batch arrived.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task RecordBatchClockAsync(
+    /// <returns>The notice that opened or closed, empty when the batch moved nothing.</returns>
+    public async Task<IReadOnlyList<AlertChange>> RecordBatchClockAsync(
         Device device,
         Guid terrariumId,
         bool skewed,
@@ -91,22 +104,32 @@ public sealed class DeviceSignalRecorder(IDeviceSignalStore store)
             if (open is not null)
             {
                 DeviceSignalAlertWriter.ResolveClockSkew(open, observedAt);
+
+                return [new AlertChange(open, AlertEvent.Resolved)];
             }
 
-            return;
+            return [];
         }
 
         if (open is not null)
         {
+            // A touch is not a lifecycle move, so it is not announced: the documented event reports open, escalate,
+            // acknowledge and resolve, and a client that re-rendered the same entry every batch would be noise.
             DeviceSignalAlertWriter.Touch(open, observedAt);
-            return;
+
+            return [];
         }
 
         var lastSignalAt = await store.FindLastClockSkewSignalAtAsync(device.Id, cancellationToken).ConfigureAwait(false);
 
-        if (DeviceClockSkewPolicy.IsSignalDue(observedAt, lastSignalAt))
+        if (!DeviceClockSkewPolicy.IsSignalDue(observedAt, lastSignalAt))
         {
-            store.AddAlert(DeviceSignalAlertWriter.OpenClockSkew(device, terrariumId, observedAt));
+            return [];
         }
+
+        var notice = DeviceSignalAlertWriter.OpenClockSkew(device, terrariumId, observedAt);
+        store.AddAlert(notice);
+
+        return [new AlertChange(notice, AlertEvent.Opened)];
     }
 }

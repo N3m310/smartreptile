@@ -195,7 +195,7 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-33 | Access token claims and lifetime | issue, then decode | `sub`, `role`, `exp = iat + 15 min`; a token beyond `exp` is rejected | 1 | FR-01 |
 | TC-U-34 | Refresh rotation is single-use and families are revoked on reuse | refresh twice with the same token | first succeeds and invalidates; second → `401 token_reused`, whole family revoked, audit entry | 1 | FR-01 |
 | TC-U-35 | Login throttling is per-username and generic | 11 failures within 15 min | lock at the 11th, identical error body in every failure, audit entries written | 1 | FR-01 |
-| TC-U-36 | RBAC matrix | Owner/Technician/Viewer × 10 actions | exactly the permission matrix in `02-design/06` §3; foreign terrarium → `404`, insufficient role → `403` | 1 | FR-02 |
+| TC-U-36 | RBAC matrix | Owner/Technician/Viewer × 10 actions | exactly the permission matrix in `02-design/06` §3; foreign terrarium → `404`, insufficient role → `403`. **Built 2026-10-10 (3.4)** for the four actions that exist over alerts and silences: ack, resolve, silence a create/read and silence cancel all name the `Technician` policy, so a Viewer is refused by the authorisation layer before any handler runs — measured live (`403 insufficient_role` on all four, the blockquote at the end of §B5). The remaining matrix rows need the features that own them (threshold write, device claim, roles, purge) | 1 | FR-02 |
 | TC-U-51 | Backup recovery code shape and storage | register | 20 characters from the 31-symbol claim-code alphabet (no `0`/`O`/`1`/`I`/`L`), stored as `SHA-256(code ‖ 16-byte salt)`, plaintext absent from the row | 1 | FR-01 |
 | TC-U-52 | Recovery with the backup code rotates everything | register, sign in, then recover with the code and a new password | code consumed and replaced, every refresh token revoked, the old password and the spent code both refused | 1 | FR-01 |
 | TC-U-53 | Server-issued reset code is single-use and time-boxed | `forgot-password`, then `reset-password` | the row holds only the SHA-256 and expires `PasswordReset:CodeMinutes` ahead; the code works once (case and separators ignored) and a replayed or expired one → `401 invalid_reset_code` | 1 | FR-01 |
@@ -205,6 +205,46 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-58 | Password policy shape (`BR-01.2`) | `PasswordPolicy.Validate` over the boundary cases: exactly 8 characters, 7 characters, a lower-case-only password, one with no special character, one with only a space as its "symbol", a 129-character one, a deny-listed one | each refusal names the rule it broke (`password_too_short`, `password_uppercase_required`, `password_special_required`, …) and every rule that fails is reported at once; the deny-list and the ≤ 128 cap still apply | 1 | FR-01 |
 | TC-U-56 | Issuing a second code closes the first | two `forgot-password` requests, then reset with the first code | the first code → `401 invalid_reset_code`; at most one code is ever live for an account | 1 | FR-01 |
 | TC-U-59 | A password change keeps its own session and ends the others (`ADR-022`) | two signed-in sessions, then a change that names one of them (and, separately, one that names none) | the named session still rotates and the other answers `401 refresh_token_invalid`; a caller that names no session — or names another account's token — has every token revoked | 1 | FR-01, ADR-022 |
+
+> **Built 2026-10-10 — the alert lifecycle and the silence windows (roadmap 3.4), which is where `TC-U-36`'s
+> alert-facing rows and the transition half of `TC-I-07` became testable.** 50 new unit cases and five new
+> integration cases:
+>
+> - **`AlertLifecycleTests` (9)** — one open alert acknowledges to exactly one owner; a second acknowledgement is
+>   refused **without touching the first**; a resolved alert cannot be acknowledged; a resolve straight from `Open`
+>   does not fabricate an acknowledgement; a resolve keeps an existing acknowledgement and measures `Duration` from
+>   the trigger; resolution is terminal and keeps the first reason; and the re-arm predicate is true for threshold
+>   alerts and false for the device-level families (`ADR-023`).
+> - **`MetricSilencePolicyTests` (10)** — the reason is required (and checked first, because it is the field a
+>   client always sends), the window must end in the future, exactly 24 hours is inside the cap and one second
+>   more is not, a reason longer than the column is refused, and the two questions the dispatcher will ask:
+>   `IsActiveAt` (the end instant is not inside the window, a cancelled window is never active) and `Covers` (a
+>   window with no metric covers every metric).
+> - **`AlertServiceTests` (18)** — paging asks for one row more than the page and returns a cursor only when there
+>   is more; a cursor this API did not issue and an inverted range are refusals, not empty pages; the detail's
+>   excerpt truncates at 240 points and says so, and a device-level alert carries none; **a foreign alert is
+>   `not_found` and writes nothing**; acknowledging stages exactly one audit row with the caller's address and
+>   broadcasts one `acknowledged` move; **resolving re-arms the dwell key and leaves the watermark alone**, while a
+>   device-level alert performs no dwell lookup at all; the reason and the note survive into the audit row, with the
+>   note trimmed; an unknown reason, an over-long note and a second resolve are refusals with the alert untouched;
+>   and a failing push leaves a stored change stored.
+> - **`MetricSilenceServiceTests` (13)** — create/list/cancel round trips with their audit rows, the whole-terrarium
+>   case, the three field refusals, a foreign terrarium or silence id answering `not_found`, only still-active
+>   windows listed, and a second `DELETE` changing nothing and writing no second audit row.
+> - **`AlertLifecycleTests` (integration, 5, real SQL Server)** — the EF scoping that makes a foreign account's
+>   alerts invisible to both the list and the lookup; the soft-delete filter on `Terrarium` reaching an alert
+>   through its foreign key; the cursor predicate the provider has to translate; **one transaction that leaves the
+>   resolved row, the re-armed `EvaluationState` and the audit entry together**; and the silence round trip.
+> - **Live, against a running API with no database** (which is what makes these route checks rather than data
+>   checks): `GET /api/v1/alerts` without a token → `401`; a Viewer token on ack, resolve, silence-create and
+>   silence-cancel → `403 insufficient_role` on all four; a bad `state`, a made-up cursor and an unknown resolve
+>   reason → `400` (`validation_failed`, `invalid_cursor`, `validation_failed`) *before* any database call; and with
+>   a Technician token every handler runs and fails only on the absent SQL Server (`500`, not the `404` a missing
+>   route would give). `swagger.json`: 35 operations, 22 requiring the bearer scheme — the 14 that already did plus
+>   all eight new ones.
+>
+> The *data* half of `TC-I-07` over HTTP (ack → resolve → second ack refused, read back through the API) still needs
+> SQL Server; the roadmap block records it as the next live run, alongside 3.3's `TC-I-09`.
 
 ### B6. Notification policy, retries and content
 
@@ -257,7 +297,7 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-I-04 | Device health + fault events update state | health + `sensor_fault` event | health denorms updated (task 2.4); humidity `Unavailable` and no humidity alert (the `SensorFault` signal, task 3.3 — the event arrives on `events`, which ingest does not consume yet) | 1 | FR-07 |
 | TC-I-05 | Provisioning end to end | self-register → claim → connect with secret → publish | device bound, status `online`, first sample stored; a second claim of the same code → `404 claim_code_invalid`; a claim for an already-bound terrarium → `409` | 1 | FR-04, FR-05 |
 | TC-I-06 | Evaluation through the pipeline | `daily` fixture played back with a fake clock | exactly one alert, correct `TriggeredAt`, correct `PeakValue`; rollups and the daily summary agree with the fixture's hand-computed values | 1 | FR-11, FR-14 |
-| TC-I-07 | Alert lifecycle through the API | open → ack (Technician) → resolve (`FalsePositive`) | states and actors stored; a Viewer ack → `403`; a second ack → `409 alert_not_open` | 1 | FR-12, FR-02 |
+| TC-I-07 | Alert lifecycle through the API | open → ack (Technician) → resolve (`FalsePositive`) | states and actors stored; a Viewer ack → `403`; a second ack → `409 alert_not_open`. **Built 2026-10-10 (3.4)** in the two halves the project can run: the RBAC and refusal half is measured live against a running API (Viewer → `403 insufficient_role` on ack, resolve and both silence writes; an unknown reason → `400` before any database call), and the data half — states, actors, one audit row per action, the re-armed `EvaluationState` and the cursor-paged list — is asserted against real SQL Server in `tests/SmartReptile.Tests.Integration/AlertLifecycleTests.cs`. The whole scenario over HTTP, end to end, still needs a running database and is recorded as an outstanding live run | 1 | FR-12, FR-02 |
 | TC-I-08 | 30-minute broker outage then back-fill | stop broker, node buffers, restart | every buffered sample stored with quality bit 8, in `RecordedAt` order, zero duplicates, coverage for the window ≥ 98% | 1 | FR-06, FR-07, NFR-03 |
 | TC-I-09 | Silence watchdog raises and auto-resolves | stop publishing for 5 min, then resume | `DeviceSilent` Warning then auto-resolve; no metric alerts from missing data | 1 | FR-07 |
 | TC-I-10 | Range query bucketing | `daily` + `monthly` fixtures | 1 h → raw; 24 h → 5-min; 30 d → hourly with ≤ 720 points and `bucket` echoed in the response | 1 | FR-09 |

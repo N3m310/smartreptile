@@ -2,7 +2,6 @@ using System.Security.Claims;
 using SmartReptile.Api.Middleware;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
-using SmartReptile.Domain.Auditing;
 
 namespace SmartReptile.Api.Endpoints;
 
@@ -29,7 +28,7 @@ public static class DeviceEndpoints
             DeviceProvisioningService provisioning,
             CancellationToken cancellationToken) =>
         {
-            var outcome = await provisioning.SelfRegisterAsync(request, ClientAddress(context), cancellationToken);
+            var outcome = await provisioning.SelfRegisterAsync(request, RequestActor.ClientAddress(context), cancellationToken);
 
             if (outcome.Problem is { } problem)
             {
@@ -67,7 +66,7 @@ public static class DeviceEndpoints
                 request,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                Actor(context));
+                RequestActor.From(context));
 
             if (outcome.Problem is { } problem)
             {
@@ -99,7 +98,7 @@ public static class DeviceEndpoints
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                Actor(context));
+                RequestActor.From(context));
 
             if (outcome.Problem is { } problem)
             {
@@ -130,7 +129,7 @@ public static class DeviceEndpoints
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                Actor(context));
+                RequestActor.From(context));
 
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
@@ -179,16 +178,4 @@ public static class DeviceEndpoints
             type: $"https://smartreptile.example/problems/{problem.Code}",
             extensions: extensions);
     }
-
-    private static string ClientAddress(HttpContext context) =>
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-    /// <summary>
-    /// Request provenance for the audit trail (§02-design/02 §3.18). Truncation of the two client-supplied values
-    /// happens in <see cref="AuditLog.ForDevice"/>, so it is applied wherever an actor is built.
-    /// </summary>
-    private static AuditActor Actor(HttpContext context) => new(
-        ClientAddress(context),
-        context.Request.Headers.UserAgent.ToString() is { Length: > 0 } userAgent ? userAgent : null,
-        context.Items[CorrelationIdMiddleware.ItemKey] as string ?? context.TraceIdentifier);
 }

@@ -124,7 +124,8 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | MQTT topic ACL | `paho-mqtt` subscribe/publish attempts outside the device's own prefix | ✅ **2.3**: own `cmd` granted; `sr/v1/d/+/telemetry` and another device's `cmd` refused; counters `mqtt_refused_subscriptions_total` / `mqtt_refused_publications_total` on `/metrics` |
 | MQTT plaintext is loopback-only | `netstat -ano` with TLS on, then again with `Mqtt:DisablePlaintextEndpoint=true` | ✅ **2.3**: `127.0.0.1:1883` **and** `[::1]:1883` only (no wildcard bind — binding the IPv4 address alone leaves the IPv6 socket open); in the release shape nothing listens on `1883` at all and TLS kept authenticating devices |
 | Ingest: broker → bus → worker → SQL Server | `paho-mqtt` publish over a real MQTT listener against a live API + SQL Server, then `curl /metrics` and read the rows back | ✅ **2.4 done 2026-10-04**: a two-sample batch published twice stored **2** `TelemetrySample` rows (sequences `1, 2`), **8** `MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, set `LastSeenAt` / `FirmwareVersion` / `SignalStrengthDbm` / `FreeHeapKb` and wrote a `DeviceHealthSample`; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`, `ingest_rejected_total=0`. A `tf = 85` sample was stored with `QualityFlags = 2`; a 121-sample batch was `payload_too_large` and a malformed body `schema_invalid`, taking `ingest_rejected_total` to **2** |
-| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **19 passed** — migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium |
+| The alert lifecycle over HTTP (M3 task 3.4) | the API started headlessly with **no** SQL Server — which is what makes a *route* check possible without a database: `curl` with a minted Viewer token, a Technician token and no token at all (14 assertions, all green) | ✅ **2026-10-10**: no token → `401 unauthenticated`; **Viewer** → `403 insufficient_role` on `POST /alerts/1/ack`, `POST /alerts/1/resolve`, `POST /terrariums/{id}/silences` and `DELETE …/silences/{id}` (the RBAC half of `TC-U-36`, measured); `?state=Nonsense`, `?cursor=not-a-cursor` and an unknown resolve reason → `400` (`validation_failed`, `invalid_cursor`, `validation_failed`) **before** any database call; with a Technician token every handler ran and failed only on the absent SQL Server (`500 internal_error`, not the `404` a missing route would give); and `swagger.json` carried **35 operations, 22 requiring the bearer scheme** — the 14 that already did plus all eight new ones. The three silence routes and five alert routes are also what `GET /` advertises. The *data* half (`TC-I-07` over HTTP: ack → resolve → second ack refused, read back through the API) still needs SQL Server |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **24 cases** — 19 green as of 2026-10-09: migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium. The five added 2026-10-10 (task 3.4) assert what a fake cannot answer: an alert of another account is invisible to both the list and the lookup, the soft-delete filter on `Terrarium` reaches an alert through its foreign key, the cursor predicate translates and pages without repeating a row, one transaction leaves the resolved row + the re-armed `EvaluationState` + the audit entry together, and a silence window round-trips through create, list and cancel |
 | Terrarium update and delete over HTTP | `curl` a live API + SQL Server: create, `PATCH` with the current `ETag`, then a stale one, then none, then `DELETE` with and without the flag (26 assertions, all green) | ✅ **2.8's update/delete halves done 2026-10-09**: `201` + `ETag` on create, `200` and a **new** `ETag` on a matching `If-Match`, `412 precondition_failed` on a stale one with the row provably not overwritten, `428 precondition_required` with no header, `If-Match: *` accepted, `400 validation_failed` on a bad body, `409 conflict_device_bound` while a live device is bound, `204` with `?allowUnboundDevice=true` (the board returns to `Provisioning` with its credentials intact), and `404 not_found` after |
 | MQTT device channels are consumed, not dropped | `paho-mqtt` publishing `status`, `health`, `events` and `telemetry` over loopback from a **scripted** node (no hardware), then reading the rows back | ✅ **2026-10-09**: `flags=1.2.0`, `rssi=-64`, `heap=140`, `bat=87.00` on the `Device` row; **2** `DeviceHealthSample` rows (one from the `health` topic, one from a batch's health block); **1** `DeviceEvent` (a `sensor_fault` on `humidityPct`) with an unknown event type refused as `schema_invalid`; **2** `TelemetrySample` rows; and **2** `EvaluationState` rows written by the evaluator worker **for the keys the profile actually bands** (`TempC`/Night and `HumidityPct`/Any, watermark 20) |
 | The threshold engine raises and closes an alert (M3 task 3.2) | `paho-mqtt` publishing a scripted excursion over a real broker against a live API + SQL Server, then reading `Alert` and `EvaluationState` back — 48 assertions, all green | ✅ **2026-10-09**: a faulted out-of-band reading opened nothing and created no state row; an out-of-band reading opened nothing while the dwell window was open; when it elapsed **exactly one Warning opened, back-dated to the first out-of-band reading**, with `TriggeringValue` = that reading and `PeakValue` = the window's worst reading (`32.6 °C` opened it, `33.0 °C` was the peak — a value only the stored readings know); a critical reading short of its own dwell touched the row without escalating; when that dwell elapsed the **same** alert escalated once (`Severity` and `DedupeKey` → Critical, id and `TriggeredAt` unchanged); three readings inside the band by the margin resolved it (`Recovered`, pointer and excursion cleared, three ticks counted); a later excursion opened a **second** row while the first stayed resolved; and `/metrics` moved by exactly the two openings and the ten published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard gecko band asks for five) because FR-10's write route is 3.1's remainder |
@@ -154,12 +155,17 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   renamed and removed over HTTP. `GET .../thresholds` reports the effective band per metric with the layer it came
   from, so the threshold editor (M4's 4.20) can be built against it and show *why* a limit is what it is.
   **Thresholds are read-only over HTTP**: writing an override (`PUT`/`DELETE`) is 3.1's other half and is not
-  built. Alerts exist and a scripted excursion proves the whole lifecycle, but **there is no `/api/v1/alerts`
-  route yet** — reading, acknowledging and resolving an alert is 3.4, and silences, summaries and exports are 3.4
-  and 3.6.
-- **The engine raises alerts without telling anyone.** A new alert is a row and a counter: delivery is the
-  notification dispatcher's (3.5) and the `alertChanged` push arrives with the lifecycle API (3.4), so a keeper
-  learns about an alert by reading the table until then. The per-device **reorder window** of
+  built. Alerts have a full API since 2026-10-10 (task 3.4): `/api/v1/alerts` lists them newest-first with
+  `?cursor=&pageSize=`, and `GET /api/v1/alerts/{id}` carries the band in force with an excerpt of the values the
+  episode was judged on; `POST /alerts/{id}/ack` and `POST /alerts/{id}/resolve` close the response loop for a
+  Technician or Owner, `GET /alerts/{id}/timeline` shows what happened to one alert and who did it, and
+  `/api/v1/terrariums/{id}/silences` silences a metric — or the whole box — for at most 24 hours with a reason on
+  record. Summaries and exports remain 3.6 and the export task.
+- **Alerts are pushed but not delivered.** An alert that opens, escalates, is acknowledged or is resolved is pushed
+  to the terrarium's group as `alertChanged`, and every lifecycle action writes its audit row in the same
+  transaction — so a dashboard badge can update live. What is still absent is *delivery*: no FCM push, no email, no
+  inbox row, because the notification dispatcher is 3.5, and a silence today suppresses what 3.5 will send rather
+  than anything the system does now. The per-device **reorder window** of
   `docs/02-design/03` §7 is also unbuilt: samples are evaluated in ingest order, which for one node *is*
   `RecordedAt` order, but a second publisher or a broker redelivery could arrive out of order and the
   `EvaluationState` watermark is an id watermark, so it cannot detect that.
@@ -387,11 +393,12 @@ settled in the process and are recorded in the documents rather than only in the
 evaluation instant; a reading back inside the band ends the excursion; escalation once per episode using the
 severity the alert already carries; a consecutive critical window; and the alert's triggering value and peak read
 back from the stored readings of its dwell window). **What is deliberately absent**: delivery — an alert is a row
-and a counter, because the dispatcher is 3.5 and `alertChanged` arrives with the lifecycle API in 3.4 — and the
-per-device reorder window of §7. Verified live by a **scripted node** driving one excursion through a real broker,
-the ingest pipeline, the evaluator and SQL Server (48 assertions, listed in the gates above): one back-dated
-Warning, no escalation under the critical dwell, one escalation of that same alert, `Recovered` after three ticks,
-and a second episode as a separate row.
+and a counter, because the dispatcher is 3.5 — and the per-device reorder window of §7. The lifecycle API that
+makes alerts readable, acknowledgeable, resolvable and silenceable landed as task 3.4 on 2026-10-10 and pushes
+`alertChanged` to the clients watching the terrarium. Verified live by a **scripted node** driving one excursion
+through a real broker, the ingest pipeline, the evaluator and SQL Server (48 assertions, listed in the gates above):
+one back-dated Warning, no escalation under the critical dwell, one escalation of that same alert, `Recovered` after
+three ticks, and a second episode as a separate row.
 
 ```bash
 # The password below is a throwaway value for a local demo account, and the recovery codes are alphabet
@@ -426,9 +433,19 @@ curl -s "http://localhost:8080/api/v1/terrariums/$ID/thresholds"
 # -> {"terrariumId":"…","capturedAtUtc":"…","timeZoneId":"Asia/Ho_Chi_Minh",
 #     "effectiveThresholds":[{"metric":"tempC","unit":"°C","phase":"night","source":"profile", …}]}
 
-# The engine's output is a table today: alerts are raised, escalated and resolved, and the dispatcher that would
-# tell anyone about them is M3 task 3.5. Read them back with:
-sqlcmd -S "localhost\SQLEXPRESS" -d SmartReptile -E -Q "SET NOCOUNT ON; SELECT TOP 5 Id, Severity, State, Metric, TriggeredAt, PeakValue FROM Alert ORDER BY Id DESC;"
+# The engine's output: alerts are raised, escalated, acknowledged, resolved and pushed to the clients watching the
+# terrarium. Delivery to a phone or an inbox is M3 task 3.5, so today the alert itself is read back over the API:
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts?state=Open&pageSize=5"
+# -> {"items":[{"id":812,"severity":"Warning","state":"Open","metric":"tempC","bandMin":26.0,"bandMax":32.0, …}],"nextCursor":null}
+
+# What happened to one of them, and who did it:
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts/812/timeline"
+
+# Closing the loop, and telling the system you already know about a condition (Technician or Owner):
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts/812/resolve" \
+     -H "Content-Type: application/json" -d '{"reason":"Accepted","note":"lamp on purpose"}'
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/terrariums/$ID/silences" \
+     -H "Content-Type: application/json" -d '{"metric":"tempC","untilUtc":"2026-10-11T09:00:00Z","reason":"lamp replacement"}'
 # The counters behind it (alerts_opened_total counts openings, not escalations):
 curl -s http://localhost:8080/metrics
 ```

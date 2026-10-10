@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Infrastructure.Observability;
 
@@ -53,6 +54,8 @@ public sealed class IngestOutcomeRecorder(
         {
             await FanOutAsync(outcome.Stored, cancellationToken).ConfigureAwait(false);
         }
+
+        await PushAlertsAsync(outcome.AlertChanges, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -80,20 +83,48 @@ public sealed class IngestOutcomeRecorder(
             return;
         }
 
-        if (outcome.StatusChanged is not { } statusChanged)
+        if (outcome.StatusChanged is { } statusChanged)
+        {
+            try
+            {
+                await broadcaster.BroadcastStatusAsync(statusChanged, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort, like the sample push: a client that misses this polls readings/latest instead, and the
+                // stored transition is already correct.
+                logger.LogError(ex, "Broadcasting the status change of device {DeviceId} failed", devicePublicId);
+            }
+        }
+
+        await PushAlertsAsync(outcome.AlertChanges, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Pushes the alert moves a message produced — the clock-skew notice and the sensor fault of 3.3 — after the
+    /// commit that gave them their identities. Best-effort like the other two pushes, and caught separately for the
+    /// same reason: a hub outage must not make a stored change look like a failed request.
+    /// </summary>
+    /// <param name="changes">Moves the producer recorded.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task PushAlertsAsync(IReadOnlyList<AlertChange> changes, CancellationToken cancellationToken)
+    {
+        if (changes.Count == 0)
         {
             return;
         }
 
         try
         {
-            await broadcaster.BroadcastStatusAsync(statusChanged, cancellationToken).ConfigureAwait(false);
+            await broadcaster
+                .BroadcastAlertsAsync(
+                    changes.Select(AlertChangedPayload.From).ToArray(),
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // Best-effort, like the sample push: a client that misses this polls readings/latest instead, and the
-            // stored transition is already correct.
-            logger.LogError(ex, "Broadcasting the status change of device {DeviceId} failed", devicePublicId);
+            logger.LogError(ex, "Broadcasting {Count} alert move(s) failed", changes.Count);
         }
     }
 

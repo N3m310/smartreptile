@@ -72,6 +72,15 @@ suppression table instead of hand-waving about alert fatigue.
 | Silence window | ≤ 24 h, per metric, reason required, visible on the dashboard | Deliberate, accountable suppression |
 | Maintenance mode | Device-level; notifies nobody but records everything | Cleaning/lamp changes without lying about data |
 
+**Silences as built (2026-10-10, roadmap 3.4).** The write and read halves of this row exist:
+`POST /terrariums/{id}/silences`, `GET` for the windows still in force and `DELETE` to cancel early, over the
+`MetricSilence` table of `02-design/02` §3.15. The **decision** this table's flowchart makes — "metric silenced for
+this terrarium?" → `Log Suppressed: silenced_metric` — stays with the dispatcher (3.5), which calls the same
+`IsActiveAt`/`Covers` pair the list endpoint renders. Two readings the build settles: a window that names no metric
+covers **every** metric of the terrarium *including its device-level alerts*, and a silence suppresses notification
+only — the evaluator keeps raising, touching and resolving alerts during one, so the dashboard and the report show
+exactly what was happening while the keeper was not being told.
+
 ## 6. Escalation
 
 For **Critical** alerts only:

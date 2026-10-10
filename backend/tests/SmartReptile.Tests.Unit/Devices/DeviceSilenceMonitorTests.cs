@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Devices;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Devices;
@@ -35,8 +36,14 @@ public class DeviceSilenceMonitorTests
 
         var outcome = await _monitor.SweepAsync();
 
-        outcome.Should().Be(new DeviceSilenceOutcome(1, MarkedOffline: 1, AlertsOpened: 1));
+        outcome.Watched.Should().Be(1);
+        outcome.MarkedOffline.Should().Be(1);
+        outcome.AlertsOpened.Should().Be(1);
         device.Status.Should().Be(DeviceStatus.Offline, "the state machine's Online → Offline edge is silence");
+
+        var change = outcome.AlertChanges.Should().ContainSingle().Subject;
+        change.Event.Should().Be(AlertEvent.Opened, "the sweep is what fans the move out, after its own commit");
+        change.Alert.Should().BeSameAs(_store.Added.Single());
 
         var alert = _store.Added.Should().ContainSingle().Subject;
         alert.Source.Should().Be(AlertSource.DeviceSilent);
@@ -78,8 +85,12 @@ public class DeviceSilenceMonitorTests
 
         var outcome = await _monitor.SweepAsync();
 
-        outcome.Should().Be(new DeviceSilenceOutcome(1, MarkedOffline: 1, AlertsOpened: 1, CriticalAlertsOpened: 1));
+        outcome.Watched.Should().Be(1);
+        outcome.MarkedOffline.Should().Be(1);
+        outcome.AlertsOpened.Should().Be(1);
+        outcome.CriticalAlertsOpened.Should().Be(1);
         _store.Added.Single().Severity.Should().Be(AlertSeverity.Critical);
+        outcome.AlertChanges.Should().ContainSingle().Which.Event.Should().Be(AlertEvent.Opened);
     }
 
     [Fact]
@@ -109,7 +120,9 @@ public class DeviceSilenceMonitorTests
         var outcome = await _monitor.SweepAsync();
 
         outcome.Watched.Should().Be(1);
-        outcome.Should().Be(new DeviceSilenceOutcome(1));
+        outcome.MarkedOffline.Should().Be(0);
+        outcome.AlertsOpened.Should().Be(0);
+        outcome.AlertChanges.Should().BeEmpty("nothing moved, so there is nothing to push");
         _store.Added.Should().BeEmpty();
         device.Status.Should().Be(DeviceStatus.Online);
     }

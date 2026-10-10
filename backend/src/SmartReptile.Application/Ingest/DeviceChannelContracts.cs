@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 
@@ -99,6 +100,12 @@ public sealed record DeviceChannelOutcome
     /// <summary>Set when the message was stored.</summary>
     public DeviceStatusChanged? StatusChanged { get; init; }
 
+    /// <summary>
+    /// Alerts the message's own evidence opened or closed — the sensor fault of 3.3 — for the fan-out to push after
+    /// the commit that gave them their identities.
+    /// </summary>
+    public IReadOnlyList<AlertChange> AlertChanges { get; init; } = [];
+
     /// <summary>Set when the message was refused.</summary>
     public IngestProblem? Problem { get; init; }
 
@@ -106,8 +113,10 @@ public sealed record DeviceChannelOutcome
     public bool Succeeded => Problem is null;
 
     /// <summary>A stored message, with the transition to broadcast when there was one.</summary>
-    public static DeviceChannelOutcome Stored(DeviceStatusChanged? statusChanged = null) =>
-        new() { StatusChanged = statusChanged };
+    public static DeviceChannelOutcome Stored(
+        DeviceStatusChanged? statusChanged = null,
+        IReadOnlyList<AlertChange>? alertChanges = null) =>
+        new() { StatusChanged = statusChanged, AlertChanges = alertChanges ?? [] };
 
     /// <summary>A refusal.</summary>
     public static DeviceChannelOutcome Rejected(string code, string message) =>

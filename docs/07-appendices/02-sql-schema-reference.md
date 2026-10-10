@@ -195,12 +195,21 @@ Indexes: `IX_Alert_Terrarium_State_Triggered` `(TerrariumId, State, TriggeredAt 
 `Open` (a new episode, `TriggeredAt` back-dated to the excursion's start), `Touch` (`LastObservedAt` and an outward
 `PeakValue`), escalation (`Severity` and therefore `DedupeKey` become Critical on the same row) and `Resolve`
 (`State`, `ResolvedAt`, `ResolvedReason = Recovered`). Acknowledgement, manual resolution and the other reasons are
-the lifecycle API's (3.4), `Device`-level sources are 3.3's, and `ThresholdSnapshotId` is 3.1's remaining half —
-still null. **`Message` is left null by design**: §02-design/05 §7 composes the notification text from these fields
-at render time and localises it per user (ADR-013), so an English sentence here would be a second, unlocalisable
-copy of a message the clients already know how to build. `TriggeringValue` is the reading that started the episode
-and `PeakValue` the episode's worst reading so far — both filled from the stored `MetricReading` rows of the dwell
-window when the alert opens, since the excursion begins before the alert does.
+the lifecycle API's (**built 2026-10-10, roadmap 3.4**: `State`, `AcknowledgedAt`, `AcknowledgedByUserId`,
+`ResolvedAt`, `ResolvedByUserId` and `ResolvedReason`, each with one audit row and a re-armed dwell key — see
+`02-design/02` §4.2), and `Device`-level sources are 3.3's. **`Message` is left null by design**: §02-design/05 §7
+composes the notification text from these fields at render time and localises it per user (ADR-013), so an English
+sentence here would be a second, unlocalisable copy of a message the clients already know how to build. The
+resolution note a keeper sends travels on the audit entry for the same reason — this row has no column for prose, and
+the reason it does keep is the machine-readable one the report groups by. `TriggeringValue` is the reading that
+started the episode and `PeakValue` the episode's worst reading so far — both filled from the stored `MetricReading`
+rows of the dwell window when the alert opens, since the excursion begins before the alert does.
+
+**One row of the table above is a sketch rather than a column: `ThresholdSnapshotId`.** No built table has it and the
+`Alert` entity maps no such property — the 2026-10-07 database snapshot lists no such column, and until 3.1's
+remaining half creates the snapshot table there is nothing for a foreign key to point at. It is left in the sketch
+deliberately, as the shape 3.1 will add, but nothing reads or writes it, and `GET /alerts/{id}` therefore carries the
+band the alert denormalised and no snapshot reference (`07-appendices/03` §4.5 says so in the as-built note).
 
 
 ### 3.9 `EvaluationState`
@@ -283,6 +292,27 @@ order", which is the query task 3.3's derived signals ask.
 topic the broker accepts and then drops looks like it worked. The event is kept whole rather than shredded into a
 column per type, so a signal rule added in 3.3 can be re-evaluated against history instead of against whatever the
 rule was when the message arrived.
+
+### 3.15 `MetricSilence`
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `Id` | uniqueidentifier PK | no | not an identity column: the key is known before the insert, so the audit row that records who asked for the window can name it in the same unit of work |
+| `TerrariumId` | uniqueidentifier FK → `Terrarium` (cascade) | no | |
+| `Metric` | tinyint | **yes** | null means every metric of the terrarium, device-level alerts included |
+| `UntilUtc` | datetimeoffset(3) | no | at most 24 h after `CreatedAt` — a rule, not a constraint (`MetricSilencePolicy`) |
+| `Reason` | nvarchar(200) | no | required; the sentence that makes a suppression accountable |
+| `CreatedByUserId` | uniqueidentifier | no | who silenced it (no FK: the trail outlives the account) |
+| `CreatedAt` | datetimeoffset(3) | no | |
+| `CancelledAt` | datetimeoffset(3) | yes | non-null means cancelled early; the row is never deleted |
+
+**Index** `IX_MetricSilence_TerrariumId_UntilUtc` `(TerrariumId, UntilUtc)` — "what is suppressing this terrarium
+right now", which the dashboard renders and the dispatcher asks before every notification.
+
+**Built 2026-10-10** by `20261010045253_AddMetricSilences` (roadmap 3.4). The catalogue has listed this table since
+the first draft; until now nothing wrote it, so a keeper had no way to tell the system that they already knew about
+a condition. Two of the three as-built differences from the sketch are recorded in `02-design/02` §3.15; the third is
+that `Metric` is nullable in the built schema although the sketch shows a plain `MetricId` — the route's
+`metricId?` is what the reading "every metric" comes from.
 
 ---
 

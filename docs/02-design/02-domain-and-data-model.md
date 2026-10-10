@@ -245,6 +245,20 @@ force, so history is explainable: *"this alert used the summer bands"*.
 ### 3.15 `MetricSilence`
 `(Id, TerrariumId, MetricId, UntilUtc, Reason, CreatedByUserId, CreatedAt, CancelledAt)`.
 
+**Built 2026-10-10** (roadmap 3.4, migration `20261010045253_AddMetricSilences`). Three as-built differences, each
+with its reason:
+
+- **`Id` is a `uniqueidentifier` and the primary key**, unlike the identity columns its neighbours use: the key is
+  known before the insert, which is what lets the audit row recording who asked for the window name it in the *same*
+  unit of work. An identity would make the trail either wrong (`0`) or a second commit, and a silence whose audit row
+  commits separately is exactly the gap the audit rule forbids (`AuditLog`'s own remark).
+- **`MetricId` is nullable, and null means every metric of the terrarium** — including its device-level alerts. The
+  contract's route takes `metricId?`, and the whole-box case is what a keeper going away for the weekend wants.
+- **Column widths and index**, read back from the schema: `Reason nvarchar(200)`, the three instants
+  `datetimeoffset(3)` like every other instant here (ADR-015), and `IX_MetricSilence_TerrariumId_UntilUtc` — because
+  "what is suppressing this terrarium right now" is the query the dashboard renders and the dispatcher asks before
+  every notification. A foreign key to `Terrarium` cascades, so a purge takes its windows with it.
+
 ### 3.16 `NotificationLog`
 `(Id, UserId, AlertId NULL, TerrariumId NULL, Channel tinyint, Title, Body, DeepLink, Status tinyint
 (0 Queued, 1 Sent, 2 Failed, 3 Suppressed), Attempts, LastError, IsRead, CreatedAt, SentAt, ReadAt,
@@ -320,6 +334,25 @@ stateDiagram-v2
   Resolved --> [*]
 ```
 `Resolved` is terminal. Recurrence creates a new row (BR-12.1) — history is immutable.
+
+**As built (2026-10-10, roadmap 3.4).** The transitions above are implemented as a pure rule
+(`Domain/Alerts/AlertLifecycle.cs`) and the reading each one needed is stated here rather than only in the code:
+
+- **`Open → Acknowledged` is the only acknowledgement edge**, so a second acknowledgement is refused with the same
+  `409 alert_not_open` a resolved alert answers: in both cases the caller's request changed nothing, and one code is
+  one thing for a client to handle.
+- **`Open → Resolved` is allowed** — a keeper who sees the alert and knows the answer does not have to acknowledge it
+  first — and it deliberately does **not** fabricate an acknowledgement. What happened is a resolve, and the timeline
+  says so.
+- **`Resolved` is terminal for the row, and the key behind it is re-armed when the alert was a threshold alert.** The
+  `EvaluationState` window for `(terrarium, metric, phase)` is cleared, so the excursion is over for both the record
+  and the engine: the alert may only return after the band has been left for the dwell again. Without that step a
+  value that never returned inside the band would satisfy a dwell that had already expired and re-open on the very
+  next sample — a keeper who chose `Accepted` would be told the same thing one interval later. Deliberate, longer
+  suppression is what a `MetricSilence` is for (ADR-023), and the two mechanisms stay different on purpose: a resolve
+  ends an episode, a silence stops the telling.
+- **Nothing here touches severity.** Escalation is the evaluator's, and a human lowering a severity would be editing
+  the record of what the biology did.
 
 ### 4.3 Export job
 `Queued → Running → Completed | Failed | Expired` (Expired after the 24 h download window, file removed by the sweeper).
