@@ -224,6 +224,41 @@ the `EvaluationState` watermark, which is an id watermark and cannot see a `Reco
 
 `GradientWarning` and `LightDeficit` are marked SHOULD: they are implemented if M4 finishes early.
 
+**As built (2026-10-10, roadmap 3.3) — all three signals of this table are implemented; the two SHOULD ones are
+not.**
+The rule is `DeviceSilencePolicy` (pure): `3 × samplingInterval` → Warning, 30 minutes → Critical, and `>` rather
+than `>=` so that the online/offline badge `TerrariumService.DeriveStatus` renders from the same threshold and the
+alert the watchdog opens cannot disagree at the boundary — both call one `SilenceThreshold`. The sweep is
+`DeviceSilenceMonitor` (Application) driven by `SilenceWatchdogWorker` on a 30-second timer, because silence is the
+*absence* of messages and nothing arrives to trigger a pass; it is the mirror image of §4.2's engine, which is
+queue-driven precisely because readings do arrive. Four readings of the design are settled here rather than left to
+the code: the alert is a **device-level row** (`Metric`, band, `TriggeringValue` and `PeakValue` all null — silence
+is not a reading, and inventing a number for it is how a dashboard ends up charting one nobody measured); it is
+**back-dated** to the instant the device should have been heard from, so its duration measures the outage rather
+than the sweep interval; escalation changes the open row's severity and dedupe key and keeps its original
+`TriggeredAt`, which is the same rule §4.2 note 4 applies to a band excursion; and resolution happens at the instant
+the device spoke again, not at the instant a sweep noticed. Two things it deliberately does not do: a device in
+`Maintenance` is not judged (that state exists so routine servicing does not create false alerts) and nothing is
+sent — delivery is the dispatcher's (3.5), the same boundary the band engine keeps.
+
+**The other two signals, same day.** `SensorFault` is decided where its evidence arrives — the `events` channel,
+from the parsed payload's failure count — through `SensorFaultPolicy` (BR-07.1's three consecutive failures; an
+event carrying no count is taken at its word, because the device only raises it after its own threshold). It opens
+one Warning per **metric**, where §02-design/02 §3.14 sketches `MetricId` as null for `SensorFault` alongside
+`DeviceSilent`: the sketch fits silence, which is a property of the board, but a fault names a probe, the dedupe key
+has a slot for it, and a device-level row would collapse "the humidity probe died" and "the light sensor died" into
+one entry that names neither. `sensor_recovered` closes the row with `Recovered` rather than
+`ResolvedReason.SensorFault` — that label is the opposite direction (a *band* alert closed because the probe, not
+the habitat, was wrong) and blurring the two would cost the v2 dataset its negative examples (BR-12.5). A faulted
+metric reading `Unavailable` needs no new code either: a faulted reading carries quality bit 1, `TerrariumService`
+already maps the non-evaluable bits to that status, and `QualityRules.IsEvaluable` is what makes the band engine
+skip it — which is exactly what the requirement's "no alerts raised while faulted" means.
+`DeviceClockSkew` is decided on the sample path from `QualityFlags.ClockUnsynced` — the flag V-09 sets, which also
+carries V-08's deliberate exclusion of a long back-fill — and raises an **Info** entry, one per episode: while it is
+open, later skewed batches move its `LastObservedAt`; a *new* entry waits the hour V-09 asks for, and the entry
+closes when a trusted sample arrives. That is the reading of "one Info signal per hour" this build takes: an hourly
+*row* would read as a new problem every hour, when what it reports is that one problem is still there.
+
 ## 5. Alert state machine and notification handoff
 
 Evaluation writes alerts; it does not send them. The dispatcher decides delivery:

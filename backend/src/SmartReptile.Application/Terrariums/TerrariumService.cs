@@ -745,8 +745,9 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// <summary>
     /// The online/offline state the dashboards show. The stored status is authoritative for the states a device
     /// cannot leave on its own (revoked, provisioning, maintenance); otherwise silence is the signal, so a node that
-    /// stops publishing reads offline after three missed intervals (FR-07 / BR-07.2) instead of claiming to be
-    /// online until the M3 watchdog exists.
+    /// stops publishing reads offline after three missed intervals (FR-07 / BR-07.2). This is the *read* half of the
+    /// rule the silence watchdog writes: both go through <see cref="DeviceSilencePolicy"/>, so the badge a client
+    /// renders cannot disagree with the alert the watchdog opened (§02-design/03 §4.3).
     /// </summary>
     private string DeriveStatus(Device device)
     {
@@ -760,10 +761,10 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             return DeviceStatusNames.Of(DeviceStatus.Offline);
         }
 
-        var silentAfter = TimeSpan.FromSeconds(
-            Math.Max(1, device.SamplingIntervalSec) * Math.Max(1, settings.SilentAfterIntervals));
-
-        return clock.UtcNow - lastSeenAt > silentAfter
+        return DeviceSilencePolicy.IsSilent(
+            clock.UtcNow - lastSeenAt,
+            device.SamplingIntervalSec,
+            settings.SilentAfterIntervals)
             ? DeviceStatusNames.Of(DeviceStatus.Offline)
             : DeviceStatusNames.Of(DeviceStatus.Online);
     }

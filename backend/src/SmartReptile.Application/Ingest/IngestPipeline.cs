@@ -1,3 +1,4 @@
+using SmartReptile.Application.Devices;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Readings;
 
@@ -27,6 +28,7 @@ public sealed class IngestPipeline(
     CalibrationApplier calibration,
     TelemetryWriter writer,
     DeviceStateUpdater stateUpdater,
+    DeviceSignalRecorder signals,
     ITelemetryStore store)
 {
     /// <summary>Runs one envelope through every stage.</summary>
@@ -62,6 +64,18 @@ public sealed class IngestPipeline(
 
         batch = plausibility.Apply(batch);
         batch = calibration.Apply(batch, DeviceCalibration.Parse(device.CalibrationJson));
+
+        // The clock-skew rule is applied here, before the commit, so the notice it may raise lands in the same unit
+        // of work as the samples that evidenced it — a batch that fails to save fails to signal too, which is the
+        // right order. Staged once rather than per attempt: the retry below re-stages the samples, not the signals.
+        if (device.TerrariumId is { } terrariumId)
+        {
+            var skewed = batch.Samples.Any(sample => DeviceClockSkewPolicy.IsSkewed(sample.Flags));
+
+            await signals
+                .RecordBatchClockAsync(device, terrariumId, skewed, envelope.ReceivedAt, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         var (write, committed) = await PersistAsync(batch, device, cancellationToken).ConfigureAwait(false);
 

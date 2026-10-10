@@ -196,6 +196,12 @@ builder.Services.AddSingleton(sp =>
     return new TerrariumSettings(defaults.TimeZoneId, defaults.SilentAfterIntervals);
 });
 
+// The silence watchdog's settings (FR-07, roadmap task 3.3). The missed-interval count is the one the read surface
+// already derives the online badge from, so a deployment that changes it moves the stored status and the badge
+// together; the 30-minute critical threshold is a rule, not a setting.
+builder.Services.AddSingleton(sp => new DeviceSilenceSettings(
+    sp.GetRequiredService<IOptions<DefaultsOptions>>().Value.SilentAfterIntervals));
+
 // ---- rate limiting (§07-appendices/03 §5) ------------------------------------------------------------
 builder.Services.AddRateLimiter(options =>
 {

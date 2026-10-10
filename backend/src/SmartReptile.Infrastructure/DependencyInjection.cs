@@ -4,9 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Evaluation;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Infrastructure.Devices;
 using SmartReptile.Infrastructure.Evaluation;
 using SmartReptile.Infrastructure.Health;
 using SmartReptile.Infrastructure.Ingest;
@@ -143,6 +145,19 @@ public static class DependencyInjection
         services.AddScoped<IEvaluationStore, EfEvaluationStore>();
         services.AddScoped<SampleEvaluator>();
         services.AddHostedService<EvaluatorWorker>();
+
+        // The silence watchdog (roadmap 3.3). A timer rather than a queue, because its input is the absence of
+        // messages: nothing arrives to trigger a pass, so somebody has to look. It writes the device's lifecycle
+        // state and the DeviceSilent alert family; delivery stays with the dispatcher (3.5).
+        services.AddScoped<IDeviceSilenceStore, EfDeviceSilenceStore>();
+        services.AddScoped<DeviceSilenceMonitor>();
+        services.AddHostedService<SilenceWatchdogWorker>();
+
+        // The other two device-health signals (3.3): the sensor fault and the clock-skew notice are decided where
+        // their evidence arrives — the events channel and the sample batch — so they need a store rather than a
+        // sweep, and they stage into the ingest unit of work their caller already owns.
+        services.AddScoped<IDeviceSignalStore, EfDeviceSignalStore>();
+        services.AddScoped<DeviceSignalRecorder>();
 
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();

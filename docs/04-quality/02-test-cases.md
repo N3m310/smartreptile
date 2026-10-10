@@ -165,6 +165,28 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-30 | Gradient warning boundary | surface 44.0, air 31.9 (12.1) vs 43.9/32.0 (11.9) | raises at 12.1, silent at 11.9 | 3 | FR-11 |
 | TC-U-31 | Light deficit accumulating | 6 h above 1 000 lx with a required 8 h, evaluated at 21:00 local | deficit 2.0 h, one `LightDeficit` signal; no per-sample light alert | 2 | FR-11, FR-14 |
 
+> **Built 2026-10-10 — `TC-U-27`, `TC-U-28` and `TC-U-29` are green, 42 cases across three rules
+> (`DeviceSilencePolicyTests` 9, `DeviceSilenceMonitorTests` 9, `SensorFaultPolicyTests` 9,
+> `DeviceClockSkewPolicyTests` 4, `DeviceSignalRecorderTests` 15, minus two rewritten pipeline constructors).**
+> `DeviceSilencePolicy` is the rule and nothing else — `3 × samplingInterval` → Warning, 30 min → Critical, the
+> comparison strictly greater so that `TerrariumService.DeriveStatus` and the watchdog cannot disagree at the
+> boundary, both going through one `SilenceThreshold` — and `DeviceSilenceMonitor` is the sweep that applies it to
+> the fleet: the device moves `Online → Offline`, one alert opens back-dated to the instant the device *should* have
+> been heard from, it escalates in place when half an hour passes, and it closes at the instant the device speaks
+> again. `SensorFaultPolicy` is BR-07.1's three consecutive failures with the reading that a payload carrying no
+> count is the device's own word, and `DeviceSignalRecorder` turns it into one Warning per **metric** — two dead
+> probes are two entries — which `sensor_recovered` closes as `Recovered`. `DeviceClockSkewPolicy` reads V-09's
+> flag (which is also where V-08's exclusion of a long back-fill lives, so an honest back-fill is never a clock
+> fault) and the recorder opens one **Info** entry per episode, refreshed while the clock stays wrong and closed by
+> the first trusted sample. `TC-U-30` and `TC-U-31` are the two SHOULD signals of §4.3 and belong with 3.6, where
+> the accumulated light-hours of `TC-U-31` come from.
+>
+> **`TC-I-09`'s "no metric alerts from missing data" holds by construction rather than by a guard**: a silent node
+> publishes no readings, so the band engine has nothing to judge — and a *faulted* metric is excluded from it by
+> `QualityRules.IsEvaluable`, so "no alerts raised while faulted" is that same rule rather than a second one. The
+> live halves — stop a node for five minutes; publish a `sensor_fault`; publish a batch whose `ts` is ten minutes
+> behind — need the broker and SQL Server and are recorded in the roadmap block.
+
 ### B5. Auth, tokens and RBAC
 
 | Id | Case | Input | Expected | P | FR |

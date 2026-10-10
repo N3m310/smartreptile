@@ -193,6 +193,14 @@ and advances an `EvaluationState` watermark per `(terrarium, metric, phase)`. Un
 **not** back-pressure: ingest's acknowledgement may wait for the database, but it must never wait for a derived
 opinion, so a full queue drops the batch and logs an error as the defect it is.
 
+The silence watchdog (roadmap 3.3, `02-design/03` §4.3) is the one worker that is timer-driven rather than
+queue-driven, for the same reason in reverse: its input is the *absence* of messages, so there is nothing to
+subscribe to and nothing arrives to trigger a pass. The other two signals of that task are the opposite case and
+live in the pipelines that receive their evidence: the sensor fault is decided in the events channel from the
+parsed payload's failure count, and the clock-skew notice on the sample path from V-09's quality bit — each staged
+into the same unit of work as the row that evidenced it, so a stored fault is always a signalled one. None of them
+sends anything: delivery stays with the dispatcher.
+
 The stage classes below are the ones that exist; `TelemetryPayloadValidator` and `PlausibilityGuard` live in the
 Application layer and `TelemetryWriter`/`DeviceStateUpdater` are application stages over an `ITelemetryStore` port,
 which is what keeps them unit-testable without a broker or a database.
@@ -407,7 +415,7 @@ details:
 | `RollupWorker` | every minute + nightly 48 h recompute | Upsert on `(terrarium, metric, hour)` | Recompute later; raw data still present |
 | `SummaryWorker` | local midnight + 5 min per terrarium timezone | Upsert on `(terrarium, localDate)` | Recompute on late data |
 | `RetentionSweeperWorker` | nightly 02:00 local | Batched deletes ≤ 10 000 rows/tx | Partial progress is safe; resumes next run |
-| `DeviceSilenceWatchdog` | every 30 s | One alert per terrarium/device | Creates `DeviceSilent` alerts; escalates at 30 min |
+| `SilenceWatchdogWorker` | every 30 s | One open alert per device | Creates `DeviceSilent` alerts, moves the device `Offline` and escalates at 30 min; a failed sweep is logged and the next tick retries |
 
 All workers derive from `BackgroundService`, resolve scoped services from a scope factory, and log with a
 correlation id. Each exposes a counter so a stuck worker is visible on `/metrics` (NFR-12).

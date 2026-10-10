@@ -532,7 +532,7 @@ covers, which is the same set the read surface resolves a card's band from — a
 |---|---|---|---|
 | 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Read half done 2026-10-09** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `TC-U-21…25` are green; the override write path and `ThresholdSnapshot` (`TC-U-26`) are open. See the block below |
 | 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green. **Decision engine done 2026-10-09** — the pure function, the evaluator that writes open/escalate/touch/resolve, and a live excursion through a real broker (see the block after this table); the per-device reorder window of §7 is open |
-| 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09` |
+| 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) belong with 3.6. See the block below |
 | 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36` |
 | 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push) |
 | 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`) |
@@ -651,6 +651,54 @@ the margin resolved it as `Recovered` and cleared the state's pointer and excurs
 **second** row while the first stayed resolved; and the counters moved by exactly the two openings and the ten
 published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard
 gecko band asks for five) and deleted everything it created.
+
+---
+
+## M3 task 3.3 — the derived signals (built 2026-10-10)
+
+Silence is the one alert whose input is an *absence*: nothing arrives to trigger a pass, so that signal needed
+somebody to look at the fleet on a timer, where 3.2's engine could be queue-driven precisely because readings do
+arrive. The other two are the opposite — a fault and a clock problem both *announce* themselves — so they are
+decided in the pipelines that receive their evidence, inside the unit of work that stores it. Each rule is a pure
+function, which is what lets the boundaries be tested without a clock, a store or a wait.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `DeviceSilencePolicy` — `3 × samplingInterval` → Warning, 30 min → Critical, plus the threshold and the back-dating, as one pure function | `Domain/Devices/DeviceSilencePolicy.cs` | 9 `DeviceSilencePolicyTests` cases |
+| `SensorFaultPolicy` — BR-07.1's three consecutive failures, and the reading that a payload with no count is the device's own word | `Domain/Devices/SensorFaultPolicy.cs` | 9 `SensorFaultPolicyTests` cases |
+| `DeviceClockSkewPolicy` — what counts as a skewed sample (V-09's flag, which carries V-08's exclusion) and the hourly floor | `Domain/Devices/DeviceClockSkewPolicy.cs` | 4 `DeviceClockSkewPolicyTests` cases |
+| `DeviceSilenceAlertWriter` / `DeviceSignalAlertWriter` — the field-level changes each family can take, dependency-free | `Application/Devices/` | the monitor's and the recorder's tests, which assert the rows' fields |
+| `DeviceSilenceMonitor` — one sweep: `Online → Offline`, one back-dated alert, escalation in place, resolution when the device returns | `Application/Devices/DeviceSilenceMonitor.cs` | 9 cases, `TC-U-27` among them |
+| `DeviceSignalRecorder` — the fault from the event that reports it and the skew notice from the batch that shows it, both idempotent | `Application/Devices/DeviceSignalRecorder.cs` | 15 cases, `TC-U-28`/`TC-U-29` among them |
+| `IDeviceSilenceStore`/`IDeviceSignalStore` + their EF adapters — the fleet, the open entries and the last signal, in a handful of indexed lookups | `Infrastructure/Devices/` | the start-up run below |
+| `SilenceWatchdogWorker` — a `PeriodicTimer` at 30 s, `alerts_opened_total` by severity, a throwing sweep logged and left for the next tick | `Infrastructure/Devices/SilenceWatchdogWorker.cs` | the start-up run below |
+
+**The readings of the design settled here**, each now stated where it belongs: the silence alert is a device-level
+row whose value and band fields stay null (silence is not a reading, and a number for it would be invented) and
+whose `TriggeredAt` is back-dated to the instant the device should have been heard from, so the duration measures
+the outage rather than the sweep cadence; the state machine's `Online → Offline` edge and the read surface's badge
+go through the same `SilenceThreshold`, so they cannot disagree at the boundary; the **sensor-fault alert names its
+metric** where `02-design/02` §3.14 sketched `MetricId` as null — a deviation, recorded in `02-design/03` §4.3,
+because two dead probes are two entries and a device-level row names neither; a fault closes with `Recovered` and
+not `ResolvedReason.SensorFault`, which is the label for the opposite direction; and the clock-skew entry is one
+per episode, refreshed while the clock stays wrong, with V-09's hour as the floor for a *new* one.
+
+**What the signals deliberately do not do.** Nothing here sends anything — delivery is the dispatcher's (3.5), the
+same boundary the band engine keeps. `SensorFault` raises no threshold alert: the faulted reading carries quality
+bit 1, `QualityRules.IsEvaluable` excludes it, and "the probe is dead" is stated as itself rather than as an
+excursion. A device in `Maintenance` is not judged by the silence sweep, and an alert already open when it went in
+is not closed behind the owner's back. And none of this changes what is stored: the raw `DeviceEvent` row keeps the
+whole payload, so a rule that changes can be replayed against history by re-parsing it.
+
+**Verification.** 588 unit tests (42 new: 9 silence policy, 9 sensor-fault policy, 4 clock-skew policy, 9 silence
+monitor, 15 signal recorder — minus the two rewritten pipeline constructors), everything builds with no warnings,
+and `dotnet format --verify-no-changes --severity error` is clean. A start-up run against no database shows the
+watchdog registered and sweeping on its timer — `Silence watchdog started; sweeping every 30s`, then
+`The silence sweep threw; the next sweep retries` — which is the wiring check and, incidentally, the failure
+behaviour §02-design/03 §8 asks for: one unhappy sweep does not stop the watchdog. The live halves of `TC-I-09`
+(stop a node for five minutes, watch the Warning open and the badge go offline, resume, watch both close) and of
+`TC-U-28`/`TC-U-29` over a broker (publish a `sensor_fault`, publish a batch with a ten-minute skew) need the broker
+and SQL Server together and are the next run to record.
 
 ---
 

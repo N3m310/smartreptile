@@ -50,7 +50,7 @@ public sealed class SmartReptileMetrics
         Interlocked.Add(ref _rejectedCount, count);
     }
 
-    /// <summary>Records an alert opened by the evaluator, by the severity it opened at.</summary>
+    /// <summary>Records an alert opened by the evaluator or by the silence watchdog, by the severity it opened at.</summary>
     public void AlertOpened(string severity, int count = 1)
     {
         _alertsOpened.Add(count, new KeyValuePair<string, object?>("severity", severity));

@@ -151,7 +151,7 @@ public sealed class JsonDeviceChannelParser : IDeviceChannelParser
             null,
             // The event's own fields are kept whole: the payloads differ per type, and a sparse wide table would
             // turn every new firmware field into a migration. Task 3.3 reads what it needs out of here.
-            new DeviceEventDraft(type.Value, metric, root.GetRawText())));
+            new DeviceEventDraft(type.Value, metric, ReadInt32(root, "consecutiveFailures"), root.GetRawText())));
     }
 
     private static string? ReadString(JsonElement root, string name) =>
