@@ -13,9 +13,10 @@ public static class AuthEndpoints
     /// <summary>Maps register, login, refresh, logout, me and change-password.</summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
+        // Two budgets, attached per route rather than to the group: guessing a password or a code and holding a
+        // token already are not the same kind of caller (`auth` and `authSession` in `Program.cs`).
         var group = app.MapGroup("/api/v1/auth")
-            .WithTags("auth")
-            .RequireRateLimiting("auth");
+            .WithTags("auth");
 
         group.MapPost("/register", async (RegisterRequest request, AuthService auth, CancellationToken ct) =>
         {
@@ -29,6 +30,7 @@ public static class AuthEndpoints
                     statusCode: StatusCodes.Status202Accepted)
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Create an account")
         .WithDescription("Anonymous. Answers 202 with a backup recovery code to store, or 409 registration_conflict "
                        + "naming the identifier that is already in use (ADR-020).");
@@ -47,6 +49,7 @@ public static class AuthEndpoints
                 ? Results.Ok(new { recoveryCode = outcome.RecoveryCode })
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Replace a forgotten password with the backup recovery code")
         .WithDescription("Anonymous and rate-limited. Consumes the stored code, issues a replacement and ends every "
                        + "existing session. A wrong code and an unknown identifier answer identically.");
@@ -65,6 +68,7 @@ public static class AuthEndpoints
             // an address has an account — is recorded in the ADR rather than left implicit.
             return outcome.Succeeded ? Results.Accepted() : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Request a password-reset code")
         .WithDescription("Anonymous and rate-limited. Answers 202 when a code was issued, and 404 identifier_unknown "
                        + "when no account uses the identifier (ADR-020).");
@@ -83,6 +87,7 @@ public static class AuthEndpoints
                 ? Results.Ok(new { recoveryCode = outcome.RecoveryCode })
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Set a new password with a server-issued reset code")
         .WithDescription("Anonymous and rate-limited. Consumes the code, issues a new backup recovery code and ends "
                        + "every existing session.");
@@ -94,6 +99,7 @@ public static class AuthEndpoints
                 ? Results.Ok(SessionBody(outcome.Session!))
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Start a session")
         .WithDescription("Returns a 15-minute access token and a single-use refresh token.");
 
@@ -104,6 +110,7 @@ public static class AuthEndpoints
                 ? Results.Ok(SessionBody(outcome.Session!))
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("authSession")
         .WithSummary("Rotate the session")
         .WithDescription("Consumes the refresh token. Reuse of a consumed token revokes the whole family.");
 
@@ -112,6 +119,7 @@ public static class AuthEndpoints
             await auth.LogoutAsync(request.RefreshToken, ct);
             return Results.NoContent();
         })
+        .RequireRateLimiting("authSession")
         .WithSummary("End a session")
         .WithDescription("Idempotent: an unknown or already-revoked token is still a success.");
 
@@ -124,6 +132,7 @@ public static class AuthEndpoints
             return profile is null ? Results.Unauthorized() : Results.Ok(profile);
         })
         .RequireAuthorization()
+        .RequireRateLimiting("authSession")
         .WithSummary("The signed-in account");
 
         group.MapPost("/change-password", async (
@@ -136,8 +145,10 @@ public static class AuthEndpoints
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
         .RequireAuthorization()
+        .RequireRateLimiting("auth")
         .WithSummary("Change the password")
-        .WithDescription("Re-proves the current password and ends every existing session.");
+        .WithDescription("Re-proves the current password and ends every other session of the account, keeping the one "
+                       + "whose refresh token the request names.");
 
         return app;
     }

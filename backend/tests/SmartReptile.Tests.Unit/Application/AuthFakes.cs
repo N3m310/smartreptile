@@ -187,6 +187,21 @@ internal sealed class FakeUserStore : IUserStore
         return Task.CompletedTask;
     }
 
+    public Task RevokeUserTokensExceptFamilyAsync(
+        Guid userId,
+        Guid familyId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        foreach (var token in _tokens.Where(
+                     token => token.UserId == userId && token.RevokedAt is null && token.FamilyId != familyId))
+        {
+            token.RevokedAt = nowUtc;
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveCount++;

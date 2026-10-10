@@ -221,8 +221,16 @@ public sealed class AuthService(
     }
 
     /// <summary>
-    /// Changes the password of the signed-in account, after re-proving the current one. Ends every session.
+    /// Changes the password of the signed-in account, after re-proving the current one. Ends every session of the
+    /// account except the caller's own, which the request names.
     /// </summary>
+    /// <remarks>
+    /// Ending *every* session is the simpler rule and it is the wrong one here: the caller has just typed the very
+    /// credential the change is about, so evicting them buys no security and costs a sign-out — while the sessions a
+    /// keeper actually wants gone are the others (the browser left open on a shared machine, the phone that was
+    /// lost). A caller who does not name a session, or names one this account does not hold, keeps none: an
+    /// unnamed session is not the caller's, and revoking everything is the reading that fails safely.
+    /// </remarks>
     public async Task<AuthOutcome> ChangePasswordAsync(
         Guid userId,
         ChangePasswordRequest request,
@@ -254,10 +262,37 @@ public sealed class AuthService(
         user.PasswordSalt = hashed.Salt;
         user.PasswordIterations = hashed.Iterations;
 
-        await store.RevokeAllUserTokensAsync(user.Id, clock.UtcNow, cancellationToken);
+        var survives = await LiveFamilyAsync(user.Id, request.RefreshToken, cancellationToken);
+
+        if (survives is { } familyId)
+        {
+            await store.RevokeUserTokensExceptFamilyAsync(user.Id, familyId, clock.UtcNow, cancellationToken);
+        }
+        else
+        {
+            await store.RevokeAllUserTokensAsync(user.Id, clock.UtcNow, cancellationToken);
+        }
+
         await store.SaveChangesAsync(cancellationToken);
 
         return AuthOutcome.Success();
+    }
+
+    /// <summary>
+    /// The rotation family the presented refresh token belongs to, when that token is this account's and still
+    /// live. A consumed-but-not-revoked token still counts: rotation keeps the family id, so a client that rotated
+    /// its token a moment before changing the password is still the caller of the change.
+    /// </summary>
+    private async Task<Guid?> LiveFamilyAsync(Guid userId, string? refreshToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return null;
+        }
+
+        var token = await store.FindRefreshTokenAsync(secrets.Sha256(refreshToken), cancellationToken);
+
+        return token is not null && token.UserId == userId && token.RevokedAt is null ? token.FamilyId : null;
     }
 
     /// <summary>

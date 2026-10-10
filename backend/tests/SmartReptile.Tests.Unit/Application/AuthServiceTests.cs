@@ -301,18 +301,40 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task ChangePassword_switches_the_password_and_ends_every_session()
+    public async Task ChangePassword_switches_the_password_and_ends_every_other_session()
+    {
+        var caller = await RegisterAndLoginAsync();
+        var elsewhere = (await LoginAsync()).Session!;
+
+        var outcome = await _auth.ChangePasswordAsync(
+            caller.User.Id,
+            new ChangePasswordRequest(Password, NewPassword, caller.RefreshToken));
+
+        outcome.Succeeded.Should().BeTrue();
+
+        // The session that made the change survives — the caller has just proved the credential the change is
+        // about — and the one that did not is gone.
+        (await _auth.RefreshAsync(caller.RefreshToken)).Succeeded.Should().BeTrue();
+        (await _auth.RefreshAsync(elsewhere.RefreshToken)).Problem!.Code.Should().Be("refresh_token_invalid");
+
+        (await LoginAsync(password: NewPassword)).Succeeded.Should().BeTrue();
+        (await LoginAsync()).Problem!.Code.Should().Be("invalid_credentials");
+    }
+
+    [Fact]
+    public async Task ChangePassword_without_a_named_session_ends_them_all()
     {
         var session = await RegisterAndLoginAsync();
+        await LoginAsync();
 
         var outcome = await _auth.ChangePasswordAsync(
             session.User.Id,
             new ChangePasswordRequest(Password, NewPassword));
 
         outcome.Succeeded.Should().BeTrue();
-        _store.Tokens.Should().OnlyContain(token => token.RevokedAt != null);
-        (await LoginAsync(password: NewPassword)).Succeeded.Should().BeTrue();
-        (await LoginAsync()).Problem!.Code.Should().Be("invalid_credentials");
+        _store.Tokens.Should().OnlyContain(
+            token => token.RevokedAt != null,
+            "a session the caller did not name is not the caller's to keep");
     }
 
     // ---- profile ------------------------------------------------------------------------------------

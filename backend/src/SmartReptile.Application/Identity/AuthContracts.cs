@@ -12,7 +12,17 @@ public sealed record LoginRequest(string? UsernameOrEmail, string? Password, str
 public sealed record RefreshRequest(string? RefreshToken);
 
 /// <summary>Change-password input; the account comes from the access token, never from the body.</summary>
-public sealed record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
+/// <param name="CurrentPassword">The password being replaced, re-proved by the caller.</param>
+/// <param name="NewPassword">The password to store.</param>
+/// <param name="RefreshToken">
+/// The caller's own session, named by its refresh token so that it is the one session that survives the change.
+/// Optional: a caller that omits it — or names a token this account does not hold — has every session ended
+/// (§02-design/06 §2), which is the reading that cannot be wrong in the unsafe direction.
+/// </param>
+public sealed record ChangePasswordRequest(
+    string? CurrentPassword,
+    string? NewPassword,
+    string? RefreshToken = null);
 
 /// <summary>
 /// Recovery input: the backup code the keeper stored at registration, plus the password to replace

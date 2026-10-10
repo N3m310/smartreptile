@@ -13,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 using SmartReptile.Api.Endpoints;
 using SmartReptile.Api.Hubs;
 using SmartReptile.Api.Middleware;
+using SmartReptile.Api.OpenApi;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
@@ -228,6 +229,21 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0,
         }));
 
+    // The session's own routes — `/auth/me`, `/auth/refresh`, `/auth/logout` — are not credential-guessing
+    // surfaces: each needs a token the caller already holds, and the client calls them as a matter of course
+    // (read the profile on load, rotate a 15-minute token, end a session). Sharing the credential budget made
+    // ordinary housekeeping spend it, and a `429` on a rotation is the one refusal that can end a signed-in
+    // session — so these three get a budget sized for the client that uses them rather than for an attacker who
+    // is guessing passwords. The credential routes keep the tight budget above.
+    options.AddPolicy("authSession", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+
     // The ingest fallback is limited per device (6/min, `07-appendices/03` §3.6) rather than per address, because
     // two boards behind one home router are two budgets - which is the point of the fallback: a device that has
     // been offline is the one that needs to back-fill, and it must not be starved by the other one.
@@ -279,8 +295,15 @@ builder.Services.AddSwaggerGen(options =>
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
         Scheme = "bearer",
         BearerFormat = "JWT",
-        Description = "Paste a user access token (15 minute lifetime).",
+        Description = "Paste a user access token (15 minute lifetime) — paste the token only, without a 'Bearer ' "
+                    + "prefix, which Swagger UI adds itself. The token comes from POST /api/v1/auth/login and is "
+                    + "valid for 15 minutes.",
     });
+
+    // The document has to *require* the scheme on the operations that use it, or Swagger UI accepts a token in its
+    // dialog and never sends it — every authenticated call then answers `401 unauthenticated`, which reads as a bad
+    // token. That is what this filter is for; a definition alone is only what makes the dialog appear.
+    options.OperationFilter<BearerSecurityOperationFilter>();
 });
 
 var app = builder.Build();

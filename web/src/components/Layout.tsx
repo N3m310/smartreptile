@@ -17,12 +17,12 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { apiBaseUrl, ApiError } from '../api/client';
+import { apiBaseUrl, ApiError, readSession } from '../api/client';
 import * as auth from '../api/endpoints';
 import { useI18n } from '../i18n';
 import { LANGUAGES } from '../i18n/strings';
 import { useSession } from '../state/session';
-import { describeError, fieldMessages } from '../lib/messages';
+import { describeChangePasswordError, fieldMessages } from '../lib/messages';
 import { MockDataNotice } from './MockDataNotice';
 
 /**
@@ -53,6 +53,7 @@ export const Layout: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [changed, setChanged] = useState(false);
 
   const online = navigator.onLine;
   const showsMockNotice = MOCK_ROUTES.some((route) => location.pathname.startsWith(route));
@@ -77,12 +78,18 @@ export const Layout: React.FC = () => {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setChanged(false);
     try {
-      await auth.changePassword({ currentPassword, newPassword });
-      // The server revoked every session including this one, so staying on a page that 401s on the next click
-      // would be a lie. The confirmation is handed to the sign-in screen through router state.
-      await signOut();
-      navigate('/', { replace: true, state: { notice: t('passwordChanged') } });
+      await auth.changePassword({
+        currentPassword,
+        newPassword,
+        // This session is the one the change keeps — the server ends every other — so the keeper is not sent back
+        // to the sign-in form for a password they just proved they know. The button state below is the receipt.
+        refreshToken: readSession()?.refreshToken ?? '',
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      setChanged(true);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
     } finally {
@@ -199,11 +206,19 @@ export const Layout: React.FC = () => {
               <p className="text-[11px] text-muted">{t('passwordHint')}</p>
               {error ? (
                 <div className="rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
-                  <p>{describeError(t, error)}</p>
+                  <p>{describeChangePasswordError(t, error)}</p>
                   {fieldMessages(t, error.errors).map((message) => (
                     <p key={message}>{message}</p>
                   ))}
                 </div>
+              ) : null}
+              {changed ? (
+                <p
+                  role="status"
+                  className="rounded-lg border border-brand/40 bg-brand/10 px-2.5 py-2 text-[11px] text-ink"
+                >
+                  {t('passwordChanged')}
+                </p>
               ) : null}
               <button
                 type="submit"

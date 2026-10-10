@@ -234,7 +234,7 @@ return `nextCursor`.
 | POST | `/auth/logout` | U | `{refreshToken}` | `204` | — |
 | GET | `/auth/me` | U | — | `200 {user, preferences}` | `401` |
 | PATCH | `/auth/me` | U | preferences, timezone, language | `200` | `400 validation_failed` |
-| POST | `/auth/change-password` | U | `{currentPassword, newPassword}` | `204` (all refresh tokens revoked) | `400 password_policy_violation`, `401 invalid_credentials`, `429 account_locked` |
+| POST | `/auth/change-password` | U | `{currentPassword, newPassword, refreshToken}` | `204` (every **other** session's refresh tokens revoked; the one named by `refreshToken` survives — `ADR-022`) | `400 password_policy_violation`, `401 invalid_credentials`, `429 account_locked` |
 | POST | `/auth/recover` | A | `{usernameOrEmail, recoveryCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_recovery_code`, `429 account_locked` |
 | POST | `/auth/forgot-password` | A | `{usernameOrEmail}` | `202` (empty body) | `404 identifier_unknown`, `429 rate_limited` |
 | POST | `/auth/reset-password` | A | `{usernameOrEmail, resetCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_reset_code`, `429 account_locked` |
@@ -529,7 +529,8 @@ be probed (BR-02.2).
 
 | Scope | Limit |
 |---|---|
-| `/api/v1/auth/*` (whole group) | 10 / min / IP; 5 failures per username per 15 min, 20 per IP per 15 min (login and both reset paths share the counters) |
+| `/api/v1/auth/*` credential routes (`register`, `login`, `change-password`, `recover`, `forgot-password`, `reset-password`) | 10 / min / IP; 10 failures per username per 15 min, 20 per IP per 15 min (login and both reset paths share the counters) |
+| `/auth/me`, `/auth/refresh`, `/auth/logout` (session lifecycle) | 60 / min / IP — a signed-in client reads its profile on load, rotates a 15-minute token and ends a session, so these are housekeeping rather than credential guessing |
 | `/devices/self-register` | 1 / 5 min / IP; 20 / hour global |
 | `/ingest/http` | 6 / min / device |
 | `/devices/{id}/snapshots` | 1 / 30 s / device |

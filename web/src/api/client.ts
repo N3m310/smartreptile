@@ -8,12 +8,17 @@
  *    carries all of it, so a screen maps codes it knows and shows an honest fallback for one it does not —
  *    which is what makes a new server-side refusal a visible gap instead of a wrong sentence.
  *
- * 2. **A 401 rotates the session once.** Access tokens live 15 minutes (BR-01.3), so this is the common path,
- *    not the exceptional one. Rotation is single-flight: ten parallel requests that all see a 401 must produce
- *    one `POST /auth/refresh`, because the refresh token is single-use and a second rotation attempt with a
- *    consumed token revokes the whole family (TC-U-34) — i.e. a naive "retry each on 401" logs the keeper out
- *    for being busy. When rotation fails the session is dropped and subscribers are told, so the shell can send
- *    them to the sign-in form with `sessionExpired` rather than leaving a page that 401s on every click.
+ * 2. **A 401 rotates the session once — when the 401 is about the token.** Access tokens live 15 minutes
+ *    (BR-01.3), so a rotation is the common path, not the exceptional one. It is single-flight: ten parallel
+ *    requests that all see a 401 must produce one `POST /auth/refresh`, because the refresh token is single-use
+ *    and a second rotation attempt with a consumed token revokes the whole family (TC-U-34) — i.e. a naive "retry
+ *    each on 401" logs the keeper out for being busy. Two refusals are *not* about the token and must not rotate:
+ *    a 401 that refused the credential this request carried (the current password, a recovery code) and a 401
+ *    that names the refresh token as spent. Only the second ends the session, with subscribers told, so the shell
+ *    can send the keeper to the sign-in form with `sessionExpired` rather than leaving a page that 401s on every
+ *    click. A refusal that is about neither — a rate limit, a 5xx, an unreachable server — leaves the session
+ *    where it is and is reported as itself, because signing somebody out over a rate limit is a lie about what
+ *    happened *and* throws away a session that still works.
  *
  * Token storage is `localStorage`, and that is a deliberate, documented compromise: a browser client has no
  * keystore (`flutter_secure_storage` is the app's answer, not the web's), so any XSS on this origin can read the
@@ -127,30 +132,79 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-/** The refresh promise while a rotation is in flight — the single-flight guard. */
-let rotation: Promise<boolean> | null = null;
+/**
+ * The refusals that answer "the credential in this request is wrong" rather than "this access token is not
+ * usable". Rotating for one of them would spend a single-use refresh token on a typo.
+ */
+const CREDENTIAL_REFUSALS = new Set(['invalid_credentials', 'invalid_recovery_code', 'invalid_reset_code']);
 
-async function rotateOnce(): Promise<boolean> {
+/** The refresh refusals that mean the session is over. Anything else refused *this attempt*, not the session. */
+const SESSION_ENDED = new Set(['refresh_token_invalid', 'token_reused']);
+
+/** How a rotation attempt ended: a fresh session, or the error worth reporting and whether the session survived. */
+type RotationResult =
+  | { rotated: true }
+  | { rotated: false; error: ApiError; sessionEnded: boolean };
+
+/** The refresh promise while a rotation is in flight — the single-flight guard. */
+let rotation: Promise<RotationResult> | null = null;
+
+/** The stable code of a refusal, read from a clone so the body survives for `toApiError`. */
+async function problemCode(response: Response): Promise<string | null> {
+  try {
+    const problem = (await response.clone().json()) as { code?: unknown };
+    return typeof problem?.code === 'string' ? problem.code : null;
+  } catch {
+    // Not a problem document (an empty body, a proxy's own 401): no code to act on, so the caller keeps the
+    // behaviour it had before codes existed.
+    return null;
+  }
+}
+
+async function rotateOnce(): Promise<RotationResult> {
   const session = readSession();
   if (!session) {
-    return false;
+    return { rotated: false, error: new ApiError('unauthenticated', 401, null), sessionEnded: true };
   }
 
-  rotation ??= (async () => {
+  rotation ??= (async (): Promise<RotationResult> => {
     try {
       const response = await send('/api/v1/auth/refresh', {
         method: 'POST',
         body: { refreshToken: session.refreshToken },
         allowRefresh: false,
       });
-      writeSession(storedSession((await response.json()) as AuthSession));
-      return true;
-    } catch {
-      // The refresh token is gone, consumed, or the family was revoked. There is no session any more, and
-      // pretending otherwise would leave a signed-in-looking shell that 401s on every request.
-      lastSessionLoss = 'expired';
-      writeSession(null);
-      return false;
+
+      if (!response.ok) {
+        // A refusal is not a rotation. Reading this body as if it were a session wrote a problem document with no
+        // tokens into `localStorage`, which `readSession` then rejected — i.e. a silent sign-out, from the one
+        // request that exists to prevent one.
+        const error = await toApiError(response);
+        const sessionEnded = response.status === 401 && SESSION_ENDED.has(error.code);
+
+        if (sessionEnded) {
+          lastSessionLoss = 'expired';
+          writeSession(null);
+        }
+
+        return { rotated: false, error, sessionEnded };
+      }
+
+      const renewed = (await response.json()) as AuthSession;
+
+      if (!renewed?.accessToken || !renewed?.refreshToken) {
+        return { rotated: false, error: new ApiError('unknown', response.status, null), sessionEnded: false };
+      }
+
+      writeSession(storedSession(renewed));
+      return { rotated: true };
+    } catch (cause) {
+      // Never reached a server: offline, timed out. The session is not the thing that failed, so it stays.
+      return {
+        rotated: false,
+        error: cause instanceof ApiError ? cause : new ApiError('network_unreachable', 0, null),
+        sessionEnded: false,
+      };
     } finally {
       rotation = null;
     }
@@ -215,8 +269,21 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   let response = await send(path, options);
 
   if (response.status === 401 && allowRefresh && readSession()) {
-    if (await rotateOnce()) {
-      response = await send(path, options);
+    // A 401 this request earned by sending a wrong credential — the current password on the change-password form,
+    // a recovery code — is the endpoint's answer, not a sign that the access token is unusable. Rotating for it
+    // spends a refresh token per typo, and a refusal *of* that rotation is what turned a mistyped password into a
+    // signed-out keeper.
+    const code = await problemCode(response);
+
+    if (code === null || !CREDENTIAL_REFUSALS.has(code)) {
+      const attempt = await rotateOnce();
+
+      if (attempt.rotated) {
+        response = await send(path, options);
+      } else if (!attempt.sessionEnded) {
+        // The session is intact: report what actually refused the call instead of the stale 401.
+        throw attempt.error;
+      }
     }
   }
 

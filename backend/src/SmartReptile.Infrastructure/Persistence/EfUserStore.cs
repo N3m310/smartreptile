@@ -76,6 +76,23 @@ public sealed class EfUserStore(SmartReptileDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task RevokeUserTokensExceptFamilyAsync(
+        Guid userId,
+        Guid familyId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var live = await db.RefreshTokens
+            .Where(token => token.UserId == userId && token.RevokedAt == null && token.FamilyId != familyId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var token in live)
+        {
+            token.RevokedAt = nowUtc;
+        }
+    }
+
+    /// <inheritdoc />
     public void AddPasswordResetCode(PasswordResetCode code) => db.PasswordResetCodes.Add(code);
 
     /// <inheritdoc />

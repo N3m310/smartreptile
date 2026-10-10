@@ -53,6 +53,8 @@ export async function me(): Promise<UserProfile> {
 export async function changePassword(body: {
   currentPassword: string;
   newPassword: string;
+  /** The caller's own refresh token: the session the change keeps alive. Every other one ends. */
+  refreshToken: string;
 }): Promise<void> {
   await apiRequest('/api/v1/auth/change-password', { method: 'POST', body });
 }

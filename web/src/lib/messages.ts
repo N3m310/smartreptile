@@ -85,6 +85,20 @@ export function describeError(t: TFunc, error: ApiError | null): string {
 }
 
 /**
+ * The sentence for a failed change-password call.
+ *
+ * `/auth/change-password` answers a wrong current password with the same opaque `401 invalid_credentials` a failed
+ * sign-in gets (`07-appendices/03` §4.1) — "this credential is wrong" is one condition with one code — but the
+ * sentence that code maps to names a *username*, and this form has no username field to be wrong: the only
+ * credential it can send is the one it is asking about. The deck's `wrongCurrentPassword` is therefore the honest
+ * reading of that code here. Every other refusal — the policy violation, the lockout, an unreachable server — is
+ * the sentence its own code already has.
+ */
+export function describeChangePasswordError(t: TFunc, error: ApiError | null): string {
+  return error?.code === 'invalid_credentials' ? t('wrongCurrentPassword') : describeError(t, error);
+}
+
+/**
  * The rule-by-rule sentences behind a refusal, e.g. every password rule a new password broke. Empty when the
  * refusal carried no field detail — which is not a failure of this function, it is an answer with no detail.
  */

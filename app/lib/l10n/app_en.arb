@@ -130,7 +130,7 @@
   "currentPassword": "Current password",
   "changePasswordSubmit": "Update password",
   "changingPassword": "Updating…",
-  "passwordChanged": "Password changed. Sign in again with the new one.",
+  "passwordChanged": "Password changed. Every other session has ended.",
   "wrongCurrentPassword": "The current password is wrong.",
   "passwordPolicyViolation": "The new password was refused.",
   "passwordHint": "At least 8 characters, including one upper-case letter and one special character.",

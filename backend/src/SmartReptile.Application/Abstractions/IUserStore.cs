@@ -46,8 +46,19 @@ public interface IUserStore
     /// </summary>
     Task RevokeTokenFamilyAsync(Guid familyId, DateTimeOffset nowUtc, CancellationToken cancellationToken);
 
-    /// <summary>Revokes every session of one account — used by a password change (§02-design/06 §2).</summary>
+    /// <summary>Revokes every session of one account — used when a caller cannot name one to keep (§02-design/06 §2).</summary>
     Task RevokeAllUserTokensAsync(Guid userId, DateTimeOffset nowUtc, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes every session of one account except the rotation family named. A password change evicts the
+    /// sessions a keeper no longer trusts while leaving them signed in on the device they just used, because that
+    /// caller has re-proved the credential the change is about.
+    /// </summary>
+    Task RevokeUserTokensExceptFamilyAsync(
+        Guid userId,
+        Guid familyId,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken);
 
     /// <summary>Stages a password-reset code.</summary>
     void AddPasswordResetCode(PasswordResetCode code);

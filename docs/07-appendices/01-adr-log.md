@@ -1,4 +1,4 @@
-# 01 — Architecture Decision Log (ADR-001 … ADR-021)
+# 01 — Architecture Decision Log (ADR-001 … ADR-022)
 
 Append-only. Each entry: **Context → Decision → Consequences → Rejected alternatives.** Numbers are never
 reused; a superseded ADR keeps its id and gains a "Superseded by" note.
@@ -646,3 +646,41 @@ correct. **Building Telegram properly** (bot linking, webhook, chat-id verificat
 credential type for a channel no requirement demands, in the same milestone as the alert engine the product actually
 needs. **Adding the SMTP sink inside this change**: it is the right compensating control for `R-13`, but it is a new
 component with its own tests, and folding it into a scope reduction would hide it.
+
+---
+
+## ADR-022 — A password change keeps the session that made it and ends every other
+**Status:** Accepted · **Date:** 2026-10-10 · **Related:** FR-01, `02-design/06` §2, BUG-07
+
+**Context.** `POST /auth/change-password` revoked every refresh token of the account, and the web client turned that
+into a visible sign-out: a keeper changed their password and was returned to the sign-in form, while the form's own
+prompt promised only that *other* sessions would end ("Mọi phiên đăng nhập khác sẽ kết thúc"). The rule came from the
+session-invalidation row of `02-design/06` §2 — "password change revokes all refresh tokens for that user" — written
+as the shortest way to say "a password change evicts the sessions the keeper no longer trusts". The session that made
+the change is not one of those: its caller typed the very credential the change is about, seconds earlier.
+
+**Decision.** The change-password request names its own session with its refresh token
+(`ChangePasswordRequest.RefreshToken`, optional), and every *other* rotation family of the account is revoked
+(`IUserStore.RevokeUserTokensExceptFamilyAsync`). A caller that omits the token, or names one this account does not
+hold or one already revoked, keeps nothing: it falls back to `RevokeAllUserTokensAsync`. The response stays `204`
+with no body — the caller's access token remains valid for the rest of its 15 minutes and its refresh token keeps
+working, because it is the one row the change did not touch.
+
+**Consequences.**
+- The prompt the form already showed is now true, so the web form reports the change in place and `Login.tsx` no
+  longer consumes a `location.state.notice` that only this flow ever produced; the deck's `passwordChanged` sentence
+  now names which sessions ended.
+- The eviction a keeper actually asks for still happens: a second browser, a second device or a stolen token stops
+  working at its next rotation (`401 refresh_token_invalid`) because the family is revoked server-side rather than
+  left to expire.
+- The safe direction stays the default. Naming no session revokes everything, so a client that cannot say who it is
+  cannot keep a session alive by omission.
+- `recover` and `reset-password` keep ending **every** session: they are reached without a session, so there is none
+  to keep, and the person holding a forgotten password may still hold a live one.
+
+**Rejected.** **Keeping the old rule and rewording the prompt** (the form would say "you will be signed out"):
+honest, but it makes a device the keeper is holding collateral of a routine action, and puts the cost on the user
+rather than on an attacker. **Rotating the caller's token as well** (a fresh pair in the response): three moving
+parts — the response shape, the client's session write, the single-use invariants — for a session nobody questioned.
+**Identifying the caller's session by a claim in the access token** (a `sid` beside `sub`): a token-format change
+that lands on every client, when the refresh token that names the session is already in the caller's hand.

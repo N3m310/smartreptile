@@ -321,7 +321,7 @@ skipped and nothing is evaluated twice.
 
 | Group | Endpoints (abbreviated) | Notes |
 |---|---|---|
-| `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password`, `recover`, `forgot-password`, `reset-password` | Anonymous + `[Authorize]`; the three recovery routes are anonymous and share the group's throttle |
+| `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password`, `recover`, `forgot-password`, `reset-password` | Anonymous + `[Authorize]`; the three recovery routes are anonymous and share the credential throttle (`auth`, 10 / min / address), while `me`, `refresh` and `logout` carry the larger `authSession` budget because a signed-in client calls them as housekeeping. A password change ends every **other** session of the account (`ADR-022`) |
 
 Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of design, and one file owns it:
 

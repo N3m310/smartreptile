@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   Eye,
@@ -40,7 +40,6 @@ export const Login: React.FC = () => {
   const { t, lang, setLang } = useI18n();
   const { session, signIn, lostReason, clearLostReason } = useSession();
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [mode, setMode] = useState<Mode>('signIn');
   const [identifier, setIdentifier] = useState('');
@@ -61,16 +60,6 @@ export const Login: React.FC = () => {
       navigate('/dashboard', { replace: true });
     }
   }, [session, navigate]);
-
-  // The shell hands its change-password confirmation over as router state, because the server revoked the session
-  // that could have shown it. The state is consumed immediately so a reload does not replay the message.
-  useEffect(() => {
-    const incoming = (location.state as { notice?: string } | null)?.notice;
-    if (incoming) {
-      setNotice(incoming);
-      navigate(location.pathname, { replace: true, state: null });
-    }
-  }, [location.state, location.pathname, navigate]);
 
   const clearFeedback = () => {
     setError(null);

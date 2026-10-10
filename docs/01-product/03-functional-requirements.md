@@ -24,7 +24,7 @@ session, and log out.
   frequently used passwords; hashed with PBKDF2-HMAC-SHA256 (≥ 210 000 iterations, 16-byte salt) or
   Argon2id (m=64 MiB, t=3, p=1).
 - `BR-01.3` Access token JWT lifetime 15 min; refresh token 30 days, single-use with rotation.
-- `BR-01.4` After 5 failed logins for one username within 15 min, that username is throttled for 15 min.
+- `BR-01.4` After 10 failed logins for one username within 15 min, that username is throttled for 15 min.
 
 **Acceptance criteria**
 - **Given** a valid registration payload, **when** the user submits it, **then** the account is
