@@ -1,23 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, ExternalLink, History as HistoryIcon, Info } from 'lucide-react';
+import { Box, ExternalLink, History as HistoryIcon, Plus, X, Loader2 } from 'lucide-react';
 import * as api from '../api/endpoints';
-import type { TerrariumList } from '../api/types';
+import type { SpeciesProfileItem, TerrariumList } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
 import { useI18n } from '../i18n';
 import { formatDateTime, formatRelative } from '../lib/format';
 import { deviceStatusLabel } from '../lib/status';
 import { usePolled } from '../lib/usePolled';
-
-/**
- * W2's terrarium list (roadmap 4.16).
- *
- * Create is deliberately absent. `POST /terrariums` exists (2.8) but it takes a `speciesProfileId`, and the route
- * that lists species profiles is specified and unbuilt — so a create form here would need the keeper to type a
- * GUID, and the alternative (hard-coding one of the four seeded profile ids) would put an invented value on the
- * screen. It waits for the catalogue route, which is the roadmap's own rule for 4.20: a screen is wired when its
- * endpoints exist, and not before.
- */
 
 const POLL_MS = 30_000;
 
@@ -26,10 +16,85 @@ export const Terrariums: React.FC = () => {
   const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), POLL_MS);
   const items = terrariums.data?.items ?? [];
 
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [profiles, setProfiles] = useState<SpeciesProfileItem[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+
+  const [name, setName] = useState('');
+  const [speciesProfileId, setSpeciesProfileId] = useState('');
+  const [location, setLocation] = useState('');
+  const [description, setDescription] = useState('');
+  const [timeZoneId, setTimeZoneId] = useState('Asia/Ho_Chi_Minh');
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const handleOpenModal = async () => {
+    setIsModalOpen(true);
+    setSubmitError(null);
+    if (profiles.length === 0) {
+      setLoadingProfiles(true);
+      try {
+        const res = await api.listSpeciesProfiles();
+        setProfiles(res.items);
+        if (res.items.length > 0) {
+          setSpeciesProfileId(res.items[0].id);
+        }
+      } catch (err) {
+        setSubmitError((err as Error).message);
+      } finally {
+        setLoadingProfiles(false);
+      }
+    }
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setName('');
+    setLocation('');
+    setDescription('');
+    setSubmitError(null);
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !speciesProfileId) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      await api.createTerrarium({
+        name: name.trim(),
+        speciesProfileId,
+        location: location.trim() || null,
+        description: description.trim() || null,
+        timeZoneId,
+      });
+
+      handleCloseModal();
+      void terrariums.reload();
+    } catch (err) {
+      setSubmitError((err as Error).message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-heading text-2xl font-bold text-ink">{t('terrariumsTitle')}</h1>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-heading text-2xl font-bold text-ink">{t('terrariumsTitle')}</h1>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleOpenModal()}
+          className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-dark"
+        >
+          <Plus className="h-4 w-4" />
+          <span>{t('terrariumNew')}</span>
+        </button>
       </header>
 
       {terrariums.error?.isNetworkFailure ? (
@@ -50,7 +115,7 @@ export const Terrariums: React.FC = () => {
           {items.map((item) => (
             <li
               key={item.id}
-              className="flex flex-col justify-between rounded-2xl border border-hairline bg-surface p-5"
+              className="flex flex-col justify-between rounded-2xl border border-hairline bg-surface p-5 shadow-sm transition-all hover:border-brand/40"
             >
               <div>
                 <div className="flex items-start justify-between gap-3">
@@ -118,10 +183,132 @@ export const Terrariums: React.FC = () => {
         </ul>
       ) : null}
 
-      <p className="flex items-start gap-2 text-[11px] text-muted">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span>{t('createTerrariumNotBuilt')}</span>
-      </p>
+      {/* Modal tạo bể nuôi mới */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl border border-hairline bg-surface p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-hairline">
+              <h3 className="font-heading text-lg font-bold text-ink">{t('terrariumNew')}</h3>
+              <button
+                type="button"
+                onClick={handleCloseModal}
+                className="rounded-lg p-1 text-muted hover:bg-hairline hover:text-ink"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreate} className="mt-5 space-y-4">
+              {submitError && (
+                <div className="rounded-xl border border-critical/40 bg-critical/10 p-3 text-xs text-critical">
+                  {submitError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-muted mb-1.5">
+                  {t('terrariumName')} *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ví dụ: Bể Rồng Úc phòng khách"
+                  className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-muted mb-1.5">
+                  {t('terrariumSpecies')} *
+                </label>
+                {loadingProfiles ? (
+                  <p className="text-xs text-muted flex items-center gap-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {t('loadingSpecies')}
+                  </p>
+                ) : (
+                  <select
+                    value={speciesProfileId}
+                    onChange={(e) => setSpeciesProfileId(e.target.value)}
+                    className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
+                  >
+                    {profiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.scientificName})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-muted mb-1.5">
+                    {t('terrariumLocation')}
+                  </label>
+                  <input
+                    type="text"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="Tầng 1, Kệ số 3"
+                    className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-muted mb-1.5">
+                    {t('terrariumTimeZone')}
+                  </label>
+                  <input
+                    type="text"
+                    value={timeZoneId}
+                    onChange={(e) => setTimeZoneId(e.target.value)}
+                    className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-muted mb-1.5">
+                  {t('terrariumDescription')}
+                </label>
+                <textarea
+                  rows={3}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Ghi chú thêm về điều kiện bể..."
+                  className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-hairline">
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  className="rounded-xl border border-hairline px-4 py-2 text-xs font-medium text-ink hover:bg-hairline/20"
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !name.trim()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2 text-xs font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>{t('creating')}</span>
+                    </>
+                  ) : (
+                    <span>{t('create')}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

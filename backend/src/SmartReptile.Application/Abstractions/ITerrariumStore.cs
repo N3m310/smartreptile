@@ -40,6 +40,9 @@ public interface ITerrariumStore
     /// </summary>
     Task<Terrarium?> FindOwnedAsync(Guid terrariumId, Guid ownerUserId, CancellationToken cancellationToken);
 
+    /// <summary>Lists all available species profiles for selection.</summary>
+    Task<IReadOnlyList<SmartReptile.Domain.Species.SpeciesProfile>> ListSpeciesProfilesAsync(CancellationToken cancellationToken);
+
     /// <summary>True when the species profile exists — the create path refuses an unknown band source.</summary>
     Task<bool> SpeciesProfileExistsAsync(Guid speciesProfileId, CancellationToken cancellationToken);
 

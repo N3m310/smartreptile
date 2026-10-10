@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
+
 import '../state/app_data_provider.dart';
 import '../theme/app_theme.dart';
 import 'terrarium_detail_screen.dart';
@@ -44,8 +45,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final data = context.watch<AppDataProvider>();
     final current = data.selectedTerrarium;
     final history = data.currentHistory;
-    final recentAlerts =
-        data.alerts.where((a) => !a.isResolved).take(2).toList();
+    final recentAlerts = data.alerts
+        .where((a) => !a.isResolved)
+        .take(2)
+        .toList();
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
@@ -87,7 +90,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
                           children: [
                             Text(
                               current.name,
@@ -100,7 +105,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: _getStatusColor(current.status)
                                     .withValues(alpha: 0.2),
@@ -135,7 +142,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.swap_horiz, color: AppColors.primary),
+                    icon: const Icon(
+                      Icons.swap_horiz,
+                      color: AppColors.primary,
+                    ),
                     color: AppColors.bgCardHover,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
@@ -222,15 +232,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Thông số vi khí hậu trực tiếp',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textMain,
+                const Expanded(
+                  child: Text(
+                    'Thông số vi khí hậu trực tiếp',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textMain,
+                    ),
                   ),
                 ),
                 TextButton(
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(48, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   onPressed: () {
                     Navigator.push(
                       context,
@@ -245,10 +264,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Text(
                         'Chi tiết',
-                        style: TextStyle(color: AppColors.primary, fontSize: 13),
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 13,
+                        ),
                       ),
-                      Icon(Icons.chevron_right,
-                          color: AppColors.primary, size: 16),
+                      Icon(
+                        Icons.chevron_right,
+                        color: AppColors.primary,
+                        size: 16,
+                      ),
                     ],
                   ),
                 ),
@@ -266,7 +291,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'Ngưỡng: ${current.thresholds.tempMin}°C - ${current.thresholds.tempMax}°C',
               icon: Icons.thermostat,
               color: AppColors.statusDanger,
-              progress: ((current.currentTemp - 15) / (45 - 15)).clamp(0.0, 1.0),
+              progress: ((current.currentTemp - 15) / (45 - 15)).clamp(
+                0.0,
+                1.0,
+              ),
             ),
             const SizedBox(height: 10),
             _SensorCard(
@@ -317,7 +345,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.bgMain,
                           borderRadius: BorderRadius.circular(8),
@@ -326,7 +356,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: const Text(
                           '24 giờ qua',
                           style: TextStyle(
-                              fontSize: 10, color: AppColors.textMuted),
+                            fontSize: 10,
+                            color: AppColors.textMuted,
+                          ),
                         ),
                       ),
                     ],
@@ -339,22 +371,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         label: const Text('Nhiệt độ'),
                         selected: _showTemp,
                         onSelected: (val) => setState(() => _showTemp = val),
-                        selectedColor:
-                            AppColors.statusDanger.withValues(alpha: 0.3),
+                        selectedColor: AppColors.statusDanger.withValues(
+                          alpha: 0.3,
+                        ),
                         checkmarkColor: AppColors.statusDanger,
                         labelStyle: TextStyle(
                           fontSize: 11,
                           color: _showTemp
                               ? AppColors.statusDanger
                               : AppColors.textMuted,
-                          fontWeight:
-                              _showTemp ? FontWeight.bold : FontWeight.normal,
+                          fontWeight: _showTemp
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                         ),
                         backgroundColor: AppColors.bgMain,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
-                      const SizedBox(width: 8),
                       FilterChip(
                         label: const Text('Độ ẩm'),
                         selected: _showHum,
@@ -366,14 +400,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           color: _showHum
                               ? AppColors.primary
                               : AppColors.textMuted,
-                          fontWeight:
-                              _showHum ? FontWeight.bold : FontWeight.normal,
+                          fontWeight: _showHum
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                         ),
                         backgroundColor: AppColors.bgMain,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
-                      const SizedBox(width: 8),
                       FilterChip(
                         label: const Text('Ánh sáng'),
                         selected: _showLight,
@@ -385,12 +420,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           color: _showLight
                               ? AppColors.accent
                               : AppColors.textMuted,
-                          fontWeight:
-                              _showLight ? FontWeight.bold : FontWeight.normal,
+                          fontWeight: _showLight
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                         ),
                         backgroundColor: AppColors.bgMain,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                     ],
                   ),
@@ -402,16 +439,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         gridData: FlGridData(
                           show: true,
                           drawVerticalLine: false,
-                          getDrawingHorizontalLine: (val) => FlLine(
-                            color: AppColors.border,
-                            strokeWidth: 1,
-                          ),
+                          getDrawingHorizontalLine: (val) =>
+                              FlLine(color: AppColors.border, strokeWidth: 1),
                         ),
                         titlesData: FlTitlesData(
                           rightTitles: const AxisTitles(
-                              sideTitles: SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
                           topTitles: const AxisTitles(
-                              sideTitles: SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
                           bottomTitles: AxisTitles(
                             sideTitles: SideTitles(
                               showTitles: true,
@@ -474,8 +511,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             LineChartBarData(
                               spots: [
                                 for (int i = 0; i < history.length; i++)
-                                  FlSpot(i.toDouble(),
-                                      history[i].light / 20.0), // Scale for chart
+                                  FlSpot(
+                                    i.toDouble(),
+                                    history[i].light / 20.0,
+                                  ), // Scale for chart
                               ],
                               isCurved: true,
                               color: AppColors.accent,
@@ -668,23 +707,38 @@ class _SensorCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Icon(icon, color: color, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(icon, color: color, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              Text(
-                safeRange,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  safeRange,
+                  maxLines: 2,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                  ),
+                ),
               ),
             ],
           ),
@@ -705,7 +759,10 @@ class _SensorCard extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 unit,
-                style: const TextStyle(fontSize: 14, color: AppColors.textMuted),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textMuted,
+                ),
               ),
             ],
           ),

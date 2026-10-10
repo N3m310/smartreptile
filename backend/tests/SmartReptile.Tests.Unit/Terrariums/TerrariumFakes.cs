@@ -213,6 +213,9 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
         return terrarium;
     }
 
+    public Task<IReadOnlyList<SpeciesProfile>> ListSpeciesProfilesAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<SpeciesProfile>>(_profiles);
+
     public Task<bool> SpeciesProfileExistsAsync(Guid speciesProfileId, CancellationToken cancellationToken) =>
         Task.FromResult(_profiles.Any(profile => profile.Id == speciesProfileId));
 

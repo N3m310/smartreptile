@@ -58,6 +58,20 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(terrarium, activity))]);
     }
 
+    /// <summary>Lists all available species profiles for selection.</summary>
+    public async Task<IReadOnlyList<SpeciesProfileSummary>> ListSpeciesProfilesAsync(CancellationToken cancellationToken)
+    {
+        var profiles = await store.ListSpeciesProfilesAsync(cancellationToken);
+        return [.. profiles.Select(p => new SpeciesProfileSummary(
+            p.Id,
+            p.Name,
+            p.ScientificName,
+            p.ClimateZone.ToString(),
+            p.PhotoperiodHours,
+            p.Notes,
+            p.IsBuiltIn))];
+    }
+
     /// <summary>One terrarium, or <c>not_found</c> when it is missing, deleted or someone else's.</summary>
     public async Task<TerrariumOutcome> GetAsync(
         Guid terrariumId,

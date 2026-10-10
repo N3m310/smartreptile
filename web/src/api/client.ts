@@ -126,6 +126,7 @@ export function consumeSessionLoss(): 'expired' | null {
 
 interface RequestOptions {
   method?: string;
+  headers?: Record<string, string>;
   body?: unknown;
   /** `false` for the auth routes themselves, which must never trigger a rotation. */
   allowRefresh?: boolean;
@@ -226,6 +227,7 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
         ...(session && path !== '/api/v1/auth/refresh'
           ? { Authorization: `Bearer ${session.accessToken}` }
           : {}),
+        ...(options.headers ?? {}),
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal ?? controller.signal,

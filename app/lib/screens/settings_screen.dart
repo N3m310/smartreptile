@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../models/terrarium_models.dart';
 import '../state/app_data_provider.dart';
 import '../theme/app_theme.dart';
@@ -82,8 +83,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 CircleAvatar(
                   radius: 26,
                   backgroundColor: AppColors.primary.withValues(alpha: 0.2),
-                  child: const Icon(Icons.person,
-                      color: AppColors.primary, size: 28),
+                  child: const Icon(
+                    Icons.person,
+                    color: AppColors.primary,
+                    size: 28,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 const Expanded(
@@ -102,14 +106,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Text(
                         'admin@vivariumguard.vn • 0987 654 321',
                         style: TextStyle(
-                            fontSize: 12, color: AppColors.textMuted),
+                          fontSize: 12,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.edit_outlined,
-                      color: AppColors.textMuted, size: 20),
+                  icon: const Icon(
+                    Icons.edit_outlined,
+                    color: AppColors.textMuted,
+                    size: 20,
+                  ),
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -138,14 +147,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Cấu hình Ngưỡng Vi khí hậu',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textMain,
+                    const Expanded(
+                      child: Text(
+                        'Cấu hình Ngưỡng Vi khí hậu',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textMain,
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         value: _currentTerrariumId,
@@ -157,15 +171,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         items: [
                           for (final t in data.terrariums)
-                            DropdownMenuItem(
-                              value: t.id,
-                              child: Text(t.name),
-                            ),
+                            DropdownMenuItem(value: t.id, child: Text(t.name)),
                         ],
                         onChanged: (id) {
                           if (id != null) {
-                            final target =
-                                data.terrariums.firstWhere((t) => t.id == id);
+                            final target = data.terrariums.firstWhere(
+                              (t) => t.id == id,
+                            );
                             _loadTerrariumThresholds(target);
                           }
                         },
@@ -196,7 +208,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: TextField(
                         controller: _tempMinCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Min (°C)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Min (°C)',
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -204,7 +218,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: TextField(
                         controller: _tempMaxCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Max (°C)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Max (°C)',
+                        ),
                       ),
                     ),
                   ],
@@ -260,7 +276,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: TextField(
                         controller: _lightMinCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Min (Lx)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Min (Lx)',
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -268,7 +286,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: TextField(
                         controller: _lightMaxCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Max (Lx)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Max (Lx)',
+                        ),
                       ),
                     ),
                   ],
@@ -305,8 +325,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       );
                     },
-                    child: const Text('Lưu cấu hình ngưỡng',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Lưu cấu hình ngưỡng',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -382,7 +404,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Text(
                                 '${d.terrariumName} • ${d.lastSeen}',
                                 style: const TextStyle(
-                                    fontSize: 10, color: AppColors.textMuted),
+                                  fontSize: 10,
+                                  color: AppColors.textMuted,
+                                ),
                               ),
                             ],
                           ),
@@ -426,31 +450,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 SwitchListTile(
-                  title: const Text('Cảnh báo nhiệt độ',
-                      style: TextStyle(fontSize: 13, color: AppColors.textMain)),
-                  subtitle: const Text('Gửi thông báo khi nhiệt vượt ngưỡng',
-                      style:
-                          TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  title: const Text(
+                    'Cảnh báo nhiệt độ',
+                    style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                  ),
+                  subtitle: const Text(
+                    'Gửi thông báo khi nhiệt vượt ngưỡng',
+                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  ),
                   value: _notifyTemp,
                   activeThumbColor: AppColors.primary,
                   onChanged: (val) => setState(() => _notifyTemp = val),
                 ),
                 SwitchListTile(
-                  title: const Text('Cảnh báo độ ẩm',
-                      style: TextStyle(fontSize: 13, color: AppColors.textMain)),
-                  subtitle: const Text('Gửi thông báo khi độ ẩm vi phạm',
-                      style:
-                          TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  title: const Text(
+                    'Cảnh báo độ ẩm',
+                    style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                  ),
+                  subtitle: const Text(
+                    'Gửi thông báo khi độ ẩm vi phạm',
+                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  ),
                   value: _notifyHumidity,
                   activeThumbColor: AppColors.primary,
                   onChanged: (val) => setState(() => _notifyHumidity = val),
                 ),
                 SwitchListTile(
-                  title: const Text('Thiết bị ngoại tuyến',
-                      style: TextStyle(fontSize: 13, color: AppColors.textMain)),
-                  subtitle: const Text('Báo khi node ESP32 mất kết nối WiFi',
-                      style:
-                          TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                  title: const Text(
+                    'Thiết bị ngoại tuyến',
+                    style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                  ),
+                  subtitle: const Text(
+                    'Báo khi node ESP32 mất kết nối WiFi',
+                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  ),
                   value: _notifyOffline,
                   activeThumbColor: AppColors.primary,
                   onChanged: (val) => setState(() => _notifyOffline = val),
@@ -469,7 +502,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.statusDanger,
                 side: BorderSide(
-                    color: AppColors.statusDanger.withValues(alpha: 0.5)),
+                  color: AppColors.statusDanger.withValues(alpha: 0.5),
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),

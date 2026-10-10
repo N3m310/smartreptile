@@ -390,3 +390,14 @@ public sealed record TerrariumOutcome
     public static TerrariumOutcome Invalid(IReadOnlyList<IdentityViolation> errors, string message = "The request was refused.") =>
         new() { Problem = new TerrariumProblem("validation_failed", message, errors) };
 }
+
+/// <summary>Summary of a species profile for selection dropdowns.</summary>
+public sealed record SpeciesProfileSummary(
+    Guid Id,
+    string Name,
+    string ScientificName,
+    string ClimateZone,
+    decimal PhotoperiodHours,
+    string? Notes,
+    bool IsBuiltIn);
+

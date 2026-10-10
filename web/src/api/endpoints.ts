@@ -10,12 +10,16 @@ import { apiRequest } from './client';
 import type {
   AuthSession,
   Coverage,
+  CreateTerrariumInput,
+  EffectiveThresholdsResponse,
   HealthReport,
   LatestReadings,
   MetricsSnapshot,
   RangeSeries,
+  SpeciesProfileItem,
   TerrariumItem,
   TerrariumList,
+  UpdateTerrariumInput,
   UserProfile,
   VersionInfo,
 } from './types';
@@ -88,6 +92,40 @@ export async function listTerrariums(): Promise<TerrariumList> {
 
 export async function getTerrarium(id: string): Promise<TerrariumItem> {
   return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}`);
+}
+
+export async function listSpeciesProfiles(): Promise<{ items: SpeciesProfileItem[] }> {
+  return apiRequest('/api/v1/species-profiles', { allowRefresh: false });
+}
+
+export async function createTerrarium(body: CreateTerrariumInput): Promise<TerrariumItem> {
+  return apiRequest('/api/v1/terrariums', { method: 'POST', body });
+}
+
+export async function updateTerrarium(
+  id: string,
+  body: UpdateTerrariumInput,
+  eTag?: string
+): Promise<TerrariumItem> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': eTag ?? '*' },
+    body,
+  });
+}
+
+export async function deleteTerrarium(
+  id: string,
+  allowUnboundDevice = true
+): Promise<void> {
+  await apiRequest(
+    `/api/v1/terrariums/${encodeURIComponent(id)}?allowUnboundDevice=${allowUnboundDevice}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function effectiveThresholds(id: string): Promise<EffectiveThresholdsResponse> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}/thresholds`);
 }
 
 export async function latestReadings(id: string): Promise<LatestReadings> {

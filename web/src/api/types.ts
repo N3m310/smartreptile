@@ -174,3 +174,47 @@ export interface MetricsSnapshot {
   brokerRunning: boolean;
   timestamp: string;
 }
+
+export interface SpeciesProfileItem {
+  id: string;
+  name: string;
+  scientificName: string;
+  climateZone: string;
+  photoperiodHours: number;
+  notes: string | null;
+  isBuiltIn: boolean;
+}
+
+export interface EffectiveThreshold {
+  metric: string;
+  layer: 'SpeciesProfile' | 'Override' | string;
+  phase: 'Day' | 'Night' | 'Any' | string;
+  targetMin: number | null;
+  targetMax: number | null;
+  criticalMin: number | null;
+  criticalMax: number | null;
+}
+
+export interface EffectiveThresholdsResponse {
+  terrariumId: string;
+  capturedAtUtc: string;
+  timeZoneId: string;
+  effectiveThresholds: EffectiveThreshold[];
+}
+
+export interface CreateTerrariumInput {
+  name: string;
+  speciesProfileId: string;
+  location?: string | null;
+  description?: string | null;
+  timeZoneId?: string;
+}
+
+export interface UpdateTerrariumInput {
+  name?: string;
+  speciesProfileId?: string;
+  location?: string | null;
+  description?: string | null;
+  timeZoneId?: string;
+}
+

@@ -44,6 +44,13 @@ public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
             .FirstOrDefaultAsync(cancellationToken);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<SmartReptile.Domain.Species.SpeciesProfile>> ListSpeciesProfilesAsync(CancellationToken cancellationToken) =>
+        await db.SpeciesProfiles
+            .AsNoTracking()
+            .OrderBy(profile => profile.Name)
+            .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
     public Task<bool> SpeciesProfileExistsAsync(Guid speciesProfileId, CancellationToken cancellationToken) =>
         db.SpeciesProfiles.AnyAsync(profile => profile.Id == speciesProfileId, cancellationToken);
 

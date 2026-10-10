@@ -264,6 +264,29 @@ public static class TerrariumEndpoints
         .WithSummary("Expected versus received samples")
         .WithDescription("Coverage for a window, derived from the bound device's sampling interval.");
 
+        group.MapGet("/species-profiles", async (
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var items = await service.ListSpeciesProfilesAsync(cancellationToken);
+            return Results.Ok(new { items });
+        })
+        .AllowAnonymous()
+        .WithSummary("List all available species profiles")
+        .WithDescription("Returns built-in and user profiles so clients can populate species selection dropdowns.");
+
+        // Also alias on top-level /api/v1/species-profiles for convenience
+        app.MapGet("/api/v1/species-profiles", async (
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var items = await service.ListSpeciesProfilesAsync(cancellationToken);
+            return Results.Ok(new { items });
+        })
+        .AllowAnonymous()
+        .WithTags("species")
+        .WithSummary("List all available species profiles");
+
         return app;
     }
 
