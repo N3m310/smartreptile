@@ -17,9 +17,9 @@ public class AuthServiceTests
     // Throwaway values for a local account, and deliberately low-entropy. CI's secret scanner flags
     // realistic-looking credentials wherever they appear — fixtures included — and allow-listing test paths is
     // exactly how a real key ends up committed unnoticed, so the fixtures keep the scan honest instead.
-    private const string Password = "local-demo-1";
-    private const string NewPassword = "local-demo-2";
-    private const string WrongPassword = "local-demo-99";
+    private const string Password = "Local-demo-1";
+    private const string NewPassword = "Local-demo-2";
+    private const string WrongPassword = "Local-demo-99";
     private const string Ip = "203.0.113.7";
 
     private readonly TestClock _clock = new();
@@ -65,13 +65,37 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task Register_answers_the_same_way_when_the_identifier_is_taken()
+    public async Task Register_refuses_a_taken_identifier_and_names_the_field()
     {
         await RegisterAsync();
 
         var again = await RegisterAsync();
 
-        again.Succeeded.Should().BeTrue("a taken identifier must not be distinguishable from a free one");
+        // ADR-020: registration is the one credential path that discloses. Before it, this call answered
+        // "accepted" and handed back a recovery code that could never work, which is what made a duplicate
+        // registration look like it had succeeded.
+        again.Succeeded.Should().BeFalse("a taken identifier is reported, not swallowed");
+        again.Problem!.Code.Should().Be("registration_conflict");
+        again.Problem.Errors.Select(violation => violation.Code)
+            .Should().BeEquivalentTo(["username_taken", "email_taken"]);
+        _store.Users.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task Register_reports_only_the_identifier_that_is_taken()
+    {
+        await RegisterAsync();
+
+        // Same username, fresh address: only the username is at fault, so only that field is named.
+        var usernameOnly = await RegisterAsync(email: "someone.else@example.com");
+        usernameOnly.Problem!.Errors.Select(violation => violation.Code)
+            .Should().BeEquivalentTo(["username_taken"]);
+
+        // Same address, fresh username.
+        var emailOnly = await RegisterAsync(username: "someoneelse");
+        emailOnly.Problem!.Errors.Select(violation => violation.Code)
+            .Should().BeEquivalentTo(["email_taken"]);
+
         _store.Users.Should().HaveCount(1);
     }
 
@@ -328,20 +352,20 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task Register_with_a_taken_identifier_returns_a_code_that_cannot_verify()
+    public async Task Register_with_a_taken_identifier_creates_nothing_and_returns_no_code()
     {
-        var first = await RegisterAsync();
+        await RegisterAsync();
+
         var second = await RegisterAsync();
 
-        // Same shape on both paths, or the response would disclose whether the identifier was free.
-        second.RecoveryCode.Should().NotBeNull();
-        second.RecoveryCode.Should().NotBe(first.RecoveryCode);
+        // A code here would be a lie: there is no account for it to recover, and the keeper would store it as
+        // their way back in (ADR-020).
+        second.RecoveryCode.Should().BeNull("nothing was created, so there is no code to hand out");
+        second.Problem!.Code.Should().Be("registration_conflict");
 
         var existing = _store.Users.Should().ContainSingle().Subject;
-        new Sha256SecretHasher()
-            .Verify(second.RecoveryCode!, existing.RecoveryCodeHash!, existing.RecoveryCodeSalt!)
-            .Should()
-            .BeFalse("a decoy code must not open the account it was refused for");
+        existing.Username.Should().Be("linh");
+        existing.RecoveryCodeHash.Should().NotBeNull();
     }
 
     [Fact]
@@ -521,13 +545,16 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task Forgot_password_answers_the_same_way_for_an_unknown_identifier()
+    public async Task Forgot_password_refuses_an_identifier_nobody_holds()
     {
         await RegisterAsync();
 
         var outcome = await ForgotPasswordAsync(identifier: "nobody");
 
-        outcome.Succeeded.Should().BeTrue("the answer must not reveal whether the account exists");
+        // ADR-020: this endpoint discloses, so a mistyped address is answered rather than silently ignored — the
+        // keeper is told to check the address instead of waiting for a code that was never generated.
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("identifier_unknown");
         _store.ResetCodes.Should().BeEmpty("there is no account to issue a code for");
         _notifier.Deliveries.Should().BeEmpty("there is no address to deliver it to");
     }

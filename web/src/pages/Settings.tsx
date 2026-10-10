@@ -22,7 +22,7 @@ export const Settings: React.FC = () => {
   // Profile state
   const [profile, setProfile] = useState({
     name: 'Nguyễn Văn Quản Trị',
-    email: 'admin@terraguard.vn',
+    email: 'admin@vivariumguard.vn',
     phone: '0987 654 321',
   });
   const [profileSaved, setProfileSaved] = useState(false);

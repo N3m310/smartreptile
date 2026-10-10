@@ -15,6 +15,8 @@
 | Reading | `MetricReading` | One metric value belonging to a sample |
 | Metric | `Metric` | Dictionary of metric codes/units |
 | Device health | `DeviceHealthSample` | RSSI, uptime, heap, battery, firmware |
+| Device event | `DeviceEvent` | Raw boot / sensor-fault / buffer / clock / calibration reports from the node |
+| Evaluation state | `EvaluationState` | Dwell/hysteresis state per (terrarium, metric, phase) |
 | Rollup | `TelemetryHourlyRollup` | min/max/avg/count per metric per hour |
 | Daily summary | `DailyEnvironmentalSummary` | Per local day: stats, out-of-range minutes, exposure index |
 | Alert | `Alert` | Lifecycle + peak value + duration |
@@ -74,8 +76,8 @@ Types are SQL Server. `TBC` = to be confirmed. Full column list with indexes and
 | `TimeZoneId` | varchar(64) | default `Asia/Ho_Chi_Minh` |
 | `QuietHoursStart/End` | time | nullable |
 | `MinNotifySeverity` | tinyint | 0 Info, 1 Warning, 2 Critical |
-| `ChannelsFcm/Telegram/Email` | bit | per-channel opt-in |
-| `TelegramChatId`, `PhoneToken` | nvarchar | nullable, FCM token |
+| `ChannelFcmEnabled`, `ChannelEmailEnabled` | bit | per-channel opt-in |
+| `FcmToken` | nvarchar(256) | nullable, FCM registration token |
 | `CreatedAt`, `LastLoginAt`, `DisabledAt` | datetime2(3) | |
 
 ### 3.2 `SpeciesProfile`
@@ -125,6 +127,11 @@ profile row for that `(MetricId, Phase)`; resolution order is override → profi
 | `TimeZoneId` | varchar(64) | drives local-day bucketing |
 | `DeviceId` | uniqueidentifier NULL | 0..1 |
 | `CreatedAt`, `UpdatedAt`, `DeletedAt` | datetime2(3) | soft delete |
+| `RowVersion` | rowversion | **added 2026-10-09**: the concurrency token `PATCH` sends as `If-Match`, so a stale edit matches zero rows instead of overwriting an edit it never saw |
+
+The device is bound through `Device.TerrariumId` rather than a `DeviceId` column here (the sketch's `DeviceId`
+became the one-to-one navigation the schema actually uses, so a terrarium has at most one live device enforced by
+the filtered unique index `IX_Device_TerrariumId`).
 
 ### 3.6 `Device`
 | Column | Type | Notes |
@@ -260,6 +267,28 @@ OccurredAt)`. Actions are a closed vocabulary: `user.login`, `user.login_failed`
 `(Id, UserId, TerrariumId, Format tinyint (Csv/Json), RangeStartUtc, RangeEndUtc, MetricIdsJson,
 Status tinyint, RowCount, FilePath, DownloadToken, ExpiresAt, ErrorMessage, CreatedAt, CompletedAt)`.
 
+### 3.20 `EvaluationState`
+`(TerrariumId, Metric, Phase, Violation tinyint, FirstOutOfBandAt NULL, CriticalSinceAt NULL,
+ConsecutiveRecoveryTicks int, OpenAlertId NULL, LastEvaluatedSampleId, LastNotificationAt NULL,
+RowVersion rowversion)`, primary key `(TerrariumId, Metric, Phase)`.
+
+The state machine of §5.4, one row per key. The primary key is the key itself and not a surrogate id: one key has
+one evaluation in flight, and a second row would mean two evaluators disagreeing about the same excursion, so the
+database refuses it rather than the code hoping. `RowVersion` makes two evaluators advancing one key impossible.
+**Created 2026-10-09** with every decision field present and unset — the queue's consumer writes only
+`LastEvaluatedSampleId` — so the rows task 3.2 inherits state "nothing decided yet" instead of a default a later
+reader would have to distrust.
+
+### 3.21 `DeviceEvent`
+`(Id, DeviceId FK, TerrariumId NULL, Type tinyint (0 boot, 1 sensorFault, 2 sensorRecovered, 3 bufferOverflow,
+4 clockUnsynced, 5 calibrated), Metric NULL, DetailJson nvarchar(max) NULL, RecordedAt, ReceivedAt)`.
+
+The raw events a node publishes on `sr/v1/d/{id}/events`, stored as received. **Created 2026-10-09**: what a device
+reports about itself is evidence, and the derived signals `SensorFault`, `DeviceSilent` and `DeviceClockSkew` are
+3.3's *decisions about* that evidence. Keeping the payload whole means a rule can be changed and re-evaluated
+against history instead of against whatever the rule was when the message arrived. `TerrariumId` is nullable so a
+board that has been unbound keeps its fault history.
+
 ## 4. Lifecycle state machines
 
 ### 4.1 Device
@@ -326,6 +355,8 @@ This trade-off is deliberate and recorded in ADR-006.
 | `Alert` + `NotificationLog` | indefinite (small) | — | demo scale |
 | `Snapshot` | 7 days | nightly sweeper | 512 KB × up to 2 880/day = cap enforced by 1/30 s limit; disabled by default |
 | `AuditLog` | 24 months | yearly | small |
+| `DeviceEvent` | with the raw window (90 days) | nightly sweeper — **task 5.3 must include it** | low |
+| `EvaluationState` | current only | no sweep; one row per `(terrarium, metric, phase)` | tiny |
 | `ExportJob` files | 24 h | sweeper | transient |
 
 Budget sanity check against NFR-11 (`< 60 MB/90 days`): 47 MB estimated + indexes ≈ 55–58 MB — the
@@ -336,7 +367,7 @@ optional. (Test `TC-I-14` measures the real number and the report quotes it.)
 
 1. All schema changes go through EF Core migrations; `database update` runs automatically on API start
    in Development and as an explicit step in the release runbook (never in Production startup).
-2. Seed data (`Metric`, three built-in `SpeciesProfile` + their `Threshold` rows) is applied by
+2. Seed data (`Metric`, four built-in `SpeciesProfile` + their `Threshold` rows) is applied by
    idempotent seeders keyed on `Code`/`Name`, so re-running never duplicates.
 3. Backwards compatibility rule for telemetry: **new metrics may be added at any time; existing metric
    semantics never change silently.** If a metric's meaning or unit must change, a new `Metric.Code` is

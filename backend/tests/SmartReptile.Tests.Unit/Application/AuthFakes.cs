@@ -152,8 +152,13 @@ internal sealed class FakeUserStore : IUserStore
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult(_users.FirstOrDefault(user => user.Id == userId));
 
-    public Task<bool> UserExistsAsync(string username, string email, CancellationToken cancellationToken) =>
-        Task.FromResult(_users.Any(user => user.Username == username || user.Email == email));
+    public Task<TakenIdentifiers> FindTakenIdentifiersAsync(
+        string username,
+        string email,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new TakenIdentifiers(
+            _users.Any(user => user.Username == username),
+            _users.Any(user => user.Email == email)));
 
     public void AddUser(User user) => _users.Add(user);
 

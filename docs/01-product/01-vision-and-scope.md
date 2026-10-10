@@ -81,7 +81,7 @@ science, and impossible to ignore. The value is not the sensor reading — it is
 | Dashboard | Live values (≤ 5 s freshness), online/offline + last-seen, in-range status per metric, 1 h / 24 h / 7 d / 30 d charts, min/max/avg |
 | Thresholds | Per-metric target band + critical band, optional day/night phases, dwell time, hysteresis |
 | Alerts | Automatic evaluation, open / acknowledge / resolve lifecycle, auto-resolve on recovery, alert history, silence a metric temporarily |
-| Notifications | In-app inbox, FCM push (Flutter app), Telegram bot channel, optional SMTP email; quiet hours; per-severity subscription; rate limiting |
+| Notifications | In-app inbox, FCM push (Flutter app), optional SMTP email; quiet hours; per-severity subscription; rate limiting |
 | Reporting | Daily environmental summary (min/max/avg per metric, light-hours, out-of-range minutes, exposure index), weekly view, CSV/JSON export |
 | Retention | Raw readings 90 days, hourly rollups 24 months, daily summaries indefinite; manual purge per terrarium |
 | Ops | `/health`, `/ready`, `/metrics`, structured logs, audit log of device + threshold changes |
@@ -112,7 +112,7 @@ decision rather than an assumption (`ADR-016`).
 |---|---|---|---|
 | TBC-1 | Which reptile species / branch? | **Semi-desert: leopard gecko (*Eublepharis macularius*)** as the demo species; tropical and desert profiles are also seeded so all three climate zones are demonstrable. See `07-appendices/05`. | Milestone M1 (§`03-implementation/07`) |
 | TBC-2 | Is 20×10 cm the floor or the whole box? | **Floor area** of a small starter box; treated as a scale model, and the docs note that a leopard gecko adult would need a larger enclosure. The system is size-agnostic. | M1 |
-| TBC-3 | Alert channel and camera? | **FCM push (app) + Telegram bot** as the two demo channels, SMTP email optional; **camera included as optional FR-17**, snapshot only, no analysis. | M1 |
+| TBC-3 | Alert channel and camera? | **FCM push (app)** as the demo channel, with the in-app inbox always available and SMTP email optional; **camera included as optional FR-17**, snapshot only, no analysis. Superseded in part by `ADR-021` (Telegram dropped). | M1 |
 | TBC-4 | How does the claim secret reach the device? | **8-digit one-time pairing token** displayed on the OLED, typed nowhere: the app hands the secret to the device over the local network (option A). Manual entry stays as the demo fallback. Recorded as **`ADR-016`**. | M1 |
 
 ## 7. Success metrics

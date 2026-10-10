@@ -3,13 +3,16 @@ using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Tests.Unit.Domain;
 
-/// <summary>BR-01.2 password rules (§02-design/06 §2).</summary>
+/// <summary>
+/// BR-01.2 password rules (§02-design/06 §2): at least 8 characters with an upper-case letter and a special
+/// character among them, plus length, digit, deny-list.
+/// </summary>
 public class PasswordPolicyTests
 {
     [Theory]
-    [InlineData("Reptile2026")]
-    [InlineData("a1bcdefghij")]
+    [InlineData("Gecko1!a")]
     [InlineData("Linh's-gecko-01")]
+    [InlineData("Bò-sát-2026!")]
     public void Accepts_a_password_that_meets_every_rule(string password) =>
         PasswordPolicy.Validate(password).Should().BeEmpty();
 
@@ -25,7 +28,9 @@ public class PasswordPolicyTests
     [Fact]
     public void Rejects_a_password_shorter_than_the_minimum()
     {
-        var violations = PasswordPolicy.Validate("Gecko1");
+        PasswordPolicy.MinLength.Should().Be(8);
+
+        var violations = PasswordPolicy.Validate("Gecko1!");
 
         violations.Should().ContainSingle()
             .Which.Code.Should().Be("password_too_short");
@@ -34,7 +39,7 @@ public class PasswordPolicyTests
     [Fact]
     public void Rejects_a_password_longer_than_the_maximum()
     {
-        var violations = PasswordPolicy.Validate(new string('a', PasswordPolicy.MaxLength) + "1");
+        var violations = PasswordPolicy.Validate(new string('a', PasswordPolicy.MaxLength) + "A1!");
 
         violations.Should().ContainSingle()
             .Which.Code.Should().Be("password_too_long");
@@ -50,8 +55,27 @@ public class PasswordPolicyTests
         lettersOnly.Should().Contain(violation => violation.Code == "password_digit_required");
     }
 
+    [Fact]
+    public void Requires_an_upper_case_letter()
+    {
+        var violations = PasswordPolicy.Validate("gecko1!x");
+
+        violations.Should().ContainSingle()
+            .Which.Code.Should().Be("password_uppercase_required");
+    }
+
     [Theory]
-    [InlineData("password")]
+    [InlineData("Gecko123")]
+    [InlineData("Gecko 123")]
+    public void Requires_a_special_character_and_does_not_count_whitespace_as_one(string password)
+    {
+        var violations = PasswordPolicy.Validate(password);
+
+        violations.Should().ContainSingle()
+            .Which.Code.Should().Be("password_special_required");
+    }
+
+    [Theory]
     [InlineData("PASSWORD")]
     [InlineData("1234567890")]
     [InlineData("matkhau123")]
@@ -67,7 +91,13 @@ public class PasswordPolicyTests
         var violations = PasswordPolicy.Validate("abc");
 
         violations.Select(violation => violation.Code)
-            .Should().BeEquivalentTo(["password_too_short", "password_digit_required"]);
+            .Should().BeEquivalentTo(
+            [
+                "password_too_short",
+                "password_digit_required",
+                "password_uppercase_required",
+                "password_special_required",
+            ]);
     }
 
     [Fact]

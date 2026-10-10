@@ -186,6 +186,23 @@ void main() {
         );
       },
     );
+
+    test('the cool-side variant is judged on the ambient envelope, not the basking one', () {
+      final coolDay = SpeciesProfiles.aridCool.bandsFor('tempC').single;
+
+      // 33 °C is the documented cool-side maximum. Against the basking ceiling (40–44) it would read as
+      // implausible, which is the false positive a non-blocking notice must never produce.
+      expect(
+        BandValidation.validate(coolDay, climateRange: SpeciesProfiles.aridCool.climateRange),
+        isEmpty,
+      );
+
+      // The carve-out is a per-profile envelope, not an exemption: the same band on the basking profile is flagged.
+      expect(
+        BandValidation.validate(coolDay, climateRange: SpeciesProfiles.arid.climateRange),
+        hasLength(1),
+      );
+    });
   });
 
   test('every seeded band passes its own validation', () {
@@ -193,6 +210,7 @@ void main() {
       SpeciesProfiles.tropical,
       SpeciesProfiles.semiArid,
       SpeciesProfiles.arid,
+      SpeciesProfiles.aridCool,
     ]) {
       for (final band in profile.bands) {
         final issues = BandValidation.validate(

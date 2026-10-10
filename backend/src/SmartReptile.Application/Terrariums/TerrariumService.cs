@@ -72,7 +72,65 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
 
         var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
 
-        return TerrariumOutcome.Found(Summarise(terrarium, activity));
+        return TerrariumOutcome.Found(Summarise(terrarium, activity), terrarium.RowVersion);
+    }
+
+    /// <summary>
+    /// Whether the caller may receive this terrarium's live updates (FR-08). Ownership is the only membership the
+    /// model has, so this is the same query as <see cref="GetAsync"/> without the summarising — and a foreign
+    /// terrarium answers <c>false</c> exactly like a missing one, so the realtime hub cannot be used to probe for
+    /// ids either (BR-02.2).
+    /// </summary>
+    /// <param name="terrariumId">Terrarium the caller wants updates for.</param>
+    /// <param name="userId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<bool> IsMemberAsync(
+        Guid terrariumId,
+        Guid userId,
+        CancellationToken cancellationToken = default) =>
+        await store.FindOwnedAsync(terrariumId, userId, cancellationToken) is not null;
+
+    /// <summary>
+    /// The band in force for every metric this terrarium has one for, with the layer it came from (FR-10, BR-10.3 —
+    /// roadmap 3.1's <c>effectiveThresholds</c> read).
+    /// </summary>
+    /// <remarks>
+    /// This is the same <see cref="ResolveEffective"/> call the band on a reading card comes from, deliberately: an
+    /// editor that previewed one set of bands while the cards were judged against another would be worse than no
+    /// editor. Only the metrics that resolve <i>right now</i> appear — a metric configured for Day alone is absent
+    /// at night, because that is the truth the evaluator will act on.
+    /// </remarks>
+    public async Task<TerrariumOutcome> EffectiveThresholdsAsync(
+        Guid terrariumId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken)
+    {
+        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
+        if (terrarium is null)
+        {
+            return TerrariumOutcome.NotFound();
+        }
+
+        var capturedAt = clock.UtcNow;
+        var entries = new List<EffectiveThresholdView>();
+
+        foreach (var definition in MetricDictionary.All)
+        {
+            if (ResolveEffective(terrarium, definition.Code, capturedAt) is { } effective)
+            {
+                entries.Add(DescribeThreshold(effective, definition));
+            }
+        }
+
+        // Ordered by metric key so the editor's rows keep their places between reloads, the same way the latest
+        // readings are ordered.
+        entries.Sort((left, right) => string.CompareOrdinal(left.Metric, right.Metric));
+
+        return TerrariumOutcome.Resolved(new TerrariumThresholds(
+            terrariumId,
+            capturedAt,
+            terrarium.TimeZoneId,
+            entries));
     }
 
     /// <summary>
@@ -160,7 +218,197 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         // a second call to render it.
         var created = await store.FindOwnedAsync(terrarium.Id, ownerUserId, cancellationToken) ?? terrarium;
 
-        return TerrariumOutcome.Found(Summarise(created, new Dictionary<Guid, TerrariumActivity>()));
+        return TerrariumOutcome.Found(Summarise(created, new Dictionary<Guid, TerrariumActivity>()), created.RowVersion);
+    }
+
+    /// <summary>
+    /// Updates the mutable fields of a terrarium (FR-03). Concurrency is the caller's responsibility: the request
+    /// must carry the <c>rowversion</c> it read, and a row that has moved on since is refused as
+    /// <c>precondition_failed</c> rather than overwritten.
+    /// </summary>
+    /// <param name="terrariumId">Terrarium to update.</param>
+    /// <param name="request">The fields to change; omitted members are left alone.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="expectedRowVersion">
+    /// The concurrency token the caller holds. An empty array means <c>If-Match: *</c> — existence is enough and
+    /// the token is not compared.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<TerrariumOutcome> UpdateAsync(
+        Guid terrariumId,
+        UpdateTerrariumRequest request,
+        Guid ownerUserId,
+        byte[] expectedRowVersion,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(expectedRowVersion);
+
+        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
+        if (terrarium is null)
+        {
+            return TerrariumOutcome.NotFound();
+        }
+
+        // Checked before validating the body: a stale client is told to reload, not handed a validation report
+        // about a version of the terrarium it is not looking at.
+        if (expectedRowVersion.Length > 0
+            && (terrarium.RowVersion is null
+                || !expectedRowVersion.AsSpan().SequenceEqual(terrarium.RowVersion)))
+        {
+            return TerrariumOutcome.PreconditionFailed();
+        }
+
+        var violations = new List<IdentityViolation>();
+
+        var name = Trimmed(request.Name);
+        if (request.Name is not null)
+        {
+            if (name is null)
+            {
+                violations.Add(new IdentityViolation("name", "terrarium_name_required", "A name is required."));
+            }
+            else if (name.Length > NameMaxLength)
+            {
+                violations.Add(new IdentityViolation(
+                    "name",
+                    "terrarium_name_too_long",
+                    $"A name may be at most {NameMaxLength} characters."));
+            }
+        }
+
+        if (Trimmed(request.Location) is { Length: > LocationMaxLength })
+        {
+            violations.Add(new IdentityViolation(
+                "location",
+                "terrarium_location_too_long",
+                $"A location may be at most {LocationMaxLength} characters."));
+        }
+
+        if (Trimmed(request.Description) is { Length: > DescriptionMaxLength })
+        {
+            violations.Add(new IdentityViolation(
+                "description",
+                "terrarium_description_too_long",
+                $"A description may be at most {DescriptionMaxLength} characters."));
+        }
+
+        var timeZoneId = Trimmed(request.TimeZoneId);
+        if (request.TimeZoneId is not null
+            && (timeZoneId is null || !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out _)))
+        {
+            violations.Add(new IdentityViolation(
+                "timeZoneId",
+                "terrarium_timezone_invalid",
+                $"'{request.TimeZoneId}' is not a known time zone."));
+        }
+
+        if (request.SpeciesProfileId is { } profileId
+            && !await store.SpeciesProfileExistsAsync(profileId, cancellationToken))
+        {
+            violations.Add(new IdentityViolation(
+                "speciesProfileId",
+                "species_profile_not_found",
+                "No such species profile."));
+        }
+
+        if (violations.Count > 0)
+        {
+            return TerrariumOutcome.Invalid(violations);
+        }
+
+        if (name is not null)
+        {
+            terrarium.Name = name;
+        }
+
+        if (request.SpeciesProfileId is { } newProfileId)
+        {
+            terrarium.SpeciesProfileId = newProfileId;
+        }
+
+        // Present means "set this", and an empty string is how a client clears a free-text field — the one thing
+        // a record bound from JSON cannot express as a null.
+        if (request.Location is not null)
+        {
+            terrarium.Location = Trimmed(request.Location);
+        }
+
+        if (request.Description is not null)
+        {
+            terrarium.Description = Trimmed(request.Description);
+        }
+
+        if (timeZoneId is not null)
+        {
+            terrarium.TimeZoneId = timeZoneId;
+        }
+
+        terrarium.UpdatedAt = clock.UtcNow;
+
+        if (!await store.TrySaveChangesAsync(cancellationToken))
+        {
+            return TerrariumOutcome.PreconditionFailed();
+        }
+
+        // Re-read for the profile name, and to pick up the rowversion the update generated so the response's ETag
+        // is the one the next request must send.
+        var updated = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken) ?? terrarium;
+        var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
+
+        return TerrariumOutcome.Found(Summarise(updated, activity), updated.RowVersion);
+    }
+
+    /// <summary>
+    /// Soft-deletes a terrarium (FR-03). Its readings, alerts and summaries survive for audit; only the terrarium
+    /// disappears from reads, because a query filter on the entity keeps it out of every query.
+    /// </summary>
+    /// <param name="terrariumId">Terrarium to remove.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="allowUnboundDevice">
+    /// Required when a live device is bound. The name counts the device, not the terrarium: it is the caller's
+    /// explicit permission to detach a board that is still reporting, which would otherwise keep publishing into
+    /// an enclosure nobody can see.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<TerrariumOutcome> DeleteAsync(
+        Guid terrariumId,
+        Guid ownerUserId,
+        bool allowUnboundDevice,
+        CancellationToken cancellationToken)
+    {
+        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
+        if (terrarium is null)
+        {
+            return TerrariumOutcome.NotFound();
+        }
+
+        // A revoked device has already released the slot (the DI-04 filtered index excludes it), so it does not
+        // make the caller ask twice to remove an enclosure it no longer reports into.
+        var bound = terrarium.Device is { } device && device.Status != DeviceStatus.Revoked ? device : null;
+
+        if (bound is not null && !allowUnboundDevice)
+        {
+            return TerrariumOutcome.DeviceBound();
+        }
+
+        if (bound is not null)
+        {
+            // Back to Provisioning, not Revoked: the board is fine, it just has no enclosure. Credentials and the
+            // owner are kept, so the same account can still rotate or revoke it and re-register it later; ingest
+            // refuses an unbound device, so it stops producing data immediately either way.
+            bound.TerrariumId = null;
+            bound.Status = DeviceStatus.Provisioning;
+            bound.ProvisionedAt = null;
+            bound.ClaimCode = null;
+            bound.ClaimCodeExpiresAt = null;
+        }
+
+        terrarium.DeletedAt = clock.UtcNow;
+
+        await store.SaveChangesAsync(cancellationToken);
+
+        return TerrariumOutcome.Deleted();
     }
 
     /// <summary>
@@ -404,6 +652,22 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             band is null ? null : new MetricBand(band.TargetMin, band.TargetMax));
     }
 
+    /// <summary>Projects one resolved band onto the wire shape the threshold editor reads.</summary>
+    private static EffectiveThresholdView DescribeThreshold(
+        EffectiveThreshold effective,
+        MetricDefinition definition) => new(
+        definition.ApiKey,
+        definition.Unit,
+        ThresholdNames.Phase(effective.Phase),
+        ThresholdNames.Source(effective.Source),
+        effective.Band.TargetMin,
+        effective.Band.TargetMax,
+        effective.Band.CriticalMin,
+        effective.Band.CriticalMax,
+        effective.Band.DwellWarnMinutes,
+        effective.Band.DwellCritMinutes,
+        effective.Band.RecoveryMargin);
+
     /// <summary>
     /// Classifies one reading. Instantaneous only: a value outside the band is reported as
     /// <see cref="ReadingStatus.OutOfRange"/> / <see cref="ReadingStatus.Critical"/> the moment it is read, while the
@@ -440,55 +704,31 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     }
 
     /// <summary>
-    /// The band in force for a metric at an instant: a per-terrarium override wins over the profile band, and an
-    /// exact-phase band wins over an <see cref="ThresholdPhase.Any"/> one (BR-10.3, BR-11.2).
+    /// The band in force for a metric at an instant, resolved by the shared rule: a per-terrarium override wins
+    /// over the profile band, and inside a layer the phase decides (BR-10.3, BR-11.2).
     /// </summary>
-    private ThresholdBand? EffectiveBand(Terrarium terrarium, MetricCode metric, DateTimeOffset atUtc)
+    private ThresholdBand? EffectiveBand(Terrarium terrarium, MetricCode metric, DateTimeOffset atUtc) =>
+        ResolveEffective(terrarium, metric, atUtc)?.Band;
+
+    /// <summary>
+    /// The same rule with the provenance attached, which is what the <c>effectiveThresholds</c> endpoint reports and
+    /// what makes the band a card shows and the band the editor lists the same band (BR-10.3).
+    /// </summary>
+    private EffectiveThreshold? ResolveEffective(Terrarium terrarium, MetricCode metric, DateTimeOffset atUtc)
     {
-        var overrides = terrarium.ThresholdOverrides
-            .Where(candidate => candidate.Metric == metric && candidate.Enabled)
-            .ToList();
-
-        var profileBands = terrarium.SpeciesProfile?.Thresholds
-            .Where(candidate => candidate.Metric == metric && candidate.Enabled)
-            .ToList() ?? [];
-
-        if (overrides.Count == 0 && profileBands.Count == 0)
-        {
-            return null;
-        }
-
-        var phase = ResolvePhase(terrarium, atUtc);
-
-        // An override for the metric beats the profile outright, and inside each set the band for the current phase
-        // beats the phase-agnostic one (BR-10.3, BR-11.2).
-        var overrideBand = overrides.FirstOrDefault(candidate => candidate.Phase == phase)
-            ?? overrides.FirstOrDefault(candidate => candidate.Phase == ThresholdPhase.Any);
-
-        if (overrideBand is not null)
-        {
-            return overrideBand.ToBand();
-        }
-
-        var profileBand = profileBands.FirstOrDefault(candidate => candidate.Phase == phase)
-            ?? profileBands.FirstOrDefault(candidate => candidate.Phase == ThresholdPhase.Any);
-
-        return profileBand?.ToBand();
-    }
-
-    private ThresholdPhase ResolvePhase(Terrarium terrarium, DateTimeOffset atUtc)
-    {
-        if (terrarium.SpeciesProfile is not { } profile)
-        {
-            return ThresholdPhase.Any;
-        }
-
+        var profile = terrarium.SpeciesProfile;
         var local = clock.InZone(atUtc, terrarium.TimeZoneId);
 
-        return ThresholdPhaseResolver.Resolve(
+        // A profile-less terrarium has no photoperiod, so the schedule defaults to "always day" rather than to a
+        // window nobody configured. Unreachable in practice — SpeciesProfileId is a required foreign key — but
+        // stated instead of left to whatever the default happened to be.
+        return ThresholdResolver.Resolve(
+            metric,
+            terrarium.ThresholdOverrides,
+            profile?.Thresholds ?? [],
             TimeOnly.FromDateTime(local.DateTime),
-            profile.LightsOnLocalTime,
-            profile.PhotoperiodHours);
+            profile?.LightsOnLocalTime ?? TimeOnly.MinValue,
+            profile?.PhotoperiodHours ?? 24m);
     }
 
     private DeviceSummary DescribeDevice(Device device) => new(

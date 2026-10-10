@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
+using SmartReptile.Domain.Evaluation;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Domain.Species;
@@ -45,6 +47,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Device health reports.</summary>
     public DbSet<DeviceHealthSample> DeviceHealthSamples => Set<DeviceHealthSample>();
 
+    /// <summary>Device-reported events (boot, sensor faults, buffer overflows, clock, calibration).</summary>
+    public DbSet<DeviceEvent> DeviceEvents => Set<DeviceEvent>();
+
     /// <summary>Telemetry samples.</summary>
     public DbSet<TelemetrySample> TelemetrySamples => Set<TelemetrySample>();
 
@@ -53,6 +58,12 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
 
     /// <summary>Alerts and their lifecycle.</summary>
     public DbSet<Alert> Alerts => Set<Alert>();
+
+    /// <summary>Dwell/hysteresis state of the threshold evaluator, one row per (terrarium, metric, phase).</summary>
+    public DbSet<EvaluationState> EvaluationStates => Set<EvaluationState>();
+
+    /// <summary>Audit trail (FR-18).</summary>
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -65,6 +76,8 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         ConfigureDevices(modelBuilder);
         ConfigureTelemetry(modelBuilder);
         ConfigureAlerts(modelBuilder);
+        ConfigureEvaluation(modelBuilder);
+        ConfigureAuditing(modelBuilder);
     }
 
     private static void ConfigureIdentity(ModelBuilder modelBuilder)
@@ -83,7 +96,6 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(u => u.RecoveryCodeSalt).HasMaxLength(16);
             entity.Property(u => u.PreferredLanguage).HasMaxLength(2).IsRequired();
             entity.Property(u => u.TimeZoneId).HasMaxLength(64).IsRequired();
-            entity.Property(u => u.TelegramChatId).HasMaxLength(32);
             entity.Property(u => u.FcmToken).HasMaxLength(256);
 
             // Username uniqueness is case-insensitive (BR-01.1).
@@ -130,6 +142,10 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(t => t.Location).HasMaxLength(120);
             entity.Property(t => t.Description).HasMaxLength(1000);
             entity.Property(t => t.TimeZoneId).HasMaxLength(64).IsRequired();
+
+            // FR-03: the update half is an ETag/If-Match round trip, so the row carries the concurrency token the
+            // database maintains rather than a hand-rolled version column a writer could forget to bump.
+            entity.Property(t => t.RowVersion).IsRowVersion();
 
             // Soft delete (DI-10): the query filter keeps deleted terrariums out of normal reads while
             // their alerts and summaries survive for audit.
@@ -271,6 +287,26 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasOne<Device>().WithMany().HasForeignKey(h => h.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.ToTable("DeviceHealthSample");
         });
+
+        modelBuilder.Entity<DeviceEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.DetailJson).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.RecordedAt).HasPrecision(3);
+            entity.Property(e => e.ReceivedAt).HasPrecision(3);
+
+            // "What happened to this board, in order" is the query task 3.3 asks of this table.
+            entity.HasIndex(e => new { e.DeviceId, e.RecordedAt }).IsDescending(false, true);
+
+            entity.HasOne<Device>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Cascade);
+
+            // Nullable and set-null: an event is a property of the board, and unbinding it must not delete history.
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(e => e.TerrariumId).OnDelete(DeleteBehavior.SetNull);
+
+            entity.ToTable("DeviceEvent");
+        });
     }
 
     private static void ConfigureTelemetry(ModelBuilder modelBuilder)
@@ -348,6 +384,58 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Ignore(a => a.Duration);
 
             entity.ToTable("Alert");
+        });
+    }
+
+    /// <summary>
+    /// The evaluator's state table (§07-appendices/02 §3.9). The key is the (terrarium, metric, phase) triple
+    /// itself: one state row per key is the invariant, and making it the primary key means a bug that tries to
+    /// write a second row fails at the database rather than at review time.
+    /// </summary>
+    private static void ConfigureEvaluation(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<EvaluationState>(entity =>
+        {
+            entity.HasKey(state => new { state.TerrariumId, state.Metric, state.Phase });
+
+            entity.Property(state => state.FirstOutOfBandAt).HasPrecision(3);
+            entity.Property(state => state.CriticalSinceAt).HasPrecision(3);
+            entity.Property(state => state.LastNotificationAt).HasPrecision(3);
+
+            // Two evaluators must not advance one key at the same time.
+            entity.Property(state => state.RowVersion).IsRowVersion();
+
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(state => state.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("EvaluationState");
+        });
+    }
+
+    private static void ConfigureAuditing(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(a => a.Id);
+            entity.Property(a => a.Id).ValueGeneratedOnAdd();
+            entity.Property(a => a.EntityName).HasMaxLength(40).IsRequired();
+            entity.Property(a => a.EntityId).HasMaxLength(64).IsRequired();
+            entity.Property(a => a.Action).HasMaxLength(40).IsRequired();
+            entity.Property(a => a.IpAddress).HasMaxLength(AuditLog.IpAddressMaxLength).IsRequired();
+
+            // Both are client-supplied headers, so the widths match the truncation in AuditLog.ForDevice rather
+            // than letting an over-long header fail the insert.
+            entity.Property(a => a.UserAgent).HasMaxLength(AuditLog.UserAgentMaxLength);
+            entity.Property(a => a.CorrelationId).HasMaxLength(AuditLog.CorrelationIdMaxLength);
+            entity.Property(a => a.OccurredAt).HasPrecision(3);
+
+            // "What happened to this thing, in order" is the query the trail exists to answer.
+            entity.HasIndex(a => new { a.EntityName, a.EntityId, a.OccurredAt }).IsDescending(false, false, true);
+            entity.HasIndex(a => a.OccurredAt);
+
+            // No foreign keys: an audit row outlives the entity it names, and a cascade would let deleting a user
+            // erase the record of what that user did.
+            entity.ToTable("AuditLog");
         });
     }
 }

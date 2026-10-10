@@ -665,9 +665,6 @@ class Labels {
   /// Row label: push.
   static const settingsChannelPush = 'Push (Android)';
 
-  /// Row label: Telegram.
-  static const settingsChannelTelegram = 'Telegram';
-
   /// Row label: email.
   static const settingsChannelEmail = 'Email';
 

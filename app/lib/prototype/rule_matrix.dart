@@ -268,7 +268,7 @@ class RuleMatrix {
     ),
     RuleEntry(
       id: 'BR-13.1',
-      title: 'Channels: in-app inbox always, push, Telegram, email',
+      title: 'Channels: in-app inbox always, push, email',
       docRef: 'FR-13',
       status: RuleStatus.modelled,
     ),

@@ -100,7 +100,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'admin@terraguard.vn • 0987 654 321',
+                        'admin@vivariumguard.vn • 0987 654 321',
                         style: TextStyle(
                             fontSize: 12, color: AppColors.textMuted),
                       ),

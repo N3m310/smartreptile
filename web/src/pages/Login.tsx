@@ -1,194 +1,423 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Eye, EyeOff, Lock, Mail, CheckCircle2, Box, Cpu, AlertTriangle, ArrowRight } from 'lucide-react';
-import { MockDataNotice } from '../components/MockDataNotice';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  ArrowRight,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Lock,
+  Mail,
+  ShieldCheck,
+  User,
+} from 'lucide-react';
+import { ApiError } from '../api/client';
+import * as auth from '../api/endpoints';
+import { useI18n } from '../i18n';
+import { LANGUAGES } from '../i18n/strings';
+import { useSession } from '../state/session';
+import { describeError, fieldHasError, fieldMessage, fieldMessages } from '../lib/messages';
+
+/**
+ * Sign in, register, and both password-recovery paths — the four things `/auth/*` can do (roadmap 4.15).
+ *
+ * What this replaced matters more than its looks. The prototype's login screen was a 400 ms `setTimeout` that
+ * navigated to `/dashboard` whatever was typed, and it carried three invented statistics ("03 Chuồng sinh thái",
+ * "09 Node kết nối IoT") on what is now the first screen a marker sees. There is no invented value left here:
+ * every number is either typed by the keeper or returned by the API. "Forgot password" also no longer shows an
+ * `alert()` telling the keeper to contact an administrator — the flow exists now, and both variants of it are on
+ * this page.
+ *
+ * The two recovery paths are one form, because the keeper holds one of two different things and only they know
+ * which: the **backup code** saved at registration, or a **server-issued code** that expires in 30 minutes. The
+ * hint under the field is the contract, and the submit handler follows the mode rather than guessing from what
+ * was typed.
+ */
+
+type Mode = 'signIn' | 'register' | 'recover' | 'reset';
 
 export const Login: React.FC = () => {
-  const [email, setEmail] = useState('admin@terraguard.vn');
-  const [password, setPassword] = useState('123456');
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
+  const { t, lang, setLang } = useI18n();
+  const { session, signIn, lostReason, clearLostReason } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate('/dashboard');
-    }, 400);
+  const [mode, setMode] = useState<Mode>('signIn');
+  const [identifier, setIdentifier] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [issuedCode, setIssuedCode] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // A session means this page has nothing to do — including one restored from storage on a reload.
+  useEffect(() => {
+    if (session) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [session, navigate]);
+
+  // The shell hands its change-password confirmation over as router state, because the server revoked the session
+  // that could have shown it. The state is consumed immediately so a reload does not replay the message.
+  useEffect(() => {
+    const incoming = (location.state as { notice?: string } | null)?.notice;
+    if (incoming) {
+      setNotice(incoming);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, navigate]);
+
+  const clearFeedback = () => {
+    setError(null);
+    setNotice(null);
+    setIssuedCode(null);
   };
 
+  const switchMode = (next: Mode) => {
+    clearFeedback();
+    setCode('');
+    setNewPassword('');
+    setMode(next);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    clearFeedback();
+    clearLostReason();
+
+    try {
+      if (mode === 'signIn') {
+        signIn(await auth.login({ usernameOrEmail: identifier.trim(), password }));
+        navigate('/dashboard', { replace: true });
+      } else if (mode === 'register') {
+        const result = await auth.register({
+          username: username.trim(),
+          email: email.trim(),
+          password,
+          preferredLanguage: lang,
+        });
+        // Shown once and never retrievable — the server keeps only its hash.
+        setIssuedCode(result.recoveryCode);
+        setNotice(t('registerDone'));
+        setIdentifier(username.trim());
+        setPassword('');
+        setMode('signIn');
+      } else if (mode === 'recover') {
+        const result = await auth.recover({
+          usernameOrEmail: identifier.trim(),
+          recoveryCode: code.trim(),
+          newPassword,
+        });
+        setIssuedCode(result.recoveryCode);
+        setNotice(t('recoveryDone'));
+        setNewPassword('');
+        setCode('');
+        setMode('signIn');
+      } else {
+        const result = await auth.resetPassword({
+          usernameOrEmail: identifier.trim(),
+          resetCode: code.trim(),
+          newPassword,
+        });
+        setIssuedCode(result.recoveryCode);
+        setNotice(t('recoveryDone'));
+        setNewPassword('');
+        setCode('');
+        setMode('signIn');
+      }
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Asks for a server-issued code and switches the form into the mode that spends it. */
+  const requestResetCode = async () => {
+    setBusy(true);
+    clearFeedback();
+    try {
+      await auth.forgotPassword({ usernameOrEmail: identifier.trim() });
+      setNotice(`${t('resetCodeRequested')} ${t('resetCodeLogHint')}`);
+      setMode('reset');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputClass = (field: string) =>
+    `w-full rounded-xl border bg-field py-3 pl-11 pr-4 text-sm text-ink outline-none transition-all placeholder:text-muted/60 focus:ring-1 focus:ring-brand ${
+      fieldHasError(error, field) ? 'border-critical' : 'border-hairline focus:border-brand'
+    }`;
+
+  const heading =
+    mode === 'signIn'
+      ? t('signInTitle')
+      : mode === 'register'
+        ? t('createAccount')
+        : mode === 'recover'
+          ? t('recoverButton')
+          : t('resetCodeLabel');
+
+  // Every field-level sentence in the refusal, de-duplicated: the policy reports one code per rule.
+  const fieldSentences = mode === 'register' ? [...new Set(fieldMessages(t, error?.errors))] : [];
+
   return (
-    <div className="min-h-screen bg-[#0b1a0d] flex flex-col items-center justify-center gap-4 p-4 sm:p-6 lg:p-8">
-      {/* The login screen is what `http://127.0.0.1:8081/` serves, so the notice is unmissable here (task 4.14) */}
-      <div className="w-full max-w-5xl">
-        <MockDataNotice />
-      </div>
-      <div className="w-full max-w-5xl bg-[#112016] border border-[#1e3825] rounded-3xl shadow-2xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[620px]">
-        {/* Left Hero Panel */}
-        <div className="lg:col-span-5 bg-gradient-to-br from-[#162a1d] via-[#112016] to-[#0e1d11] p-8 sm:p-10 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-[#1e3825]">
-          <div>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#4a9e6a] to-[#204930] flex items-center justify-center text-white shadow-xl shadow-[#4a9e6a]/20">
-                <ShieldCheck className="w-7 h-7 text-[#dcd5c4]" />
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-4 sm:p-6 lg:p-8">
+      <div className="w-full max-w-5xl rounded-3xl border border-hairline bg-surface shadow-2xl">
+        <div className="grid grid-cols-1 lg:grid-cols-12">
+          {/* Hero: brand and purpose. Nothing here is a measurement, so nothing here is a number. */}
+          <div className="rounded-t-3xl border-b border-hairline bg-gradient-to-br from-raised via-surface to-field p-8 sm:p-10 lg:col-span-5 lg:rounded-l-3xl lg:rounded-tr-none lg:border-b-0 lg:border-r">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand to-[#204930] shadow-xl shadow-brand/20">
+                <ShieldCheck className="h-7 w-7 text-ink" aria-hidden="true" />
               </div>
               <div>
-                <span className="text-2xl font-heading font-extrabold tracking-wider text-[#dcd5c4] block">
-                  TERRA<span className="text-[#4a9e6a]">GUARD</span>
+                <span className="block font-heading text-2xl font-extrabold tracking-wider text-ink">
+                  VIVARIUM<span className="text-brand">GUARD</span>
                 </span>
-                <span className="text-xs text-[#8e9e8f] tracking-widest uppercase block -mt-1">
-                  Hệ sinh thái Bò sát Thông minh
+                <span className="block text-xs uppercase tracking-widest text-muted">
+                  {t('appTitle')}
                 </span>
               </div>
             </div>
 
-            <h2 className="text-xl sm:text-2xl font-heading font-bold text-[#dcd5c4] leading-snug mb-3">
-              Giám sát vi khí hậu & cảnh báo ngưỡng chuẩn xác
-            </h2>
-            <p className="text-sm text-[#8e9e8f] leading-relaxed">
-              Giải pháp IoT chuyên dụng theo dõi nhiệt độ, độ ẩm và ánh sáng cho chuồng nuôi bò sát, bảo vệ sức khỏe loài nuôi 24/7.
+            <p className="mt-8 text-sm leading-relaxed text-muted">
+              {mode === 'register' ? t('registerPrompt') : t('signInPrompt')}
             </p>
-          </div>
 
-          {/* 3 Stat Cards */}
-          <div className="space-y-3 my-8">
-            <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-[#0b1a0d]/60 border border-[#1e3825]">
-              <div className="w-10 h-10 rounded-xl bg-[#4a9e6a]/15 text-[#4a9e6a] flex items-center justify-center shrink-0">
-                <Box className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-[#8e9e8f]">Terrarium Đang Quản Lý</p>
-                <p className="text-base font-heading font-bold text-[#dcd5c4]">03 Chuồng sinh thái</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-[#0b1a0d]/60 border border-[#1e3825]">
-              <div className="w-10 h-10 rounded-xl bg-[#c87f3a]/15 text-[#c87f3a] flex items-center justify-center shrink-0">
-                <Cpu className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-[#8e9e8f]">Cảm biến & Bộ điều khiển</p>
-                <p className="text-base font-heading font-bold text-[#dcd5c4]">09 Node kết nối IoT</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-[#0b1a0d]/60 border border-[#1e3825]">
-              <div className="w-10 h-10 rounded-xl bg-[#e05530]/15 text-[#e05530] flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-[#8e9e8f]">Hệ thống cảnh báo ngưỡng</p>
-                <p className="text-base font-heading font-bold text-[#dcd5c4]">Thời gian thực & Phản hồi tức thì</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-xs text-[#8e9e8f] flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#4a9e6a]" />
-            <span>Phiên bản v1.0 • Không AI • Logic ngưỡng tin cậy</span>
-          </div>
-        </div>
-
-        {/* Right Form Panel */}
-        <div className="lg:col-span-7 p-8 sm:p-12 flex flex-col justify-center">
-          <div className="max-w-md mx-auto w-full">
-            <div className="mb-8">
-              <h3 className="text-2xl font-heading font-bold text-[#dcd5c4]">Đăng nhập hệ thống</h3>
-              <p className="text-sm text-[#8e9e8f] mt-1.5">
-                Nhập thông tin xác thực để truy cập bảng điều khiển TerraGuard
-              </p>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email */}
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e9e8f] mb-2">
-                  Địa chỉ Email
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8e9e8f]">
-                    <Mail className="w-5 h-5" />
-                  </div>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    placeholder="admin@terraguard.vn"
-                    className="w-full pl-11 pr-4 py-3 bg-[#0b1a0d] border border-[#1e3825] focus:border-[#4a9e6a] rounded-xl text-sm text-[#dcd5c4] placeholder-[#556055] outline-none transition-all focus:ring-1 focus:ring-[#4a9e6a]"
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e9e8f] mb-2">
-                  Mật khẩu
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8e9e8f]">
-                    <Lock className="w-5 h-5" />
-                  </div>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    placeholder="••••••••"
-                    className="w-full pl-11 pr-11 py-3 bg-[#0b1a0d] border border-[#1e3825] focus:border-[#4a9e6a] rounded-xl text-sm text-[#dcd5c4] placeholder-[#556055] outline-none transition-all focus:ring-1 focus:ring-[#4a9e6a]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-[#8e9e8f] hover:text-[#dcd5c4]"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Remember me & Forgot pass */}
-              <div className="flex items-center justify-between text-xs pt-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none text-[#8e9e8f] hover:text-[#dcd5c4]">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 rounded bg-[#0b1a0d] border-[#1e3825] accent-[#4a9e6a] focus:ring-0"
-                  />
-                  <span>Ghi nhớ đăng nhập</span>
-                </label>
-                <a
-                  href="#forgot"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('Vui lòng liên hệ quản trị viên để khôi phục mật khẩu tài khoản.');
-                  }}
-                  className="text-[#c87f3a] hover:underline"
+            <div className="mt-8 flex items-center gap-2">
+              <span className="text-xs uppercase tracking-widest text-muted">{t('language')}</span>
+              {LANGUAGES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setLang(option)}
+                  aria-pressed={lang === option}
+                  className={`rounded-lg border px-3 py-1 text-xs transition-colors ${
+                    lang === option
+                      ? 'border-brand text-brand'
+                      : 'border-hairline text-muted hover:text-ink'
+                  }`}
                 >
-                  Quên mật khẩu?
-                </a>
+                  {option === 'vi' ? t('languageVi') : t('languageEn')}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-8 sm:p-12 lg:col-span-7">
+            <div className="mx-auto w-full max-w-md">
+              <h1 className="font-heading text-2xl font-bold text-ink">{heading}</h1>
+
+              {/* A session the transport could not rotate says so, instead of a silent bounce. */}
+              {lostReason === 'expired' ? (
+                <p className="mt-4 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5 text-[13px] text-ink">
+                  {t('sessionExpired')}
+                </p>
+              ) : null}
+
+              {error ? (
+                <div
+                  role="alert"
+                  className="mt-4 rounded-xl border border-critical/40 bg-critical/10 px-4 py-2.5 text-[13px] text-ink"
+                >
+                  <p>{describeError(t, error)}</p>
+                  {fieldSentences.map((sentence) => (
+                    <p key={sentence} className="mt-1 text-xs">
+                      {sentence}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
+              {notice ? (
+                <p
+                  role="status"
+                  className="mt-4 rounded-xl border border-brand/40 bg-brand/10 px-4 py-2.5 text-[13px] text-ink"
+                >
+                  {notice}
+                </p>
+              ) : null}
+
+              {issuedCode ? (
+                <p className="mt-3 rounded-xl border border-hairline bg-field px-4 py-3 text-sm">
+                  <span className="text-muted">{t('recoveryIssued')} </span>
+                  <code className="font-mono text-base tracking-widest text-ink">{issuedCode}</code>
+                </p>
+              ) : null}
+
+              <form onSubmit={submit} className="mt-6 space-y-5">
+                {mode === 'register' ? (
+                  <>
+                    <Field label={t('username')} icon={<User className="h-5 w-5" />}>
+                      <input
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        required
+                        autoComplete="username"
+                        aria-invalid={fieldHasError(error, 'username')}
+                        className={inputClass('username')}
+                      />
+                    </Field>
+                    <FieldLabelError message={fieldMessage(t, error, 'username')} />
+                    <Field label={t('email')} icon={<Mail className="h-5 w-5" />}>
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                        autoComplete="email"
+                        aria-invalid={fieldHasError(error, 'email')}
+                        className={inputClass('email')}
+                      />
+                    </Field>
+                    <FieldLabelError message={fieldMessage(t, error, 'email')} />
+                  </>
+                ) : (
+                  <Field label={t('usernameOrEmail')} icon={<User className="h-5 w-5" />}>
+                    <input
+                      value={identifier}
+                      onChange={(event) => setIdentifier(event.target.value)}
+                      required
+                      autoComplete="username"
+                      className={inputClass('identifier')}
+                    />
+                  </Field>
+                )}
+
+                {mode === 'signIn' || mode === 'register' ? (
+                  <>
+                    <Field label={t('password')} icon={<Lock className="h-5 w-5" />}>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        required
+                        autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                        aria-invalid={fieldHasError(error, 'password')}
+                        className={inputClass('password')}
+                      />
+                      <PasswordToggle
+                        shown={showPassword}
+                        onToggle={() => setShowPassword(!showPassword)}
+                      />
+                    </Field>
+                    {mode === 'register' ? (
+                      <p className="text-xs text-muted">{t('passwordHint')}</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <Field
+                      label={mode === 'recover' ? t('recoveryCode') : t('resetCodeLabel')}
+                      icon={<KeyRound className="h-5 w-5" />}
+                    >
+                      <input
+                        value={code}
+                        onChange={(event) => setCode(event.target.value)}
+                        required
+                        spellCheck={false}
+                        autoComplete="one-time-code"
+                        className={`${inputClass('code')} font-mono`}
+                      />
+                    </Field>
+                    <p className="text-xs text-muted">
+                      {mode === 'recover' ? t('recoverHintBackup') : t('recoverHintIssued')}
+                    </p>
+                    <div>
+                      <Field label={t('newPassword')} icon={<Lock className="h-5 w-5" />}>
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={newPassword}
+                          onChange={(event) => setNewPassword(event.target.value)}
+                          required
+                          autoComplete="new-password"
+                          aria-invalid={fieldHasError(error, 'password')}
+                          className={inputClass('password')}
+                        />
+                        <PasswordToggle
+                          shown={showPassword}
+                          onToggle={() => setShowPassword(!showPassword)}
+                        />
+                      </Field>
+                      {/* The rule in the same words the server enforces (BR-01.2). */}
+                      <p className="mt-2 text-xs text-muted">{t('passwordHint')}</p>
+                    </div>
+                  </>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="group mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3.5 text-sm font-medium text-white shadow-lg shadow-brand/25 transition-all hover:bg-brand-dark disabled:opacity-70"
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      <span>{busyLabel(t, mode)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{actionLabel(t, mode)}</span>
+                      <ArrowRight
+                        className="h-4 w-4 transition-transform group-hover:translate-x-1"
+                        aria-hidden="true"
+                      />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                {mode === 'signIn' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => switchMode('register')}
+                      className="text-accent hover:underline"
+                    >
+                      {t('createAccount')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => switchMode('recover')}
+                      className="text-accent hover:underline"
+                    >
+                      {t('forgotPassword')}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* The other recovery path: the keeper who lost the backup code asks for a fresh one. */}
+                    {mode === 'recover' ? (
+                      <button
+                        type="button"
+                        onClick={() => void requestResetCode()}
+                        disabled={busy || identifier.trim().length === 0}
+                        className="text-accent hover:underline disabled:opacity-50"
+                      >
+                        {t('sendResetCode')}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => switchMode('signIn')}
+                      className="text-muted hover:text-ink"
+                    >
+                      {t('backToSignIn')}
+                    </button>
+                  </>
+                )}
               </div>
-
-              {/* Submit button */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full mt-2 py-3.5 px-4 bg-[#4a9e6a] hover:bg-[#3d8558] text-white font-medium text-sm rounded-xl shadow-lg shadow-[#4a9e6a]/25 transition-all flex items-center justify-center gap-2 group cursor-pointer disabled:opacity-70"
-              >
-                <span>{isLoading ? 'Đang xác thực...' : 'Đăng nhập vào hệ thống'}</span>
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-              </button>
-            </form>
-
-            <div className="mt-8 pt-6 border-t border-[#1e3825]/80 text-center text-xs text-[#8e9e8f]">
-              <span>Tài khoản mẫu: </span>
-              <span className="font-mono text-[#dcd5c4]">admin@terraguard.vn</span>
-              <span className="mx-2">•</span>
-              <span>Pass: </span>
-              <span className="font-mono text-[#dcd5c4]">123456</span>
             </div>
           </div>
         </div>
@@ -197,3 +426,62 @@ export const Login: React.FC = () => {
   );
 };
 
+const PasswordToggle: React.FC<{ shown: boolean; onToggle: () => void }> = ({ shown, onToggle }) => {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={shown ? t('hidePassword') : t('showPassword')}
+      className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-muted hover:text-ink"
+    >
+      {shown ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+    </button>
+  );
+};
+
+const Field: React.FC<{ label: string; icon: React.ReactNode; children: React.ReactNode }> = ({
+  label,
+  icon,
+  children,
+}) => (
+  <div>
+    <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted">
+      {label}
+    </label>
+    <div className="relative">
+      <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-muted">
+        {icon}
+      </span>
+      {children}
+    </div>
+  </div>
+);
+
+/** The per-field sentence under an input, when the refusal named that field. */
+const FieldLabelError: React.FC<{ message: string | null }> = ({ message }) =>
+  message ? <p className="-mt-3 text-xs text-critical">{message}</p> : null;
+
+function actionLabel(t: (key: string) => string, mode: Mode): string {
+  switch (mode) {
+    case 'register':
+      return t('register');
+    case 'recover':
+    case 'reset':
+      return t('recoverButton');
+    default:
+      return t('signIn');
+  }
+}
+
+function busyLabel(t: (key: string) => string, mode: Mode): string {
+  switch (mode) {
+    case 'register':
+      return t('registering');
+    case 'recover':
+    case 'reset':
+      return t('recovering');
+    default:
+      return t('signingIn');
+  }
+}

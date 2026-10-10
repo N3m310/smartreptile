@@ -2,6 +2,15 @@ using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Application.Abstractions;
 
+/// <summary>Which registration identifiers already belong to an account.</summary>
+/// <param name="Username">True when the username is taken.</param>
+/// <param name="Email">True when the email address is taken.</param>
+public readonly record struct TakenIdentifiers(bool Username, bool Email)
+{
+    /// <summary>True when either identifier is taken.</summary>
+    public bool Any => Username || Email;
+}
+
 /// <summary>
 /// Persistence port for accounts and sessions. A port rather than a <c>DbContext</c> because the Application
 /// project deliberately has no EF Core reference (§02-design/01 §4): the use cases must be testable without a
@@ -15,8 +24,12 @@ public interface IUserStore
     /// <summary>Finds an account by id.</summary>
     Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken);
 
-    /// <summary>True when either identifier is already taken. Used only to decide whether to create the row.</summary>
-    Task<bool> UserExistsAsync(string username, string email, CancellationToken cancellationToken);
+    /// <summary>
+    /// Which of the two registration identifiers is already in use. Two flags rather than one boolean because
+    /// registration answers with the field to fix (ADR-020): "one of these is taken" is a worse answer than
+    /// "the email is", and the caller typed both.
+    /// </summary>
+    Task<TakenIdentifiers> FindTakenIdentifiersAsync(string username, string email, CancellationToken cancellationToken);
 
     /// <summary>Stages a new account.</summary>
     void AddUser(User user);

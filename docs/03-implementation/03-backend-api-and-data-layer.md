@@ -168,6 +168,31 @@ deliberate:
   the committed samples, so the push cannot be mistaken for part of the transaction it follows: a failed broadcast
   is logged as a lost push by `IngestOutcomeRecorder`, never as a refused batch.
 
+**As built (2026-10-09) — the other three channels, and the evaluator behind the queue.** The stage table above is
+the telemetry path. A publication on `health`, `status` or `events` takes the same hop but a different pipeline,
+because the three have no samples to judge and no batch to validate:
+
+| Channel | Pipeline | Writes |
+|---|---|---|
+| `telemetry` | `IngestPipeline` | `TelemetrySample` + `MetricReading` + device state |
+| `health` | `DeviceChannelPipeline` | device denorms + `DeviceHealthSample` |
+| `status` | `DeviceChannelPipeline` | `Device.Status`, and the `statusChanged` push |
+| `events` | `DeviceChannelPipeline` | `DeviceEvent` |
+
+`DeviceChannelPipeline` shares the gate the sample path uses — the payload must name the device the transport
+authenticated (rule V-04), and the device must exist, be unrevoked and be bound — so a device cannot reach the
+database on one topic that it could not reach on another. `JsonDeviceChannelParser` is the tolerant half and
+`Application/Ingest/DeviceChannelContracts.cs` the rules, split the same way as the telemetry parser and validator.
+An out-of-vocabulary `status` word or event `type` is refused as `schema_invalid`, so a firmware typo is counted
+rather than quietly becoming a new category. `ack` is still forwarded to nobody: command results are FR-14's, and
+accepting one would acknowledge a command this build cannot issue.
+
+`IEvaluationQueue` is now `InProcessEvaluationQueue` — a bounded channel drained by `EvaluatorWorker` into
+`SampleEvaluator` (`Application/Evaluation/`), which applies §02-design/03 §4.2's "faulted or implausible: return"
+and advances an `EvaluationState` watermark per `(terrarium, metric, phase)`. Unlike `InProcessTelemetryBus` it does
+**not** back-pressure: ingest's acknowledgement may wait for the database, but it must never wait for a derived
+opinion, so a full queue drops the batch and logs an error as the defect it is.
+
 The stage classes below are the ones that exist; `TelemetryPayloadValidator` and `PlausibilityGuard` live in the
 Application layer and `TelemetryWriter`/`DeviceStateUpdater` are application stages over an `ITelemetryStore` port,
 which is what keeps them unit-testable without a broker or a database.
@@ -245,10 +270,43 @@ public static ThresholdDecision Decide(EffectiveBand band, decimal value, DateTi
 `IClock` (`Clock.Inject`) is injected so time can be advanced in tests without `Thread.Sleep` — the same
 pattern the Flutter core uses (`03-implementation/05`).
 
+**As built (2026-10-09, roadmap 3.2).** The sketch above is the shipped algorithm, in
+`Domain/Evaluation/ThresholdDecision.cs`, with five differences worth naming — each one a place where the sketch
+left something undecided:
+
+| Sketch | Built | Why |
+|---|---|---|
+| `EffectiveBand band` | `ThresholdBand band` | `ThresholdBand` is the domain's own value object (with generated/validated ordering helpers); `EffectiveBand` was a name for a type that never needed to exist |
+| `!state.IsCritical` | `AlertSeverity? openAlertSeverity` parameter | `EvaluationState` has no severity column and should not grow one (§07-appendices/02 §3.9): the fact lives on the alert row, so the caller passes it in |
+| `alerts.OpenAsync(...)` / `alerts.TouchAsync(...)` | `ThresholdAlertWriter.Open/Touch/Escalate/Resolve` | four field-level writes with no I/O, so a test asserts a row without a store; sending is 3.5's, and `alertChanged` is 3.4's |
+| `states.SaveAsync(state.With(decision))` | the same entity mutated in place, saved once per pass | the state row is loaded per batch and mutated by the decision, so `With` would allocate a second truth |
+| *(nothing about the alert's values)* | `TriggeringValue`/`PeakValue` read back from the stored readings of the dwell window | both describe readings the engine judged before the alert existed; the readings are the evidence, so no column is added for them |
+
+**One write ordering is deliberate.** When a decision opens an alert, the alert is committed *before* the state
+row points at it (`state.OpenAlertId = alert.Id` needs the identity the insert assigned). So an interruption
+between the two leaves an open alert that no state row names, rather than a state naming a row that was never
+written — and the next pass repairs the first case by adopting the open alert it finds for that key. The same
+adoption is what makes a human's resolve through the lifecycle API (3.4) visible to the evaluator without a second
+mechanism: a resolved row is not open, so the pointer is cleared and the next excursion is a new episode.
+
+**What is not built here.** The reorder window of §5 below is still a sketch: evaluation runs in ingest order (see
+`02-design/03` §4.2's as-built note and the open item in `03-implementation/07`), and `Message` is left null on
+purpose because §02-design/05 §7 composes the notification text from the alert's fields and localises it per user
+(ADR-013).
+
 ## 5. Ordered evaluation queue
 
 Alerts must be evaluated in `RecordedAt` order per device or a late sample could resolve an episode before
 its cause was processed.
+
+> **Not built (2026-10-09).** The window below is still a sketch. What runs today evaluates batches in ingest
+> order, which is per-device publish order and therefore `RecordedAt` order for a single node — the common case —
+> but a second publisher or a broker redelivery can still reach the engine out of order. The `EvaluationState`
+> watermark cannot catch that: it is an id watermark, and a back-filled sample gets a *higher* id than the samples
+> already evaluated even though its `RecordedAt` is older. Recorded as open in `03-implementation/07` (roadmap
+> 3.2) with the reason it was not built now: a 30-second buffer delays every evaluation by 30 seconds, which the
+> pipeline's own live checks and the M3 demo timing would have to absorb, and no test case in `04-quality/02`
+> demands it yet.
 
 ```csharp
 // Keyed by device; a small reorder window absorbs out-of-order back-fill.
@@ -267,15 +325,17 @@ skipped and nothing is evaluated twice.
 
 Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of design, and one file owns it:
 
-- **Two credentials, two endpoints, one non-disclosure rule.** `recover` spends the backup code issued at
-  registration; `forgot-password` + `reset-password` spend a code the server issues. Every failure on both paths is
-  the same opaque `401` (`invalid_recovery_code` / `invalid_reset_code`) whether the identifier is unknown, the
-  account is disabled, the code is spent, or the code belongs to someone else. `forgot-password` always answers
-  `202` with an empty body, including when it issued nothing, so it cannot be used to ask whether an account exists.
+- **Two credentials, two endpoints, one non-disclosure rule — with two recorded exceptions.** `recover` spends the
+  backup code issued at registration; `forgot-password` + `reset-password` spend a code the server issues. Every
+  *code* failure on both paths is the same opaque `401` (`invalid_recovery_code` / `invalid_reset_code`) whether the
+  code is spent, expired or belongs to someone else. What the identifier resolves to is disclosed on two paths only
+  (`ADR-020`): registration answers `409 registration_conflict` naming `email_taken` / `username_taken`, and
+  `forgot-password` answers `404 identifier_unknown` when no account uses the identifier — a keeper who mistyped
+  their address is told so rather than left waiting for a code that was never generated.
 - **A failing delivery channel cannot change the answer.** `AuthService.ForgotPasswordAsync` commits the code and
-  then calls `IPasswordResetNotifier` inside a guard that swallows a throwing implementation: a `500` for accounts
-  that exist next to a `202` for accounts that do not would hand back exactly the oracle the `202` exists to deny.
-  The port is still required not to throw — the guard is the second line, not the first.
+  then calls `IPasswordResetNotifier` inside a guard that swallows a throwing implementation: a `500` where the code
+  exists would be indistinguishable from a broken deployment and would tell the keeper nothing about the code they
+  were just issued. The port is still required not to throw — the guard is the second line, not the first.
 - **Hashing follows what the secret is used for.** The backup code is salted (`Sha256SecretHasher`, shared with
   device credentials) because it is verified after the account is known. The reset code is **unsalted** SHA-256 via
   `ISecretGenerator.Sha256`, like a refresh token, because the row has to be *found* by the value presented; both
@@ -287,7 +347,7 @@ Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of de
   holding a live credential is a leak, so the default is off and the release note says so (limitation L-02).
 | `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage` · **planned:** `PATCH/DELETE {id}`, `GET/PUT {id}/thresholds`, `POST {id}/silences`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` + `ITerrariumStore`), not a filter applied afterwards |
 | `/api/v1/devices` | `GET`, `GET {id}`, `POST self-register`, `POST claim`, `PATCH {id}`, `POST {id}/rebind`, `POST {id}/rotate-secret`, `POST {id}/revoke`, `POST {id}/calibration`, `POST {id}/commands`, `POST {id}/snapshots` | `self-register` anonymous + rate-limited |
-| `/api/v1/ingest` | `POST http` | Device-auth header; the HTTP fallback path |
+| `/api/v1/ingest` | **built:** `POST http` | Device-auth header (`Device {id}.{secret}`); the HTTP fallback path, 6 requests/min/device |
 | `/api/v1/alerts` | `GET`, `GET {id}`, `POST {id}/ack`, `POST {id}/resolve` | Role-gated ack/resolve |
 | `/api/v1/species-profiles` | `GET`, `POST`, `PATCH {id}`, `DELETE {id}`, `POST {id}/duplicate` | Built-ins immutable |
 | `/api/v1/notifications` | `GET`, `POST {id}/read`, `POST read-all` | In-app inbox |
@@ -315,6 +375,27 @@ public sealed class TelemetryHub : Hub
 Events pushed: `readingAdded {sampleId, recordedAt, metrics[]}`, `statusChanged {deviceStatus, lastSeenAt}`,
 `alertChanged {alertId, state, severity}`. Membership is authorised on join — a group is never joined
 before the `TerrariumAccessRequirement` check, otherwise SignalR would become a cross-tenant data leak.
+
+**As built (task 2.9, 2026-10-06).** Three things the sketch does not say, all of them decisions rather than
+details:
+
+- **Membership is the ownership query the read surface already makes.** `TerrariumService.IsMemberAsync` asks
+  `ITerrariumStore.FindOwnedAsync`, so the hub answers "not yours" and "does not exist" identically, exactly as
+  `GET /terrariums/{id}` does (BR-02.2) — the hub cannot be used to enumerate ids. A connection with no subject is
+  refused rather than trusted; `[Authorize]` should make that unreachable, and the safe direction to be wrong in
+  costs nothing here.
+- **The push is an Application port implemented in the API project.** `SignalRTelemetryBroadcaster` sits beside the
+  hub because `IHubContext<TelemetryHub>` is not visible from Infrastructure; the ingest pipeline still depends only
+  on `ITelemetryBroadcaster`. The event body is `ReadingAddedPayload`, in the application layer so its shape is
+  testable without a hub, and one event is sent per sample rather than per batch — a client handler then treats
+  every arrival the same way instead of unwrapping a batch that may be one long. Metrics are keyed by the metric
+  dictionary's `ApiKey`, the same string `readings/latest` answers with, and the per-metric `qualityFlags` is the
+  *sample's* bitmask, because quality is recorded per sample.
+- **The token travels in the query string** (`?access_token=…`), because a browser cannot set a header on the
+  WebSocket handshake. Accepted on `/hubs` only: a token in a URL reaches logs, proxies and referrer headers, which
+  is worth paying for the one route that cannot avoid it and nowhere else.
+
+`statusChanged` and `alertChanged` are still unwritten — see the 2.9 block in `07-implementation-roadmap`.
 
 ## 8. Background workers
 

@@ -54,7 +54,7 @@ Rules:
 |---|---|---|
 | `Domain` | Entities, enums, value objects, domain rules (`ThresholdBand.Validate()`, `Alert.Escalate()`) | EF Core, HTTP, MQTT, `ILogger` |
 | `Application` | Use-case services (commands/queries), DTOs, validator classes, interfaces (`IMqttPublisher`, `INotificationChannel`, `IDeviceSecretHasher`, `IClock`) | `DbContext` usage in callers, HTTP types, MQTTnet types |
-| `Infrastructure` | EF Core `DbContext`, configurations, migrations, repositories, MQTT client/broker host, FCM/Telegram/SMTP clients, PBKDF2 hasher | Business decisions (it implements interfaces, it does not decide) |
+| `Infrastructure` | EF Core `DbContext`, configurations, migrations, repositories, MQTT client/broker host, FCM/SMTP clients, PBKDF2 hasher | Business decisions (it implements interfaces, it does not decide) |
 | `Api` | Endpoints/controllers, request/response models, auth policies, SignalR hub, background workers, DI wiring, `Program.cs` | Direct SQL, domain logic beyond mapping |
 
 ### 2.2 Folder tree
@@ -157,34 +157,34 @@ Rules:
 
 ## 4. Web conventions (`web/`)
 
-The folder holds **two surfaces that follow different rules on purpose** (ADR-017), and **`ADR-019` inverts their
-roles**: `web/legacy/` still ships today and is retired by task 4.19, while the TERRAGUARD client in `web/` becomes
-the M4 web surface. The rules below are stated per surface, and each one that exists to keep a *prototype* honest is
-written with the task that retires it — an obligation that outlives its reason is how a prototype ends up shipping
-with a prototype's rules.
+One surface since 2026-10-07: the TERRAGUARD client in `web/` is the M4 web surface (`ADR-019`) and it is wired to
+the API. The M1 static dashboard (`web/legacy/`) is deleted, so the per-surface rules that used to live here have
+collapsed into one list — a rule that existed only to keep a *prototype* honest went with the prototype.
 
-### 4.1 The static dashboard (`web/legacy/`) — still shippable, retired by 4.19
+### 4.1 The retired static dashboard (`web/legacy/`) — deleted 2026-10-07
 
-- Vanilla ES modules; **no build step** — a demo must not depend on `npm install` succeeding.
-- Served by nginx under `/legacy/`, next to the prototype build at `/`; the two mounts and the prototype-only SPA
-  fallback live in `web/nginx.conf` (task 4.12).
-- `js/api.js` is the only place that knows the API base URL and attaches the bearer token
-  (token kept in memory + `sessionStorage`, never `localStorage`, because it is a shared demo machine).
-- `js/i18n.js` mirrors the ARB keys; `TC-I-15` compares key sets so translations cannot drift.
-- One file per page in `js/pages/`; `wallboard.html` has no navigation chrome.
-- Chart.js instance per chart, disposed on page unload; no chart re-creates on every push (only
-  `chart.data` is appended, capped at 720 points client-side).
+Kept as a one-line record because other documents cite it: vanilla ES modules with no build step, served by nginx
+under `/legacy/` next to the prototype build, `js/api.js` owning the API base URL and the session,
+`js/i18n.js` mirroring the ARB keys, one file per page in `js/pages/`. Task 4.19 removed it once every screen it
+had was a React route; the two things worth not losing were its honest failure classification (unreachable vs
+not-built vs not-found) and its wallboard, both of which are now `web/src/lib/messages.ts` and `/wallboard`.
 
-### 4.2 The TERRAGUARD client (`web/`) — the M4 web surface, being wired
+### 4.2 The TERRAGUARD client (`web/`) — the web surface, wired
 
 - React 19 + Vite + TypeScript + Tailwind v4 (ADR-017). `src/pages/*.tsx` is one screen per route,
   `src/components/Layout.tsx` is the shared shell; `npm run dev` to work on it, `npm run build` to refresh the
-  committed `web/dist/`.
-- **Wiring replaces mock data screen by screen** (4.15–4.20). A screen that still renders `src/data/mockData.ts`
-  must not call the API and must keep its mock-data notice; a screen that has been wired must not keep a mock
-  fallback, because a plausible number on a failed request is worse than an error state — the `failureKind`
-  distinction `web/legacy/js/api.js` makes (unreachable vs not-built vs not-found) is the behaviour to copy, and it
-  is why the dashboard's diagnosis is honest without a server.
+  committed `web/dist/`, then `npm run typecheck` and `npm run check:strings` as CI does.
+- **`src/api/` is the only place that knows the API.** `client.ts` owns the base URL, the stored session and the
+  single-flight refresh-on-401; `endpoints.ts` is one function per route; `types.ts` mirrors §4 of the contract.
+  A screen never calls `fetch`.
+- **A refusal is rendered from its code.** `lib/messages.ts` maps problem codes and `errors[]` field codes to
+  sentences, and an unknown code prints `errorRequestFailed (code)` rather than a guess (roadmap 4.15).
+- **No threshold logic in the client.** Status, band and phase come from `readings/latest`; `lib/status.ts` maps the
+  five API values to a label and a colour and holds no comparison. The one comparison left is §6's staleness age
+  against `3 × samplingIntervalSec` (ADR-005, task 4.17).
+- **Three screens still render `src/data/mockData.ts`** — `Devices`, `Alerts`, `Settings` — because their endpoints
+  do not exist yet (4.20). They must not call the API and the shell renders their mock-data notice; a wired screen
+  must not keep a mock fallback, because a plausible number on a failed request is worse than an error state.
 - **No threshold logic in the client.** Status, band and phase come from `readings/latest`; comparing a metric
   value against a bound belongs in the engine, not in a screen (ADR-005, task 4.17). The prototype's `value > max`
   alert path is the specific thing that rule was written against, and it goes with `Alerts.tsx`'s wiring rather

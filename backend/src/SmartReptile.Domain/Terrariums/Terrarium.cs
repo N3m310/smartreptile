@@ -35,6 +35,14 @@ public class Terrarium
     /// <summary>Last modification timestamp.</summary>
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// SQL Server <c>rowversion</c>, the optimistic-concurrency token FR-03's update half is built on. A client
+    /// reads it from the <c>ETag</c> of a detail response and returns it as <c>If-Match</c>; a concurrent edit
+    /// changes the value, so the stale update affects zero rows instead of silently overwriting the other edit.
+    /// Null only before the row has been inserted.
+    /// </summary>
+    public byte[]? RowVersion { get; set; }
+
     /// <summary>Soft-delete marker; non-null means the terrarium was removed by its owner.</summary>
     public DateTimeOffset? DeletedAt { get; set; }
 

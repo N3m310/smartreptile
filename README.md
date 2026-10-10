@@ -11,8 +11,7 @@ No AI, no actuation** (see `docs/07-appendices/06-v2-ai-roadmap.md` for what com
 | Firmware (sensor node) | `firmware/` | ESP32 / Arduino via PlatformIO (`esp32dev` + `native` for host tests) |
 | Backend | `backend/` | ASP.NET Core 10, EF Core 10, SQL Server 2022, in-process MQTT broker (MQTTnet), SignalR |
 | Mobile app | `app/` | Flutter (Android primary), `provider` |
-| Web dashboard | `web/legacy/` | Static HTML/CSS/JS + Chart.js (no build step) — the only web surface with a real API behind it today; **retired by task 4.19** (`ADR-019`) |
-| Web client | `web/` | React 19 + Vite + TypeScript + Tailwind CSS v4 — the M4 web surface from `ADR-019`. Still mock data until 4.15–4.20 wire it screen by screen; a screen that still renders `mockData.ts` keeps its mock-data notice |
+| Web client | `web/` | React 19 + Vite + TypeScript + Tailwind CSS v4 — **the web surface** (`ADR-019`, wired to the API 2026-10-07; the M1 static dashboard it replaced is deleted). `npm run dev` for it, `npm run build` to refresh the committed `web/dist/` that nginx serves |
 
 ## Quick start
 
@@ -74,27 +73,27 @@ flutter run -d android     # or: flutter run -d emulator-5554
 flutter test
 ```
 
-### 5. Web (`web/` — two surfaces during the transition, see `ADR-017`, `ADR-018` and `ADR-019`)
+### 5. Web (`web/` — one surface since 2026-10-07: the VIVARIUMGUARD client, see `ADR-019`)
 
-Compose serves both surfaces from one nginx (`web/nginx.conf`, task 4.12): `http://127.0.0.1:8081/` is the
-committed prototype build, and `http://127.0.0.1:8081/legacy/` is the dashboard that talks to the API.
-
-The dashboard — the surface that still ships today, retired by task 4.19 (`ADR-019`) — no build step:
-
-```bash
-cd web/legacy
-python -m http.server 8081     # the same files compose serves under /legacy/
-```
-
-The TERRAGUARD client — the M4 web surface from `ADR-019`, still mock data with no network calls until
-4.15–4.20 wire it screen by screen:
+Compose serves the committed build from one nginx (`web/nginx.conf`): `http://127.0.0.1:8081/` is the wired
+VIVARIUMGUARD client, and `/wallboard`, `/history` or any other deep route returns `200` through the SPA fallback.
+The M1 static dashboard that used to answer under `/legacy/` is deleted, and with it the second mount. (The brand
+was renamed from TERRAGUARD on 2026-10-09; `ADR-019` and the dated entries below keep the old name because they
+record what was decided then.)
 
 ```bash
 cd web
 npm install
 npm run dev                    # Vite on http://127.0.0.1:8081 — the same port as compose, so run one, not both
+npm run typecheck              # tsc --noEmit (CI)
+npm run check:strings          # i18n key parity against app/lib/l10n/app_*.arb (CI)
 npm run build                  # refresh the committed web/dist/ that compose serves at /
 ```
+
+Sign in with any account on the API; the [quick-start](#1-backend--database) backend serves it. A fresh account
+shows the empty state, because a terrarium has to be created through `POST /api/v1/terrariums`
+(`07-appendices/03` §4.2) — the web form that would do it waits for the species-profile catalogue route, and says
+so rather than inventing a profile id.
 
 ## Verification gates for Milestone M1 (`docs/03-implementation/07-implementation-roadmap.md`)
 
@@ -103,15 +102,17 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Gate | Command / method | Result |
 |---|---|---|
 | Backend builds, warnings as errors | `dotnet build backend/SmartReptile.sln -c Release` | ✅ Build succeeded, 0 warnings |
-| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **422 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery) |
+| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **545 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery, 453 after the disclosed-conflict change, 455 after the password-policy change, 497 after the M2 close-out and the M3 scaffolding, 513 after 3.1's read half, **545 after the threshold engine (3.2)**) |
 | Formatting gate (CI parity) | `dotnet format SmartReptile.sln --verify-no-changes --severity error` | ✅ clean (generated migrations excluded via `.editorconfig`) |
+| Web client type-checks and builds | `npm run typecheck && npm run build` in `web/` | ✅ **clean** — `tsc --noEmit` exit 0, `vite build` produced `index-DX1qiJCO.js` (793 kB / 226 kB gzip) + `index-BLifHLg9.css` (39.6 kB), refreshed 2026-10-09 |
+| Web i18n key parity (`TC-I-15`) | `npm run check:strings` in `web/` | ✅ **164 keys**, identical in vi and en, every key referenced by `src/` defined — and the check was verified to *fail* on a deliberate typo before it was trusted |
 | Schema created by migrations only | `dotnet ef migrations add InitialSchema` | ✅ one migration; `(DeviceId, Sequence)` unique, filtered open-alert unique, one-device-per-terrarium unique, band CHECK constraints all present |
 | Docker image builds | `docker compose build api` | ✅ builds from a clean context (needed `backend/.dockerignore` — defect 8 below) |
 | Compose stack comes up | `docker compose up -d` | ✅ `db`, `api`, `web` all Up; `db` + `api` report `healthy`, 0 container restarts |
 | Migration applies to a **real** SQL Server | `dotnet ef database update` against 127.0.0.1:14330 | ✅ `Applying migration '20260921091523_InitialSchema' ... Done.` — 13 tables created |
 | Invariants exist in SQL, not only in C# | `sys.indexes`, `sys.check_constraints`, `sys.foreign_keys` | ✅ filtered unique `IX_Alert_DedupeKey ([State]<>(2))`, `IX_Device_TerrariumId ([TerrariumId] IS NOT NULL AND [Status]<>(3))`, 5 `CK_Threshold*` / `CK_ThresholdOverride*` ordering constraints |
 | Cascade risk does not fire | read the FK delete rules back | ✅ `Device → Terrarium` is `SET_NULL`, so `TelemetrySample` has a single cascade path — this was the specific shape that was flagged as a risk before the schema existed |
-| Reference data seeds on startup | `SELECT COUNT(*) FROM SpeciesProfile` | ✅ 3 profiles (`Arid (desert)`, `Leopard gecko (semi-desert)`, `Tropical (humid forest)`) and 17 threshold bands |
+| Reference data seeds on startup | `SELECT COUNT(*) FROM SpeciesProfile` | ✅ 4 profiles (`Arid (desert)`, `Arid-cool (bearded dragon, ambient)`, `Leopard gecko (semi-desert)`, `Tropical (humid forest)`) and 19 threshold bands |
 | Dashboard served, and the browser accepts the API | nginx `web` on `:8081` + real browser `fetch` to `:8080` | ✅ `index`/`wallboard`/`health` all `200`; browser fetch of `/version` returns `200` with `Access-Control-Allow-Origin: http://127.0.0.1:8081` (+`204` preflight). *(The three pages now live in `web/legacy/` after the prototype took the root of `web/` — `ADR-017`.)* **Re-verified 2026-10-03 after 4.12:** `:8081/` now serves the prototype build and `:8081/legacy/index.html` / `wallboard.html` / `health.html` all return `200`; BUG-03 is closed, with the `curl` pair written down in `docs/05-release/01` §5 |
 | Liveness | `curl /health/live` | ✅ `200 Healthy`, answers immediately |
 | Readiness with the database **up** | `curl /health/ready` | ✅ `200 Healthy` — `database: Healthy` ("Database is reachable") + `mqtt-broker: Healthy`, 7 ms |
@@ -123,7 +124,11 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | MQTT topic ACL | `paho-mqtt` subscribe/publish attempts outside the device's own prefix | ✅ **2.3**: own `cmd` granted; `sr/v1/d/+/telemetry` and another device's `cmd` refused; counters `mqtt_refused_subscriptions_total` / `mqtt_refused_publications_total` on `/metrics` |
 | MQTT plaintext is loopback-only | `netstat -ano` with TLS on, then again with `Mqtt:DisablePlaintextEndpoint=true` | ✅ **2.3**: `127.0.0.1:1883` **and** `[::1]:1883` only (no wildcard bind — binding the IPv4 address alone leaves the IPv6 socket open); in the release shape nothing listens on `1883` at all and TLS kept authenticating devices |
 | Ingest: broker → bus → worker → SQL Server | `paho-mqtt` publish over a real MQTT listener against a live API + SQL Server, then `curl /metrics` and read the rows back | ✅ **2.4 done 2026-10-04**: a two-sample batch published twice stored **2** `TelemetrySample` rows (sequences `1, 2`), **8** `MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, set `LastSeenAt` / `FirmwareVersion` / `SignalStrengthDbm` / `FreeHeapKb` and wrote a `DeviceHealthSample`; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`, `ingest_rejected_total=0`. A `tf = 85` sample was stored with `QualityFlags = 2`; a 121-sample batch was `payload_too_large` and a malformed body `schema_invalid`, taking `ingest_rejected_total` to **2** |
-| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **15 passed** — migrations applied, 3 profiles + 17 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`) |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **19 passed** — migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium |
+| Terrarium update and delete over HTTP | `curl` a live API + SQL Server: create, `PATCH` with the current `ETag`, then a stale one, then none, then `DELETE` with and without the flag (26 assertions, all green) | ✅ **2.8's update/delete halves done 2026-10-09**: `201` + `ETag` on create, `200` and a **new** `ETag` on a matching `If-Match`, `412 precondition_failed` on a stale one with the row provably not overwritten, `428 precondition_required` with no header, `If-Match: *` accepted, `400 validation_failed` on a bad body, `409 conflict_device_bound` while a live device is bound, `204` with `?allowUnboundDevice=true` (the board returns to `Provisioning` with its credentials intact), and `404 not_found` after |
+| MQTT device channels are consumed, not dropped | `paho-mqtt` publishing `status`, `health`, `events` and `telemetry` over loopback from a **scripted** node (no hardware), then reading the rows back | ✅ **2026-10-09**: `flags=1.2.0`, `rssi=-64`, `heap=140`, `bat=87.00` on the `Device` row; **2** `DeviceHealthSample` rows (one from the `health` topic, one from a batch's health block); **1** `DeviceEvent` (a `sensor_fault` on `humidityPct`) with an unknown event type refused as `schema_invalid`; **2** `TelemetrySample` rows; and **2** `EvaluationState` rows written by the evaluator worker **for the keys the profile actually bands** (`TempC`/Night and `HumidityPct`/Any, watermark 20) |
+| The threshold engine raises and closes an alert (M3 task 3.2) | `paho-mqtt` publishing a scripted excursion over a real broker against a live API + SQL Server, then reading `Alert` and `EvaluationState` back — 48 assertions, all green | ✅ **2026-10-09**: a faulted out-of-band reading opened nothing and created no state row; an out-of-band reading opened nothing while the dwell window was open; when it elapsed **exactly one Warning opened, back-dated to the first out-of-band reading**, with `TriggeringValue` = that reading and `PeakValue` = the window's worst reading (`32.6 °C` opened it, `33.0 °C` was the peak — a value only the stored readings know); a critical reading short of its own dwell touched the row without escalating; when that dwell elapsed the **same** alert escalated once (`Severity` and `DedupeKey` → Critical, id and `TriggeredAt` unchanged); three readings inside the band by the margin resolved it (`Recovered`, pointer and excursion cleared, three ticks counted); a later excursion opened a **second** row while the first stayed resolved; and `/metrics` moved by exactly the two openings and the ten published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard gecko band asks for five) because FR-10's write route is 3.1's remainder |
+| Effective thresholds over HTTP (M3 task 3.1's read half) | `curl` a live API + SQL Server: terrariums on the seeded Tropical profile in a zone inside the photoperiod and one outside it, with an override inserted per phase (`sqlcmd`, because the write half of 3.1 does not exist yet) — 34 assertions, all green | ✅ **2026-10-09**: an anonymous read `401`; **both phases observed**, the phase computed from each terrarium's own zone — `Europe/London` (local 15:00) listed four metrics with the day band `24–28 °C`, `Pacific/Auckland` (local 03:00) listed two with the night band `20–24 °C`; `humidityPct` reported `phase: "any"` / `source: "profile"` with the profile's `60–80` and critical `40–95` in both; a **day-only** override correctly *silent* at night (the profile's night band came back); an override for the night phase reported `source: "override"` with its own bounds while the other metrics kept `source: "profile"` and the metric list was unchanged; a foreign/missing id `404 not_found`; `readings/latest` still `200` beside the new route. The same run is what pins the two readings of `03-implementation/06` §1 that the document left ambiguous |
 | Device provisioning over HTTP | `curl` against a live API + SQL Server (50 assertions) | ✅ **2.2 done 2026-10-03**: self-register `201`/`429`/`400`, claim `200`/`404 claim_code_invalid`/`404 not_found`/`409 terrarium_already_bound`, rotate `200` with a 10-minute grace, revoke `204` and idempotent — with `Owner`-only gating (`Technician` → `403 insufficient_role`) |
 | Firmware builds for the target | `pio run -e esp32dev` | ✅ RAM 13.6% (44 536 B), Flash 20.7% (270 673 B) |
 | Firmware host unit tests | `docker run --rm -v "$PWD/firmware:/firmware" smartreptile-fw-test` (image from `firmware/Dockerfile.host-tests`; plain `pio test -e native` wherever a host compiler exists) | ✅ **22/22 passed** — 8 filters + 8 payload + 6 ring buffer, ~18 s. First ever execution, and it caught defect 11 |
@@ -143,18 +148,31 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   `/metrics`, the SignalR hub), `/api/v1/auth` (register, login, refresh, logout, me, change-password — added
   2026-10-03 — plus recover, forgot-password and reset-password, added 2026-10-06), `/api/v1/devices`
   (self-register, claim, rotate-secret, revoke — added the same day, task 2.2) and `/api/v1/terrariums` (list,
-  create, detail, `readings/latest`, `readings`, `coverage` — added 2026-10-06, task 2.8), so the dashboard's
-  live view signs in and renders measured values rather than degrading to its empty state; the empty state now
-  means an account with no terrarium, and one can be created over HTTP. Terrarium update/delete, thresholds,
-  silences, summaries, exports and alerts are still M2/M3 work.
+  create, detail, `readings/latest`, `readings`, `coverage` — added 2026-10-06 — plus `PATCH`, `DELETE` and
+  `thresholds`, added 2026-10-09), so the dashboard's live view signs in and renders measured values rather than
+  degrading to its empty state; the empty state now means an account with no terrarium, and one can be created,
+  renamed and removed over HTTP. `GET .../thresholds` reports the effective band per metric with the layer it came
+  from, so the threshold editor (M4's 4.20) can be built against it and show *why* a limit is what it is.
+  **Thresholds are read-only over HTTP**: writing an override (`PUT`/`DELETE`) is 3.1's other half and is not
+  built. Alerts exist and a scripted excursion proves the whole lifecycle, but **there is no `/api/v1/alerts`
+  route yet** — reading, acknowledging and resolving an alert is 3.4, and silences, summaries and exports are 3.4
+  and 3.6.
+- **The engine raises alerts without telling anyone.** A new alert is a row and a counter: delivery is the
+  notification dispatcher's (3.5) and the `alertChanged` push arrives with the lifecycle API (3.4), so a keeper
+  learns about an alert by reading the table until then. The per-device **reorder window** of
+  `docs/02-design/03` §7 is also unbuilt: samples are evaluated in ingest order, which for one node *is*
+  `RecordedAt` order, but a second publisher or a broker redelivery could arrive out of order and the
+  `EvaluationState` watermark is an id watermark, so it cannot detect that.
 - **No sensor hardware is connected**: `main.cpp` runs with bench mode off and reports placeholder values until
   M2, and no board has ever been flashed from this repository.
 - **The MQTT broker verifies device credentials** (task 2.3, 2026-10-03): `username = deviceId`, `password =
   secret`, validated against the current `DeviceCredential` with the rotation grace window applied, plus a
   per-device topic ACL and a revoke-time session kick. The consumer landed with task 2.4 on 2026-10-04: a
   telemetry publication now becomes a `TelemetrySample`, its `MetricReading` rows and a device state update, and
-  the counters move. `health`, `status` and `events` are still forwarded to nobody, and the HTTPS fallback
-  endpoint arrives with the firmware work of 2.6.
+  the counters move. As of 2026-10-09 the other three channels are consumed too — `health` updates the fleet
+  figures and writes a health row, `status` sets the lifecycle state and pushes `statusChanged`, `events` is stored
+  as a `DeviceEvent` — so only `ack` is still forwarded to nobody, because command results are FR-14's. The HTTPS
+  fallback endpoint exists; its firmware half arrives with the device work of 2.6.
 - **No load, soak, or backup testing**, and the retention/rollup jobs have never run against real data.
 - **Nothing is deployed**: this is a local Compose stack, not a host with TLS, backups, or monitoring (M6).
 
@@ -300,10 +318,10 @@ stored as `SHA-256(code ‖ 16-byte salt)` and shown once; `POST /api/v1/auth/re
 every session. A keeper who no longer has it can ask for a **server-issued code** instead:
 `POST /api/v1/auth/forgot-password` mints a single-use, 30-minute code and `POST /api/v1/auth/reset-password`
 spends it, rotates the backup code and ends every session. The issued code is stored as an **unsalted** SHA-256 —
-like a refresh token, and unlike the backup code — because the row has to be found *by* the value presented. Both
-paths answer identically for an unknown identifier, a spent code and another account's code, which is the point:
-`forgot-password` returns `202` with an empty body on every path, including when it issued nothing, and the failure
-code on both reset paths is one opaque `401`. Delivery is the `IPasswordResetNotifier` port; the implementation
+like a refresh token, and unlike the backup code — because the row has to be found *by* the value presented. The
+reset paths answer identically for an unknown identifier, a spent code and another account's code, which is the
+point: the failure code on both is one opaque `401`. (`forgot-password` itself stopped being identical for all
+callers on 2026-10-07 — see **ADR-020** below.) Delivery is the `IPasswordResetNotifier` port; the implementation
 this deployment ships writes the code to the server log when `PasswordReset:LogCode` is true (false in
 `appsettings.json`, true in `appsettings.Development.json` only) and otherwise says plainly that it reached nobody,
 which is all that is left of limitation **L-02** — the transport, not the flow. Checked over real HTTP (the
@@ -326,28 +344,91 @@ screens have endpoints today** (`Login`, `Dashboard`, `History`), which is why 4
 cannot. Until a screen is wired it keeps its mock-data notice, and the notice goes when the mock data does. See
 [docs/03-implementation/07-implementation-roadmap.md](docs/03-implementation/07-implementation-roadmap.md).
 
+**Completed 2026-10-07 (web — the promotion, tasks 4.15–4.19).** TERRAGUARD is now the web surface and the M1
+static dashboard (`web/legacy/`) is deleted, with its compose mount and its nginx location. What that took:
+`web/src/api/{client,endpoints,types}.ts` (base URL, stored session, single-flight refresh-on-401, `ApiError`
+carrying `code`/`status`/`detail`/`errors[]`); a session provider whose role comes from `GET /auth/me` rather than
+from `localStorage`; four auth modes on one `Login.tsx` (sign in, register, backup-code recovery, server-issued
+reset code); a route guard; the dashboard, terrariums, terrarium detail and history wired to `/terrariums`,
+`readings/latest`, the bucketed range route and `coverage`; the wallboard rebuilt as a React kiosk route (W1 was
+never one of the prototype's eight screens) and the retired `health.html` diagnosis rehomed at `/system` so the
+retirement did not lose a function; §3's four status roles as the only palette, with contrast measured per surface
+and recorded; `tsc`, `vite build` and key parity in a new CI `web` job; and one copy deck for both clients — the
+client reads `app/lib/l10n/app_{en,vi}.arb` directly, so `TC-I-15`'s "identical key sets" is structural rather than
+a comparison of two lists. Verified live: a terrarium created through `POST /terrariums`, a device claimed and fed
+through `/ingest/http`, and the served build rendering five metric cards with the *server's* statuses plus coverage
+`0.42%` (6 of 1440 expected) — then the same through the real nginx config: `/`, `/wallboard` and a deep route all
+`200`. `Devices`, `Alerts` and `Settings` still render mock data with the notice, because their endpoints do not
+exist; that is 4.20, not an oversight.
+
+**Added 2026-10-07 (auth — the password policy the brief asks for, and the two endpoints that now disclose).**
+`PasswordPolicy` requires **≥ 8 characters with at least one letter, one digit, one upper-case letter and one
+special character** (a symbol that is not a letter or a digit — whitespace does not count), keeps the ≤ 128 cap and
+the embedded common-password deny-list, and reports one code per rule, so the dashboard states the rule under both
+new-password fields and names the rule a refusal broke instead of saying only that the password was refused. The
+Live page also gained *Đổi mật khẩu* / *Change password*: the endpoint had existed since FR-01 with 67 unit tests
+behind it and no client that could reach it. `POST /register` answers `409 registration_conflict` (with `errors[]`
+naming `email_taken` / `username_taken`) instead of `202` plus a recovery code that could never verify, and
+`POST /forgot-password` answers `404 identifier_unknown` for an identifier nobody holds — both deliberate
+exceptions to the non-disclosure rule, recorded in **ADR-020** together with their cost. Verified live: `202` then
+`409` for one email, `404` for an unknown address, `400 password_policy_violation` naming the rule that failed, and
+the change-password flow end to end in the browser; **455 backend unit tests pass** (was 422, 453 after the
+disclosure change) and the integration project passes 16 of 16.
+
+**Added 2026-10-09 (backend, M3 tasks 3.1 and 3.2 — the threshold engine).** M3 has started, and the system now
+decides things about the data it stores. **3.1's read half**: the override → profile resolution order of
+`docs/03-implementation/06` §1 became `ThresholdResolver`, one pure function, and
+`GET /api/v1/terrariums/{id}/thresholds` answers with the effective band per metric plus the layer it came from —
+the same call the card's band comes from, so an editor and a card cannot disagree. **3.2**: the decision procedure
+of `docs/02-design/03` §4.2 became `ThresholdDecision.Decide` — dwell, recovery hysteresis and escalation as one
+static function with no dependency at all — and `SampleEvaluator` acts on it, writing a new alert (back-dated to the
+first out-of-band reading), a touch, an escalation of the same row, or a recovery. Five readings of the design were
+settled in the process and are recorded in the documents rather than only in the code (dwell measured against the
+evaluation instant; a reading back inside the band ends the excursion; escalation once per episode using the
+severity the alert already carries; a consecutive critical window; and the alert's triggering value and peak read
+back from the stored readings of its dwell window). **What is deliberately absent**: delivery — an alert is a row
+and a counter, because the dispatcher is 3.5 and `alertChanged` arrives with the lifecycle API in 3.4 — and the
+per-device reorder window of §7. Verified live by a **scripted node** driving one excursion through a real broker,
+the ingest pipeline, the evaluator and SQL Server (48 assertions, listed in the gates above): one back-dated
+Warning, no escalation under the critical dwell, one escalation of that same alert, `Recovered` after three ticks,
+and a second episode as a separate row.
+
 ```bash
 # The password below is a throwaway value for a local demo account, and the recovery codes are alphabet
 # patterns rather than captured values, for the same reason: CI's secret scanner rejects realistic-looking
 # credentials wherever they appear, test fixtures and documentation included, and allow-listing those paths is
 # exactly how a real key gets committed unnoticed. A real code from a live run is a credential until it expires.
+# It is a documented policy value too (BR-01.2: ≥ 8 characters, one letter, one digit, one upper-case letter and
+# one special character) — an example the server refuses is worse than no example.
 curl -s -X POST http://localhost:8080/api/v1/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"username":"keeper","email":"keeper@example.com","password":"local-demo-1"}'
+  -d '{"username":"keeper","email":"keeper@example.com","password":"Local-demo-1!"}'
 # -> 202 {"status":"accepted","recoveryCode":"DEM2DEM2DEM2DEM2DEM2"}   # store it: shown once, never retrievable
 curl -s -X POST http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"usernameOrEmail":"keeper","password":"local-demo-1"}'
-# Forgot it instead? Ask for a code; the answer is the same whether or not the account exists, and in a
-# development environment the code itself is in the API log (PasswordReset:LogCode).
+  -d '{"usernameOrEmail":"keeper","password":"Local-demo-1!"}'
+# Already taken? /register answers 409 registration_conflict with errors[] naming email_taken or username_taken.
+# Forgot it instead? Ask for a code; an identifier nobody holds answers 404 identifier_unknown (ADR-020), and in
+# a development environment the code itself is in the API log (PasswordReset:LogCode).
 curl -s -X POST http://localhost:8080/api/v1/auth/forgot-password \
   -H 'Content-Type: application/json' -d '{"usernameOrEmail":"keeper"}'
 curl -s -X POST http://localhost:8080/api/v1/auth/reset-password \
   -H 'Content-Type: application/json' \
-  -d '{"usernameOrEmail":"keeper","resetCode":"DEM3DEM3DEM3DEM3DEM3","newPassword":"local-demo-2"}'
+  -d '{"usernameOrEmail":"keeper","resetCode":"DEM3DEM3DEM3DEM3DEM3","newPassword":"Local-demo-2!"}'
 # -> 200 {"recoveryCode":"DEM4DEM4DEM4DEM4DEM4"}   # the backup code rotated too, so take the new one
 
 # With a terrarium and a sample in place, the read surface the dashboard uses:
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings/latest"
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings?metric=tempC&from=2026-10-06T00:00:00Z&to=2026-10-07T00:00:00Z"
+
+# The effective band per metric, with the layer each one came from (no route writes an override yet):
+curl -s "http://localhost:8080/api/v1/terrariums/$ID/thresholds"
+# -> {"terrariumId":"…","capturedAtUtc":"…","timeZoneId":"Asia/Ho_Chi_Minh",
+#     "effectiveThresholds":[{"metric":"tempC","unit":"°C","phase":"night","source":"profile", …}]}
+
+# The engine's output is a table today: alerts are raised, escalated and resolved, and the dispatcher that would
+# tell anyone about them is M3 task 3.5. Read them back with:
+sqlcmd -S "localhost\SQLEXPRESS" -d SmartReptile -E -Q "SET NOCOUNT ON; SELECT TOP 5 Id, Severity, State, Metric, TriggeredAt, PeakValue FROM Alert ORDER BY Id DESC;"
+# The counters behind it (alerts_opened_total counts openings, not escalations):
+curl -s http://localhost:8080/metrics
 ```

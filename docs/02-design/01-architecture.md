@@ -22,7 +22,7 @@ made a first-class concern.
 | **L1 Sensing** | Produce trustworthy measurements | SHT31 (temp/RH), BH1750 (lux), LTR390 (UVI), DS18B20 (surface temp), optional ESP32-CAM | Reports a fault flag; the system marks the metric unavailable instead of guessing |
 | **L2 Edge** | Sample, filter, buffer, transport, health | ESP32 firmware (`sr-node`): sampler task, filter, ring buffer, transport task, provisioning portal | Degrades to buffering; eventually drops oldest and reports the count |
 | **L3 Platform** | Ingest, store, evaluate, alert, aggregate | MQTT broker, ASP.NET Core API + workers, SQL Server | Ingest never blocks on evaluation; evaluation never blocks on notification |
-| **L4 Experience** | Show and explain | Flutter app (Android), web client (React 19 + Vite + TS + Tailwind, `web/` — the M4 surface from `ADR-019`, being wired; `web/legacy/` is the M1 static dashboard it replaces, retired by 4.19) — SignalR | Read-only degraded mode with last known values + clear staleness |
+| **L4 Experience** | Show and explain | Flutter app (Android), web client (React 19 + Vite + TS + Tailwind, `web/` — the M4 surface from `ADR-019`, wired to the API 2026-10-07; the M1 static dashboard it replaced is deleted) — SignalR | Read-only degraded mode with last known values + clear staleness |
 
 ## 3. Component view
 
@@ -41,7 +41,7 @@ flowchart TB
     BROKER["MQTT broker (MQTTnet)<br/>1883/8883, LWT, retained status"]
     INGEST["IngestWorker<br/>validate · enrich · calibrate · dedupe"]
     EVAL["ThresholdEvaluator<br/>dwell · hysteresis · phase · dedupe"]
-    NOTIF["NotificationDispatcher<br/>FCM · Telegram · SMTP · inbox"]
+    NOTIF["NotificationDispatcher<br/>FCM · SMTP · inbox"]
     ROLL["RollupWorker<br/>hourly · daily · cumulative exposure"]
     SWEEP["RetentionSweeper<br/>purge raw 90 d, snapshots 7 d"]
     API["REST API<br/>auth · terrariums · devices · readings · alerts · summaries · exports"]
@@ -68,7 +68,7 @@ flowchart TB
   API --> WEB
   API --> APP
   NOTIF --> FCM["FCM"] --> APP
-  NOTIF --> TG["Telegram Bot API"]
+  NOTIF --> MAIL["SMTP relay"]
 ```
 
 ## 4. Dependency rules (enforced in review and by project references)
@@ -120,7 +120,7 @@ flowchart LR
 ```
 
 - **Volumes:** `db-data` (SQL Server), `uploads` (snapshots, exports), `broker-data` (retained status/queues).
-- **Secrets:** `.env` (not committed) for SQL password, Telegram token, FCM service account path; certificate
+- **Secrets:** `.env` (not committed) for SQL password, FCM service account path, SMTP credentials; certificate
   mounted read-only. `appsettings.Development.json` contains no secrets (NFR-04).
 - **TLS:** self-signed/internal CA certificate is acceptable for the demo **only if** the ESP32 is flashed with
   the matching CA and the app/browser trust it; otherwise use a Let's Encrypt certificate on a hostname.

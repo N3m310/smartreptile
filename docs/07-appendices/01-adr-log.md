@@ -1,4 +1,4 @@
-# 01 — Architecture Decision Log (ADR-001 … ADR-019)
+# 01 — Architecture Decision Log (ADR-001 … ADR-021)
 
 Append-only. Each entry: **Context → Decision → Consequences → Rejected alternatives.** Numbers are never
 reused; a superseded ADR keeps its id and gains a "Superseded by" note.
@@ -138,7 +138,7 @@ would expose every device).
 ---
 
 ## ADR-007 — Alert channels: FCM push primary, Telegram secondary, SMTP optional
-**Status:** Accepted · **Related:** FR-13, risk R-13
+**Status:** Accepted, **superseded in part (2026-10-07) by `ADR-021`** — the Telegram half is no longer in force; "FCM primary, SMTP optional" and the `INotificationChannel` seam stand · **Related:** FR-13, risk R-13
 
 **Context.** The brief leaves the alert channel open ("thông báo qua ứng dụng nhắn tin hoặc app").
 
@@ -525,3 +525,124 @@ either alone. **Promoting the prototype without its obligations** — wiring it 
 Vietnamese-only copy and the CI exclusion as they are: that is how a mock prototype becomes a shipped surface that
 still cannot be measured, and it would empty `TC-I-15`'s gate of meaning. **Editing or deleting ADR-018** to record
 this (append-only log: a revoked entry keeps its text, and its status line is what declares the revocation).
+
+---
+
+## ADR-020 — Registration and `forgot-password` disclose whether an identifier has an account
+**Status:** Accepted · **Date:** 2026-10-07 · **Related:** FR-01, BR-01.5, `02-design/06` §2, `07-appendices/03` §4.1/§5, `03-implementation/03` §6, `04-quality/02` (`TC-U-54`, `TC-U-57`), BUG-05
+
+**Context.** Both endpoints were built on a strict non-disclosure rule: `register` answered `202` with a recovery
+code whether or not the identifiers were free (the code was a decoy on the taken path), and `forgot-password`
+answered `202` with an empty body whether or not any account used the identifier. The intent was to keep the API from
+being usable as an account-existence oracle — the same rule `login`, recovery and terrarium ownership follow.
+
+Running it on 2026-10-07 showed the rule is a net loss in these two places, and the loss is a *lie with a cost*:
+
+1. **Registration told the caller the account had been created.** Registering a second time with the same email but
+   a fresh username returned `202 {"status":"accepted","recoveryCode":"…"}`, the DB (correctly, the unique index
+   holds) created nothing, and the person was left holding a recovery code that can never verify — while the natural
+   next step, signing in, failed with `invalid_credentials`. From the product's point of view that is a
+   duplicate-email "success" that leaves someone hunting for an account that does not exist, and it can also cost
+   them the *real* recovery code if they store the decoy and discard the first one.
+2. **`forgot-password` could not be told apart from a delivery failure.** An address nobody holds produced the same
+   `202` as a real one, and delivery is a log line at best (limitation L-02), so a mistyped address is
+   indistinguishable from a code that never arrived. The value the endpoint protects — "does this address have an
+   account?" — is worth less than the support cost of the confusion, and it is a question the caller is asking about
+   *their own* address, which they typed themselves.
+
+Two facts made the change cheap and honest: the DB already enforces email and username uniqueness, so nothing about
+storage or concurrency had to change, and the spec (`07-appendices/03` §4.1) had already sketched `409` for a taken
+identifier while noting the built API answered `400` instead.
+
+**Decision.** These two endpoints disclose, and nothing else does.
+
+| Path | Before | Now |
+|---|---|---|
+| `POST /auth/register` with a taken username and/or email | `202` + a decoy recovery code, no account created | `409 registration_conflict` with `errors[]` naming `username_taken` and/or `email_taken`; nothing created; no code returned |
+| `POST /auth/forgot-password` with an unknown identifier | `202`, no code issued | `404 identifier_unknown`; no code row created |
+| `POST /auth/forgot-password` for a disabled account | `202`, no code issued | `404 identifier_unknown` — it cannot be recovered either, and a third answer would tell a stranger more, not less |
+| `POST /auth/login` | one opaque `401` | unchanged |
+| `POST /auth/recover`, `POST /auth/reset-password` | one opaque `401` for an unknown identifier, a spent code, an expired code and another account's code | unchanged |
+| Terrarium, device and ingest routes | ownership and credentials indistinguishable (`BR-02.2`) | unchanged |
+
+The decoy mechanism is deleted rather than kept: `RegisterAsync` generates the recovery code only after the account
+row is created, and `IUserStore.UserExistsAsync` became `FindTakenIdentifiersAsync` returning one flag per identifier,
+so the conflict can name the field the caller has to fix.
+
+**Consequences.**
+- **`forgot-password` is now an account-existence oracle**, and that is accepted rather than overlooked: anyone can
+  learn whether a given address has an account by watching for `404` against `202`. The exposure is bounded by the
+  group's rate limit (10 requests/minute per client address, `Program.cs`) and by the fact that the answer is the one
+  the caller already knows about their own address. It is *not* bounded by any attempt to make the timing identical,
+  and no such attempt is claimed.
+- **Registration discloses too**, which is the ordinary signup behaviour and the reason it is the safer of the two:
+  a stranger learns nothing about an address they do not already associate with the product, and the person who
+  typed the identifier is told what to fix.
+- The two endpoints no longer have "identical answers" as an invariant, so the tests that asserted it are rewritten
+  (`TC-U-54`) and a new case pins the conflict's field-level shape (`TC-U-57`). `BUG-05` records what the old
+  behaviour looked like from the outside.
+- `AuthService.ForgotPasswordAsync` still commits the code before calling the notifier, and still swallows a
+  throwing delivery channel: a `500` where the code exists would be indistinguishable from a broken deployment and
+  would tell the keeper nothing about the code they were just issued.
+- The earlier reasoning is **not** erased. `05-release/03` §5 keeps its 2026-10-06 row stating that both paths
+  answered identically, because that is what was decided and verified then; this ADR is why it changed, and the
+  history that cites it stays intact.
+
+**Rejected.** **Keeping both endpoints non-disclosing** and fixing only the messaging in the client: the client
+cannot distinguish the two cases without the server saying so, which is the whole problem. **Disclosing at
+`login`/`recover`/`reset-password` too** (so the whole auth surface answers consistently): registration and the
+forgot-password prompt are the two moments where the identifier's existence is already the caller's own business,
+while a reset code that discloses an account would let anyone enumerate accounts for no usability gain. **Keeping
+the decoy code but returning `409` as well**: contradictory, and it is the decoy that made the old answer a lie.
+**Making the timing of the two `forgot-password` paths identical** to hide the new distinction: the distinction is
+now the documented contract, so spending effort to conceal it would be working against this decision.
+
+---
+
+## ADR-021 — Telegram is dropped as a notification channel
+**Status:** Accepted · **Date:** 2026-10-07 · **Supersedes in part:** ADR-007 · **Related:** FR-13, BR-13.1, BR-13.5, `02-design/05` §3/§6, `05-release/03` (R-13, TBC-3), roadmap 3.5, migration `DropTelegramChannel`, `07-appendices/02`, `07-appendices/07`
+
+**Context.** `ADR-007` made a Telegram bot the secondary channel and the one the live demo would use, and `BR-13.1`
+listed it as a per-user option. The notification engine itself (roadmap 3.5) is unbuilt, so nothing has ever sent
+through it; what existed was three declarations and no behaviour — `ChannelTelegramEnabled` and `TelegramChatId` on
+`User` (written by nobody, read by nobody, at their defaults on every account: all `false`/`null` in the
+`07-appendices/07` dump of 2026-10-07), a `TELEGRAM_BOT_TOKEN` line in `.env.example`, a `Channel.telegram` member in
+the Flutter prototype, and the channel's place in the requirement, the design and the test documents. On 2026-10-07
+the team narrowed the notification scope to the channels it intends to build and asked for every Telegram artefact to
+be removed.
+
+**Decision.** Telegram is dropped as a channel — from the requirement, the domain model, the configuration surface,
+the prototype and the current-state documents. The two columns are removed by the `DropTelegramChannel` migration
+(applied to the development database on 2026-10-07). The surviving channels are the in-app inbox (always on; the
+audit trail), FCM push (optional per user) and SMTP email (optional per user, off by default).
+
+**Consequences.**
+- **Nothing delivered is lost today.** No code path read either column and the dispatcher does not exist, so the only
+  test touched is the prototype's `notification_policy_test.dart` (one expectation removed); `TC-U-37…45` and
+  `TC-I-12` stay unbuilt-and-untouched. `BR-13.1`, `BR-13.5`, `02-design/05` §3/§6, the appendix DDL and the
+  traceability row now name FCM and SMTP only.
+- **The M3 demo loses its easiest live path, and that cost is real rather than nominal.** A Telegram message proved a
+  genuine out-of-band delivery with nothing to install and no Firebase project. What remains is the in-app inbox —
+  which lives on the same screen as the alert, so it demonstrates the policy but not delivery to a second device — or
+  SMTP, which needs a relay this environment does not have (the same gap as `L-02`, where the reset code's
+  *transport* is a log line). `R-13` is therefore rewritten to say what is actually left instead of pointing at a
+  channel that no longer exists, and `TBC-3` records the change. If the demo needs a real out-of-band notification,
+  the cheapest replacement is a local SMTP sink in compose (MailHog/Mailpit) — recorded here as the rejected-*for-now*
+  option, to be its own task with its own tests.
+- `ADR-007` is **superseded in part, not revoked**: its primary channel, its SMTP option and its
+  `INotificationChannel` seam all stand. Its entry keeps its original text and gains a status note, per this log's
+  rule.
+- The prototype moves with the requirement: the `Channel.telegram` member, its settings label, its place in the
+  default channel set and the fake user's `telegramChatId` are gone, so the settings screen and the rule matrix
+  describe the same three channels the requirement now names.
+- **Past records are not rewritten.** `ADR-007`'s text, the earlier rows of `05-release/03` §5, `InitialSchema` and
+  the older migration snapshots, and every roadmap/doc-log mention of what was decided at the time stay as written.
+  The sweep that closed this change left no Telegram string in code, configuration, current policy or the shipped web
+  client — only in those historical records and in this entry.
+
+**Rejected.** **Keeping the columns unused** and dropping only the documentation: two dead columns and a
+`TELEGRAM_BOT_TOKEN` line invite a future reader to assume a channel exists, which is the belief this ADR exists to
+correct. **Building Telegram properly** (bot linking, webhook, chat-id verification): a week of work and a second
+credential type for a channel no requirement demands, in the same milestone as the alert engine the product actually
+needs. **Adding the SMTP sink inside this change**: it is the right compensating control for `R-13`, but it is a new
+component with its own tests, and folding it into a scope reduction would hide it.

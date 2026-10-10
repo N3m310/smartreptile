@@ -54,8 +54,9 @@ at the freeze. Until both are answered, treat the W8 web gate as at risk rather 
 - `BE-1` 2.2 device claim + 2.3 MQTT credential check + TLS
 - `BE-2` 2.4 ingest worker and pipeline (`TC-U-01…09`)
 - `APP` 4.1 auth + 4.2 home — **built against the stub API, not waiting for a real endpoint**
-- `DOC` book the mentor slot for W7; close the `Arid-cool` gap; literature pass; then the 4.10 live page
-  (**4.12 was closed early**, 2026-10-03 — BUG-03 is fixed)
+- `DOC` book the mentor slot for W7; literature pass; then the 4.10 live page
+  (**the `Arid-cool` gap was closed early**, 2026-10-07 — the variant is seeded and the band counts moved with it;
+  **4.12 was closed early**, 2026-10-03 — BUG-03 is fixed)
 - **Gate:** real sensor values on serial — the line M1 has been missing
 
 ### W6 · 10-12 … 10-18 — first sample end to end
@@ -70,7 +71,7 @@ at the freeze. Until both are answered, treat the W8 web gate as at risk rather 
 
 ### W7 · 10-19 … 10-25 — the engine can tell the keeper something
 - `BE-2` 3.1 + **3.2 `ThresholdDecision` + `EvaluatorWorker`** + 3.3 derived signals
-- `BE-1` 3.4 alert lifecycle + 3.5 notifications — get one real Telegram message through
+- `BE-1` 3.4 alert lifecycle + 3.5 notifications — get one real notification through (inbox + a real FCM push)
 - `FW` 2.6 HTTPS back-fill; 2.7 provisioning + claim code on the OLED
 - `APP` 4.5 alerts inbox/detail/ack; 4.6 threshold editor — **6 of 9 screens done by Friday**
 - `DOC` mentor meeting: demo M3 and write the dated 1.1 line; report R3 (**4.14 was closed early**, 2026-10-03:
@@ -173,7 +174,7 @@ remaining `DOC` load is unrealistic, move 4.8/4.9 to `DOC` or the web pages to t
 
 1. FR-17 camera snapshot · 2. web pages beyond wallboard + live · 3. 5.7 k6 → a measured single-client sample
 4. 24 h soak → 8 h with the same instrumentation · 5. 4.8 report screen (the API export stays)
-6. SMTP email channel (keep FCM + Telegram) · 7. ~~promoting the prototype past a mock-data reference (`ADR-018`
+6. SMTP email channel (keep FCM) · 7. ~~promoting the prototype past a mock-data reference (`ADR-018`
 declines this)~~ — **no longer available as a cut: `ADR-019` makes the promotion the plan** (4.15–4.20), so cutting
 it now means cutting the M4 web surface itself. **4.12 was never on this list**: it
 repaired a broken demo path (BUG-03) and was closed on 2026-10-03, together with 4.13 and 4.14.

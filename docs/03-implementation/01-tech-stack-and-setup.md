@@ -22,8 +22,7 @@ unpinned versions are treated as a defect because "it worked last week" is not a
 | Mobile app | **Flutter** stable + Dart | Flutter 3.47.x / Dart 3.13.x | Rubric requires a real mobile app |
 | App packages | `provider` (state), `http` (REST), `signalr_netcore` or `web_socket_channel` (live), `fl_chart` (charts), `shared_preferences` (non-secret cache), `flutter_secure_storage` (tokens), `firebase_messaging`, `intl`, `flutter_localizations`, `go_router` | pinned in `pubspec.yaml` | `provider` is explicitly on the rubric |
 | App tests | `flutter_test`, `mocktail`, `integration_test` | pinned | Widget + unit + E2E |
-| Web dashboard (M1, `web/legacy/`) | Static HTML + CSS + vanilla JS + **Chart.js** | Chart.js 4.x pinned | Matches the mentor's reference ("nhẹ, có thể mở rộng lên React"); no build step to break at demo time. The only web surface that renders real API data — **until `ADR-019` retires it (task 4.19)** in favour of the TERRAGUARD client below |
-| Web client (`web/`, TERRAGUARD) | **React 19** + **Vite 6** + **TypeScript 5.7** + **Tailwind CSS v4**, plus `react-router-dom` 7, `recharts` 2, `lucide-react` | pinned in `web/package.json` | The M4 web surface from `ADR-019`. Arrived as a UI exploration over mock data — built faster than the vanilla-JS equivalent, and the reason ADR-003's "no build step" half is superseded (ADR-017). Promotion to shipped surface adds an API client, ARB-parity keys and CI (4.15–4.20) |
+| Web client (`web/`, TERRAGUARD) | **React 19** + **Vite 6** + **TypeScript 5.7** + **Tailwind CSS v4**, plus `react-router-dom` 7, `recharts` 2, `lucide-react` | pinned in `web/package.json` | **The web surface** (`ADR-019`): the M1 static dashboard was retired on 2026-10-07 (task 4.19) and this client absorbed it — sign-in and both recovery paths, the live dashboard, terrariums, history, the wallboard and the ops diagnosis page all read the API. The API client, the shared ARB key set and the CI job (`tsc`, key parity, build) arrived with 4.15–4.18 |
 | Node (web client only) | Node.js 22 LTS + npm | 22.x | `npm run dev` / `npm run build` for `web/`; nothing else in the stack needs Node, and the committed `web/dist/` keeps the nginx demo Node-free |
 | Reverse proxy | `nginx:1.27-alpine` serving the dashboard + TLS termination for the demo host | 1.27 | Simple, well understood |
 | Orchestration | **Docker Compose** | v2 | NFR-08 |
@@ -45,19 +44,24 @@ smartreptile/
 │   ├── SmartReptile.sln
 │   ├── src/SmartReptile.Domain/          # entities, value objects, no dependencies
 │   ├── src/SmartReptile.Application/     # use cases, services, interfaces, validators
-│   ├── src/SmartReptile.Infrastructure/  # EF Core, repositories, MQTT, FCM, Telegram, hashing
+│   ├── src/SmartReptile.Infrastructure/  # EF Core, repositories, MQTT, FCM, hashing
 │   ├── src/SmartReptile.Api/             # endpoints, auth, SignalR, workers, Program.cs
 │   └── tests/SmartReptile.Tests.{Unit,Integration}
 ├── app/                          # Flutter
 │   ├── lib/{core,data,state,screens,widgets,l10n}
 │   └── test/  integration_test/
-└── web/                          # two surfaces, one folder (ADR-017); roles inverted by ADR-019
-    ├── legacy/                   # M1 static dashboard — talks to the API, no build step, retired by 4.19
-    │   ├── index.html wallboard.html health.html
-    │   ├── css/app.css
-    │   └── js/{api.js, store.js, i18n.js, pages/live.js}
-    ├── index.html package.json package-lock.json vite.config.ts tsconfig.json
-    ├── src/{App.tsx, main.tsx, index.css, components/Layout.tsx, data/mockData.ts, pages/*.tsx}
+├── scripts/                      # dump-database.ps1 -> regenerates 07-appendices/07 (DB contents, secrets redacted)
+└── web/                          # one web surface: the TERRAGUARD client (ADR-019; web/legacy/ retired 2026-10-07)
+    ├── index.html package.json package-lock.json vite.config.ts tsconfig.json nginx.conf
+    ├── scripts/check-strings.mjs  # key parity + every referenced key defined (TC-I-15), run in CI
+    ├── src/{App.tsx, main.tsx, index.css}
+    │   ├── api/       # transport, session, DTOs and one function per route
+    │   ├── i18n/      # reads app/lib/l10n/app_*.arb directly: one copy deck, two clients
+    │   ├── state/     # the session provider the guard reads
+    │   ├── lib/       # formatting, status rendering, error-code sentences, polling
+    │   ├── components/ pages/
+    │   └── data/mockData.ts       # only the three screens 4.20 has no endpoints for
+    └── dist/                      # committed build; nginx serves it (no Node at demo time)
     └── dist/                     # committed Vite build of the prototype — deliberate exception (ADR-017)
 ```
 
@@ -83,7 +87,7 @@ smartreptile/
 ### 4.1 Backend + database + broker (Docker Compose)
 
 ```bash
-cp .env.example .env          # then fill in: MSSQL_SA_PASSWORD, JWT_SIGNING_KEY, TELEGRAM_BOT_TOKEN
+cp .env.example .env          # then fill in: MSSQL_SA_PASSWORD, JWT_SIGNING_KEY, PROVISIONING_SHARED_KEY
 docker compose up -d db       # start SQL Server first, wait for healthy
 docker compose up -d api mqtt web
 docker compose logs -f api    # expect: "Applying migrations..." then "Now listening on: http://+:8080"
@@ -124,29 +128,30 @@ flutter build apk --release --split-per-abi
 `app/lib/core/env.dart` holds the API base URL per build flavour (`dev` → `http://10.0.2.2:8080` for the
 Android emulator, `demo` → `https://<host>`); no secrets are compiled into the app.
 
-### 4.4 Web (`web/`) — two surfaces
+### 4.4 Web (`web/`) — one surface
 
-The **M1 static dashboard**, the only web surface that talks to the API today — retired by task 4.19 (`ADR-019`):
-
-```bash
-cd web/legacy
-python -m http.server 8081           # compose serves these same files under /legacy/ (task 4.12)
-```
-
-The **TERRAGUARD client** — the M4 web surface from `ADR-019`. Still mock data with no network calls until
-4.15–4.20 wire it screen by screen:
+The **TERRAGUARD client** is the web surface (`ADR-019`); the M1 static dashboard was retired on 2026-10-07 by
+task 4.19, and every screen it had is a React route now (including the ops diagnosis page it used to own as
+`health.html`):
 
 ```bash
 cd web
 npm install
 npm run dev                          # Vite on http://127.0.0.1:8081
+npm run typecheck                    # tsc --noEmit, the first half of the CI job
+npm run check:strings                # key parity + every referenced key defined (TC-I-15)
 npm run build                        # writes web/dist/, which is committed on purpose (ADR-017)
 ```
 
-`npm run dev` binds the same port as the compose `web` service, so run one or the other. Compose itself serves both
-surfaces from one nginx (task 4.12): `/` is the committed client build and `/legacy/` is the M1 dashboard, per
-`web/nginx.conf` — a layout that collapses to a single mount when 4.19 deletes `web/legacy/`. **BUG-03**
-(`05-release/03` §4) is closed, and its regression check is the `curl` pair in `05-release/01` §5.
+`npm run dev` binds the same port as the compose `web` service, so run one or the other. Compose serves one surface
+from one nginx (`web/nginx.conf`): `/` is the committed build, with an `index.html` fallback so `/wallboard` and any
+deep route return `200` instead of a 404. **BUG-03** (`05-release/03` §4) stays closed, and its regression check is
+the `curl` pair in `05-release/01` §5 — rewritten for one mount when the two-mount pair became obsolete.
+
+The ARB files are the copy deck for **both** clients: `src/i18n/strings.ts` imports
+`../../app/lib/l10n/app_{en,vi}.arb` through Vite's `?raw`, so `TC-I-15`'s "identical key sets" is structural rather
+than a comparison of two lists. Adding a string means adding it to both ARB files; `npm run check:strings` fails the
+build if a screen names a key that no locale defines.
 
 ## 5. Configuration reference (`.env.example`)
 
@@ -162,7 +167,6 @@ surfaces from one nginx (task 4.12): `/` is the committed client build and `/leg
 | `MQTT_REQUIRE_CLIENT_AUTH` | `true` | FR-05: a connection must carry a device credential |
 | `INGEST_HTTP_FALLBACK_ENABLED` | `true` | FR-06 |
 | `FCM_SERVICE_ACCOUNT_PATH` | `/secrets/fcm.json` | Optional; push disabled if absent |
-| `TELEGRAM_BOT_TOKEN` | *(blank)* | Optional channel |
 | `SMTP_*` | *(blank)* | Optional channel |
 | `RETENTION_RAW_DAYS` | `90` | FR-15 |
 | `RETENTION_ROLLUP_MONTHS` | `24` | FR-15 |

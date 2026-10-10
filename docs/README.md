@@ -31,7 +31,7 @@ flowchart LR
   API --> DB[(SQL Server<br/>raw + rollups)]
   API -->|SignalR live push| W[Web dashboard]
   API -->|FCM push| M[Flutter app]
-  API -->|Telegram / email| N[Alert channels]
+  API -->|FCM / email| N[Alert channels]
 ```
 
 ---
@@ -122,6 +122,7 @@ flowchart LR
 | `07-appendices/04-hardware-bom-and-wiring.md` | Bill of materials, pin map, power budget, enclosure notes, bring-up sequence |
 | `07-appendices/05-species-threshold-reference.md` | Threshold tables per species/climate zone, phase rules, **literature list to verify** |
 | `07-appendices/06-v2-ai-roadmap.md` | Dataset/feature schema, label sources, model candidates, ethics, v2 milestones |
+| `07-appendices/07-database-snapshot-2026-10-07.md` | Point-in-time dump of the development database — all 15 tables, their columns and their rows, secrets redacted to their byte length. Regenerate with `scripts/dump-database.ps1`; it is evidence of what the demo was standing on, not the schema's source of truth (that is `07-appendices/02`) |
 
 ---
 
@@ -241,5 +242,95 @@ of `value > max` in a screen (4.17), vi+en with a key set shared with the app (4
 (M4 intro, 4.10, 4.15–4.20, DoD and a per-screen staging table), `02-design/04` §1.2, `05-release/01` §5,
 `04-quality/01` §6, `04-quality/02` (the `TC-I-15` caveat), `04-quality/03` §5.12, `03-implementation/01`/`02` and
 `05-release/03` §3/§5. No document was added or removed, so the doc set is still **36 files** (35 documents + this
+index).
+
+**Revised 2026-10-09 (twelfth pass) — M3 task 3.2: the threshold engine, and the first alert this system ever
+raised.** The decision procedure of `02-design/03` §4.2 is now `ThresholdDecision.Decide` — a static,
+dependency-free function over a band, a reading and an `EvaluationState` that mutates that state and returns what to
+do — and `SampleEvaluator` became the thing that acts on it: it resolves the band through the *same*
+`ThresholdResolver` the read surface labels a card with, and writes the new alert, the touch, the escalation or the
+resolution. `ThresholdAlertWriter` owns those four field-level writes so they are testable without a store, and
+`alerts_opened_total` is counted by severity from the evaluation outcome. Five readings of the design were settled
+while writing it, and all five are now stated in the documents rather than only in the code: the **dwell is
+measured against the evaluation instant** while every instant recorded is the sample's own, so a back-filled
+excursion opens for the record and back-dated (the burst the design worries about is the dispatcher's rule,
+BR-06.6/11.8); **a reading back inside the target band ends the excursion even without clearing the recovery
+margin**, because the margin gates closing an alert rather than re-arming the dwell; **escalation needs the severity
+the alert already carries**, passed in because `EvaluationState` has no severity column and should not grow one;
+**the critical window is consecutive**; and the alert's **triggering value and peak are read back from the stored
+readings of the dwell window** rather than from two more columns rewritten on every sample. Two examples in the doc
+set were found to be self-inconsistent and are corrected where they stand — `TC-U-15`'s 32.2 °C is *outside* a
+26–32 °C band, and `03-implementation/06` §3's Example B listed 31.6 °C as a recovery tick when a 0.5 °C margin asks
+for ≤ 31.5 — and the `07-appendices/03` `seq` rule gained the sentence that cost this pass twenty minutes: `seq` is
+the batch's **first** sample, and the samples that follow continue from there, so a device publishing batches of
+three advances the counter by three. **Two pieces of the design are deliberately absent and named rather than implied:**
+delivery (evaluation writes alerts and the dispatcher sends them, 3.5; `alertChanged` arrives with the lifecycle API
+in 3.4, because an event no client can act on is noise with a schema) and the **per-device reorder window** of
+`02-design/03` §7 — samples are evaluated in ingest order, which for one node *is* `RecordedAt` order, but a second
+publisher or a broker redelivery could arrive out of order and the `EvaluationState` watermark cannot see it because
+it is an *id* watermark. Evidence: 545 unit tests (19 `ThresholdDecisionTests` + 26 evaluator cases), 19 integration
+cases, `dotnet format --verify-no-changes --severity error` clean, and a live 48-check run in which a **scripted
+node** drove one excursion through a real broker, ingest, evaluator and SQL Server — a faulted reading ignored, a
+sub-dwell excursion silent, exactly one back-dated Warning whose peak came from its dwell window rather than from
+the reading that opened it, a critical reading short of its dwell touching without escalating, that same row
+escalating exactly once, `Recovered` after three ticks with the pointer and the excursion cleared, a second episode
+as a separate row, and counters that moved by exactly the two openings and ten stored samples with no duplicate.
+Touched `02-design/03` (§4.1/§4.2), `03-implementation/03` (§4's as-built table and §5's open note),
+`03-implementation/06` §3, `03-implementation/07` (the 3.2 block, its row, the scaffolding pointer),
+`04-quality/02` (B2), `07-appendices/02` (§3.8/§3.9), `07-appendices/03` §3.2, `05-release/03` §5 and the repository
+`README`. No document was added or removed, so the doc set is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-09 (eleventh pass) — M3 has started, with the one task in it that is a prerequisite rather than
+a feature.** The threshold resolution order (`03-implementation/06` §1) was a private method inside
+`TerrariumService` that returned the band and discarded the reason; 3.1 needed an endpoint that reports `source`,
+which would have meant a second copy of the rule and 3.2's evaluator a third. It is now
+`ThresholdResolver.Resolve` — one pure function in the domain returning `EffectiveThreshold(metric, phase, source,
+band)` — and `GET /api/v1/terrariums/{id}/thresholds` reads the metric dictionary through it at `clock.UtcNow` in
+the terrarium's own zone. The response carries `terrariumId`, `capturedAtUtc`, `timeZoneId` and
+`effectiveThresholds[]`; a metric with no band for the phase in force is **absent** rather than null-bounded, and
+entries are ordered by metric key so the editor's rows keep their places. `readings/latest`'s band and this
+endpoint's band now come from the same call, and a test asserts they agree instead of assuming it. Writing the rule
+down once also forced two ambiguities in §1 into the open, and both are now settled in the document: precedence is
+applied **per instant** (an override decides whenever it holds a row for the phase in force, but a layer holding
+only the other phase's row is silent rather than decisive — the behaviour `readings/latest` already had), and
+**`Any` wins inside a layer**. Three things are deliberately *not* built and are recorded as open rather than
+implied: the override write path (`PUT`/`DELETE`, which is why the live check inserted its rows with `sqlcmd`),
+`ThresholdSnapshot` (its natural writer is 3.2/3.4), and the resolution order's third tier `SystemDefault` — which
+§1 names and then never gives a value anywhere in the doc set, so an unresolvable metric is reported absent instead
+of filled from a default nobody wrote down. Evidence: 513 unit tests (10 `ThresholdResolverTests` + 6 service cases
+new), 19 integration cases against SQL Server Express, `dotnet format --verify-no-changes --severity error` clean,
+and a live run of 34 checks through the real API and database on the seeded Tropical profile — **both phases
+observed**, by creating one terrarium whose local clock is inside the photoperiod and one outside it. Touched
+`03-implementation/06` §1, `07-appendices/03` §4.2 (the built route, its response shape and the three shape rules a
+client needs), `03-implementation/07` (a new 3.1 block, the 3.1 row and 4.20's threshold-editor note),
+`04-quality/02` (B3's `TC-U-21…26` status) and `05-release/03` §5. No document was added or removed, so the doc set
+is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-09 (tenth pass) — the client is renamed VIVARIUMGUARD.** The wordmark in the shell and on the
+sign-in hero, the browser title (`web/index.html`), the Flutter `MaterialApp` title and the app's own split-span
+wordmark (`app/lib/app.dart`) now read **VIVARIUMGUARD**, the two-tone `VIVARIUM` + `GUARD` structure unchanged; the
+settings placeholders in both clients carry `admin@vivariumguard.vn`. The committed `web/dist/` is rebuilt to match,
+so it is now `index-DX1qiJCO.js` — Vite empties `outDir`, so the old hash is gone. Three internal identifiers keep
+the old word deliberately, because no user ever sees them and renaming two of them would sign every existing
+session out and forget the language choice: the `localStorage` keys `terraguard.session` / `terraguard.language`,
+and the npm package name `terraguard-web`. **Revision notes and ADR titles above are not rewritten** — the
+project's existing rule for past records — so `ADR-017`/`ADR-018`/`ADR-019`, the M4 sections that describe the
+promotion, and the earlier passes of this index still say TERRAGUARD where they are recording what was decided at
+the time. Touched `05-release/01` §5 (the rebuild, the new hash and what is deliberately *not* renamed),
+`05-release/03` §5, `02-design/04` §1.2, the roadmap's M4 heading and the repository `README`. No document was
+added or removed, so the doc set is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-09 (ninth pass) — M2's closable backlog is closed, without hardware, and M3 is scaffolded.**
+Everything M2 still owed that did not need a board is now built and verified: FR-03's update and delete halves
+(`PATCH`/`DELETE /terrariums/{id}` with a `Terrarium.RowVersion` concurrency token, `ETag`/`If-Match`,
+`412`/`428`/`409`), the claim `500`→`409 terrarium_already_bound` translation, the three unforwarded device channels
+(`health`, `status`, `events`) and the `statusChanged` push they made possible. The M3 boundary pieces that M2 left
+as placeholders are real: a bounded `IEvaluationQueue` replacing `PendingEvaluationQueue`, an `EvaluatorWorker`
+whose `SampleEvaluator` applies §02-design/03 §4.2's documented guard and advances an `EvaluationState` watermark,
+and `DeviceEvent` storage for 3.3 — both tables created by one migration. Touched `07-appendices/02` (the summary
+table, §3.9, a new §3.14, and the migration's DDL), `07-appendices/03` (§3.1's health payload and the per-channel
+`deviceId` rule, §4.2's `PATCH`/`DELETE` contract, §6's emitted events), `03-implementation/07` (2.2/2.4/2.8/2.9
+closures and a new M3-scaffolding block), `04-quality/02` (`TC-I-03`'s evaluator note), `05-release/03` §5 and the
+repository `README`. No document was added or removed, so the doc set is still **36 files** (35 documents + this
 index).
 

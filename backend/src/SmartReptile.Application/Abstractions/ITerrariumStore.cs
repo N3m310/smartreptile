@@ -83,4 +83,11 @@ public interface ITerrariumStore
 
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Commits staged changes for an update, reporting a lost optimistic-concurrency race instead of throwing
+    /// (FR-03). False means another writer changed the row after it was read, so the caller's <c>If-Match</c> is
+    /// stale and the update must be refused rather than allowed to overwrite the other change.
+    /// </summary>
+    Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken);
 }

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using SmartReptile.Application.Devices;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Tests.Unit.Application;
 
@@ -23,6 +24,7 @@ public class DeviceProvisioningServiceTests
     private readonly FakeDeviceSessionRegistry _sessions = new();
     private readonly DeviceProvisioningService _service;
     private readonly Guid _owner = Guid.NewGuid();
+    private readonly AuditActor _actor = new("203.0.113.7", "curl/8.5.0", "corr-m2-audit");
 
     public DeviceProvisioningServiceTests() =>
         _service = new DeviceProvisioningService(
@@ -211,6 +213,22 @@ public class DeviceProvisioningServiceTests
         outcome.Problem!.Code.Should().Be("terrarium_already_bound");
     }
 
+    [Fact]
+    public async Task Claim_reports_a_race_the_database_won_as_the_same_conflict()
+    {
+        var terrarium = _store.AddTerrarium(_owner);
+        var registration = (await SelfRegisterAsync()).Registration!;
+
+        // The pre-check passed because the other writer had not committed yet; the filtered unique index DI-04
+        // then refused the insert. That must read as the documented 409 rather than escaping as a 500 (TC-I-05).
+        _store.ClaimRaceLost = true;
+
+        var outcome = await _service.ClaimAsync(new ClaimRequest(registration.ClaimCode, terrarium.Id), _owner);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("terrarium_already_bound");
+    }
+
     // ---- rotate and revoke --------------------------------------------------------------------------
 
     [Fact]
@@ -333,6 +351,92 @@ public class DeviceProvisioningServiceTests
         var verification = await _service.VerifyCredentialAsync(deviceId, secret);
 
         verification.Should().Be(DeviceCredentialVerification.Rejected);
+    }
+
+    // ---- audit trail (FR-18, BR-18.4) ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Claim_records_who_claimed_the_device_and_from_where()
+    {
+        var (code, deviceId, terrariumId) = await ArrangeAsync();
+
+        var outcome = await _service.ClaimAsync(new ClaimRequest(code, terrariumId), _owner, actor: _actor);
+
+        var entry = _store.CommittedAuditEntries.Should().ContainSingle().Subject;
+
+        entry.Action.Should().Be(AuditAction.DeviceClaimed);
+        entry.EntityName.Should().Be("Device");
+        entry.EntityId.Should().Be(deviceId, "the row is readable without joining to the device table");
+        entry.DeviceId.Should().Be(_store.Devices.Single().Id);
+        entry.UserId.Should().Be(_owner);
+        entry.OccurredAt.Should().Be(_clock.UtcNow);
+        entry.IpAddress.Should().Be(_actor.IpAddress);
+        entry.UserAgent.Should().Be(_actor.UserAgent);
+        entry.CorrelationId.Should().Be(_actor.CorrelationId);
+        entry.BeforeJson.Should().BeNull("the device existed but carried no binding to report");
+        entry.AfterJson.Should().Contain(terrariumId.ToString()).And.Contain(_owner.ToString());
+
+        // The trail must not become a second place the credential lives.
+        entry.AfterJson.Should().NotContain(outcome.Claim!.Secret);
+    }
+
+    [Fact]
+    public async Task Claim_without_a_request_behind_it_still_records_the_change()
+    {
+        var (code, _, terrariumId) = await ArrangeAsync();
+
+        await _service.ClaimAsync(new ClaimRequest(code, terrariumId), _owner);
+
+        var entry = _store.CommittedAuditEntries.Should().ContainSingle().Subject;
+
+        entry.IpAddress.Should().Be("unknown");
+        entry.UserAgent.Should().BeNull();
+        entry.CorrelationId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Rotate_records_that_it_happened_without_recording_the_secret()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        var outcome = await _service.RotateSecretAsync(deviceId, _owner, actor: _actor);
+
+        var entry = _store.CommittedAuditEntries.Last();
+
+        entry.Action.Should().Be(AuditAction.DeviceSecretRotated);
+        entry.EntityId.Should().Be(deviceId);
+        entry.AfterJson.Should().Contain("previousUsableUntil").And.NotContain(outcome.Rotation!.Secret);
+    }
+
+    [Fact]
+    public async Task Revoke_records_the_revocation_once_and_a_repeat_records_nothing()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        await _service.RevokeAsync(deviceId, _owner, actor: _actor);
+        await _service.RevokeAsync(deviceId, _owner, actor: _actor);
+
+        var entry = _store.CommittedAuditEntries
+            .Where(candidate => candidate.Action == AuditAction.DeviceRevoked)
+            .Should().ContainSingle("a repeat revoke changes nothing, so there is no change to record")
+            .Subject;
+
+        entry.AfterJson.Should().Contain("\"credentialsRevoked\":1");
+    }
+
+    [Fact]
+    public async Task A_refused_claim_records_nothing()
+    {
+        var (code, _, _) = await ArrangeAsync();
+        var foreignTerrarium = _store.AddTerrarium(Guid.NewGuid());
+
+        var outcome = await _service.ClaimAsync(
+            new ClaimRequest(code, foreignTerrarium.Id),
+            _owner,
+            actor: _actor);
+
+        outcome.Succeeded.Should().BeFalse();
+        _store.CommittedAuditEntries.Should().BeEmpty("nothing changed, so there is nothing to audit");
     }
 
     // ---- helpers ------------------------------------------------------------------------------------

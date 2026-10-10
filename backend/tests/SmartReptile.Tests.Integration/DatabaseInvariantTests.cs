@@ -107,4 +107,91 @@ public sealed class DatabaseInvariantTests(DatabaseFixture fixture)
 
         await tx.RollbackAsync();
     }
+
+    [Fact]
+    public async Task A_stale_terrarium_update_is_refused_by_the_rowversion()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var terrariumId = await Seed.TerrariumAsync(db, await Seed.UserAsync(db));
+
+        var terrarium = await db.Terrariums.SingleAsync(t => t.Id == terrariumId);
+        var seen = terrarium.RowVersion;
+        seen.Should().NotBeNull();
+
+        // Someone else edits the row, which moves the database's own token while this context still holds the old
+        // one — the situation ETag/If-Match exists for (FR-03).
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE [Terrarium] SET [Name] = N'changed elsewhere' WHERE [Id] = {terrariumId}");
+
+        terrarium.Name = "mine";
+
+        // The refusal happens in the WHERE clause, not in application code: "0 rows affected" is the whole
+        // mechanism, which is why a fake cannot stand in for it.
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => db.SaveChangesAsync());
+
+        await db.Entry(terrarium).ReloadAsync();
+        terrarium.Name.Should().Be("changed elsewhere");
+        terrarium.RowVersion.Should().NotBeEquivalentTo(seen);
+
+        await tx.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task The_evaluation_state_key_is_unique_per_terrarium_metric_and_phase()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var terrariumId = await Seed.TerrariumAsync(db, await Seed.UserAsync(db));
+
+        await InsertEvaluationStateAsync(db, terrariumId, metric: 0, phase: 0, sampleId: 1);
+
+        // One state row per key is the invariant: a second evaluator writing one would mean two of them
+        // disagreeing about the same excursion, and the primary key is what makes that impossible.
+        var failure = await Assert.ThrowsAsync<SqlException>(
+            () => InsertEvaluationStateAsync(db, terrariumId, metric: 0, phase: 0, sampleId: 2));
+
+        failure.Message.Should().Contain("PK_EvaluationState");
+
+        // A different phase is a different key, which is what lets a Day and a Night excursion coexist.
+        await InsertEvaluationStateAsync(db, terrariumId, metric: 0, phase: 1, sampleId: 2);
+
+        await tx.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task A_device_event_can_be_stored_without_a_terrarium()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var terrariumId = await Seed.TerrariumAsync(db, await Seed.UserAsync(db));
+        var deviceId = await Seed.DeviceAsync(db, terrariumId);
+
+        // An event is a property of the board, so it outlives the binding: the column is nullable on purpose, which
+        // is what lets task 3.3 read the fault history of a device that has since been unbound.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO [DeviceEvent] (DeviceId, TerrariumId, Type, Metric, DetailJson, RecordedAt, ReceivedAt)
+            VALUES ({deviceId}, NULL, 4, NULL, N'{"ntpAttempts":5}', SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET())
+            """);
+
+        (await db.DeviceEvents.CountAsync(e => e.DeviceId == deviceId)).Should().Be(1);
+
+        await tx.RollbackAsync();
+    }
+
+    /// <summary>Writes one evaluator state row, so the test asserts what the database refuses.</summary>
+    private static Task InsertEvaluationStateAsync(
+        SmartReptileDbContext db,
+        Guid terrariumId,
+        int metric,
+        int phase,
+        long sampleId) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO [EvaluationState] (TerrariumId, Metric, Phase, Violation, ConsecutiveRecoveryTicks,
+                                           LastEvaluatedSampleId)
+            VALUES ({terrariumId}, {metric}, {phase}, 0, 0, {sampleId})
+            """);
 }

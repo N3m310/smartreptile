@@ -117,6 +117,68 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.ToTable("Alert", (string)null);
                 });
 
+            modelBuilder.Entity("SmartReptile.Domain.Auditing.AuditLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("EntityName")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredAt");
+
+                    b.HasIndex("EntityName", "EntityId", "OccurredAt")
+                        .IsDescending(false, false, true);
+
+                    b.ToTable("AuditLog", (string)null);
+                });
+
             modelBuilder.Entity("SmartReptile.Domain.Devices.Device", b =>
                 {
                     b.Property<Guid>("Id")
@@ -262,6 +324,47 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.ToTable("DeviceCredential", (string)null);
                 });
 
+            modelBuilder.Entity("SmartReptile.Domain.Devices.DeviceEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("DetailJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("Metric")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<Guid?>("TerrariumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerrariumId");
+
+                    b.HasIndex("DeviceId", "RecordedAt")
+                        .IsDescending(false, true);
+
+                    b.ToTable("DeviceEvent", (string)null);
+                });
+
             modelBuilder.Entity("SmartReptile.Domain.Devices.DeviceHealthSample", b =>
                 {
                     b.Property<long>("Id")
@@ -305,6 +408,51 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.HasIndex("DeviceId", "RecordedAt");
 
                     b.ToTable("DeviceHealthSample", (string)null);
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Evaluation.EvaluationState", b =>
+                {
+                    b.Property<Guid>("TerrariumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Metric")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Phase")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ConsecutiveRecoveryTicks")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CriticalSinceAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset?>("FirstOutOfBandAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<long>("LastEvaluatedSampleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("LastNotificationAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<long?>("OpenAlertId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Violation")
+                        .HasColumnType("int");
+
+                    b.HasKey("TerrariumId", "Metric", "Phase");
+
+                    b.ToTable("EvaluationState", (string)null);
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Identity.PasswordResetCode", b =>
@@ -399,9 +547,6 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.Property<bool>("ChannelFcmEnabled")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("ChannelTelegramEnabled")
-                        .HasColumnType("bit");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -460,10 +605,6 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Role")
                         .HasColumnType("int");
-
-                    b.Property<string>("TelegramChatId")
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("TimeZoneId")
                         .IsRequired()
@@ -795,6 +936,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<Guid>("SpeciesProfileId")
                         .HasColumnType("uniqueidentifier");
 
@@ -859,11 +1005,34 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.Navigation("Device");
                 });
 
+            modelBuilder.Entity("SmartReptile.Domain.Devices.DeviceEvent", b =>
+                {
+                    b.HasOne("SmartReptile.Domain.Devices.Device", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
+                        .WithMany()
+                        .HasForeignKey("TerrariumId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("SmartReptile.Domain.Devices.DeviceHealthSample", b =>
                 {
                     b.HasOne("SmartReptile.Domain.Devices.Device", null)
                         .WithMany()
                         .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Evaluation.EvaluationState", b =>
+                {
+                    b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
+                        .WithMany()
+                        .HasForeignKey("TerrariumId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

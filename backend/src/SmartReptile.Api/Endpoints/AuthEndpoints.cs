@@ -21,10 +21,8 @@ public static class AuthEndpoints
         {
             var outcome = await auth.RegisterAsync(request, ct);
 
-            // A free identifier and a taken one answer identically, so registration cannot be used to test
-            // whether an address has an account (§02-design/06 §2). That includes the recovery code: on both
-            // paths one is returned, and only the one issued for an account that was actually created can ever
-            // verify. The client proceeds to log in.
+            // 202 carries the recovery code of the account that was created. A taken identifier is a 409 naming the
+            // field to fix, rather than a success that hides it (ADR-020).
             return outcome.Succeeded
                 ? Results.Json(
                     new { status = "accepted", recoveryCode = outcome.RecoveryCode },
@@ -32,8 +30,8 @@ public static class AuthEndpoints
                 : Problem(outcome.Problem!);
         })
         .WithSummary("Create an account")
-        .WithDescription("Anonymous. Answers identically whether or not the identifiers were free, and returns a "
-                       + "backup recovery code to store.");
+        .WithDescription("Anonymous. Answers 202 with a backup recovery code to store, or 409 registration_conflict "
+                       + "naming the identifier that is already in use (ADR-020).");
 
         group.MapPost("/recover", async (
             RecoverRequest request,
@@ -59,15 +57,17 @@ public static class AuthEndpoints
             AuthService auth,
             CancellationToken ct) =>
         {
-            await auth.ForgotPasswordAsync(request, ClientAddress(context), ct);
+            var outcome = await auth.ForgotPasswordAsync(request, ClientAddress(context), ct);
 
-            // Always 202 with no body. The use case cannot fail in a reportable way, and that is the point: any
-            // difference between a known and an unknown identifier would make this an account-existence oracle.
-            return Results.Accepted();
+            // 202 with no body when a code was issued; 404 identifier_unknown when nobody holds the identifier.
+            // That difference is deliberate (ADR-020): a keeper who mistyped their address is told so instead of
+            // waiting for a code that was never generated. The cost — this endpoint can now be used to ask whether
+            // an address has an account — is recorded in the ADR rather than left implicit.
+            return outcome.Succeeded ? Results.Accepted() : Problem(outcome.Problem!);
         })
         .WithSummary("Request a password-reset code")
-        .WithDescription("Anonymous and rate-limited. Always answers 202; whether the identifier has an account is "
-                       + "told only to the account's owner, through the delivery channel.");
+        .WithDescription("Anonymous and rate-limited. Answers 202 when a code was issued, and 404 identifier_unknown "
+                       + "when no account uses the identifier (ADR-020).");
 
         group.MapPost("/reset-password", async (
             ResetPasswordRequest request,
@@ -143,8 +143,9 @@ public static class AuthEndpoints
     }
 
     /// <summary>
-    /// Maps an authentication failure to RFC 7807. The status class follows the code, not the message, so a
-    /// lockout is a 429 and a policy rejection is a 400 while every credential failure stays an opaque 401.
+    /// Maps an authentication failure to RFC 7807. The status class follows the code, not the message, so a lockout
+    /// is a 429, a policy rejection is a 400, a taken registration identifier is a 409, an identifier nobody holds is
+    /// a 404, and every credential failure stays an opaque 401.
     /// </summary>
     private static IResult Problem(AuthProblem problem)
     {
@@ -152,6 +153,8 @@ public static class AuthEndpoints
         {
             "account_locked" or "ip_blocked" => StatusCodes.Status429TooManyRequests,
             "registration_invalid" or "password_policy_violation" => StatusCodes.Status400BadRequest,
+            "registration_conflict" => StatusCodes.Status409Conflict,
+            "identifier_unknown" => StatusCodes.Status404NotFound,
             _ => StatusCodes.Status401Unauthorized,
         };
 

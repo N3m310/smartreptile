@@ -1,88 +1,133 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
+  AlertTriangle,
   Box,
   Cpu,
-  AlertTriangle,
   History,
-  Settings,
+  KeyRound,
+  LayoutDashboard,
+  Loader2,
   LogOut,
   Menu,
-  X,
-  Bell,
+  MonitorPlay,
+  ServerCog,
+  Settings,
   ShieldCheck,
   User,
-  ChevronRight,
+  X,
 } from 'lucide-react';
-import { initialAlerts } from '../data/mockData';
+import { apiBaseUrl, ApiError } from '../api/client';
+import * as auth from '../api/endpoints';
+import { useI18n } from '../i18n';
+import { LANGUAGES } from '../i18n/strings';
+import { useSession } from '../state/session';
+import { describeError, fieldMessages } from '../lib/messages';
 import { MockDataNotice } from './MockDataNotice';
 
-export const Layout: React.FC = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const navigate = useNavigate();
-  const pendingAlertCount = initialAlerts.filter((a) => a.status === 'pending').length;
+/**
+ * The shell. Everything in it is either the session's or the API's — the prototype's hard-coded
+ * "Admin Quản Lý / admin@terraguard.vn" and its invented alert badge are gone, because a role the page invents is
+ * a permission decision the page has no business making (`02-design/06` §3).
+ *
+ * A route guard lives one level up in `App.tsx`; this component can assume a session exists and still reads it
+ * defensively, because a session can be dropped from inside a request (a rotation failure) while the shell is
+ * mounted.
+ *
+ * The three screens still on `data/mockData.ts` — Devices, Alerts, Settings — keep the mock-data notice. They
+ * cannot be wired yet (roadmap 4.20: their endpoints do not exist), and the honest thing to do with a screen that
+ * renders invented values is to say so on that screen. The notice therefore follows the route instead of being
+ * rendered globally, so a wired screen never apologises for data it did not invent.
+ */
 
-  const handleLogout = () => {
-    navigate('/');
-  };
+const MOCK_ROUTES = ['/devices', '/alerts', '/settings'];
+
+export const Layout: React.FC = () => {
+  const { t, lang, setLang } = useI18n();
+  const { user, signOut } = useSession();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const online = navigator.onLine;
+  const showsMockNotice = MOCK_ROUTES.some((route) => location.pathname.startsWith(route));
 
   const navItems = [
-    { name: 'Tổng quan', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Terrarium', path: '/terrariums', icon: Box },
-    { name: 'Thiết bị IoT', path: '/devices', icon: Cpu },
-    {
-      name: 'Cảnh báo',
-      path: '/alerts',
-      icon: AlertTriangle,
-      badge: pendingAlertCount > 0 ? pendingAlertCount : null,
-      badgeColor: 'bg-[#e05530]',
-    },
-    { name: 'Lịch sử dữ liệu', path: '/history', icon: History },
-    { name: 'Cài đặt hệ thống', path: '/settings', icon: Settings },
+    { name: t('navDashboard'), path: '/dashboard', icon: LayoutDashboard },
+    { name: t('navTerrariums'), path: '/terrariums', icon: Box },
+    { name: t('navDevices'), path: '/devices', icon: Cpu },
+    { name: t('navAlerts'), path: '/alerts', icon: AlertTriangle },
+    { name: t('navHistory'), path: '/history', icon: History },
+    { name: t('navSettings'), path: '/settings', icon: Settings },
+    { name: t('navSystem'), path: '/system', icon: ServerCog },
+    { name: t('navWallboard'), path: '/wallboard', icon: MonitorPlay },
   ];
 
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/', { replace: true });
+  };
+
+  const submitPasswordChange = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await auth.changePassword({ currentPassword, newPassword });
+      // The server revoked every session including this one, so staying on a page that 401s on the next click
+      // would be a lie. The confirmation is handed to the sign-in screen through router state.
+      await signOut();
+      navigate('/', { replace: true, state: { notice: t('passwordChanged') } });
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#0b1a0d] text-[#dcd5c4] flex flex-col md:flex-row">
-      {/* Mobile Backdrop */}
-      {sidebarOpen && (
+    <div className="flex min-h-screen flex-col bg-canvas text-ink md:flex-row">
+      {sidebarOpen ? (
         <div
-          className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-xs"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
-      )}
+      ) : null}
 
-      {/* Sidebar */}
       <aside
-        className={`fixed md:sticky top-0 h-screen w-64 bg-[#112016] border-r border-[#1e3825] z-50 flex flex-col transition-transform duration-300 ease-in-out ${
+        className={`fixed top-0 z-50 flex h-screen w-64 flex-col border-r border-hairline bg-surface transition-transform duration-300 ease-in-out md:sticky ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
-        {/* Brand Logo */}
-        <div className="h-18 px-6 border-b border-[#1e3825] flex items-center justify-between">
+        <div className="flex h-18 items-center justify-between border-b border-hairline px-6">
           <NavLink to="/dashboard" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#4a9e6a] to-[#204930] flex items-center justify-center text-white shadow-lg shadow-[#4a9e6a]/20">
-              <ShieldCheck className="w-6 h-6 text-[#dcd5c4]" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-[#204930] shadow-lg shadow-brand/20">
+              <ShieldCheck className="h-6 w-6 text-ink" aria-hidden="true" />
             </div>
             <div>
-              <span className="text-xl font-heading font-extrabold tracking-wider text-[#dcd5c4] block">
-                TERRA<span className="text-[#4a9e6a]">GUARD</span>
+              <span className="block font-heading text-xl font-extrabold tracking-wider text-ink">
+                VIVARIUM<span className="text-brand">GUARD</span>
               </span>
-              <span className="text-[10px] text-[#8e9e8f] tracking-widest uppercase block -mt-1">
-                Terrarium Monitor
+              <span className="-mt-1 block text-[10px] uppercase tracking-widest text-muted">
+                {t('appTitle')}
               </span>
             </div>
           </NavLink>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="md:hidden text-[#8e9e8f] hover:text-[#dcd5c4] p-1"
+            className="p-1 text-muted hover:text-ink md:hidden"
+            aria-label={t('cancel')}
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Navigation Links */}
-        <nav className="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 space-y-1.5 overflow-y-auto px-4 py-6">
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
@@ -91,104 +136,151 @@ export const Layout: React.FC = () => {
                 to={item.path}
                 onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium transition-all ${
+                  `flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all ${
                     isActive
-                      ? 'bg-[#4a9e6a] text-white shadow-md shadow-[#4a9e6a]/20 font-semibold'
-                      : 'text-[#8e9e8f] hover:bg-[#162a1d] hover:text-[#dcd5c4]'
+                      ? 'bg-brand font-semibold text-white shadow-md shadow-brand/20'
+                      : 'text-muted hover:bg-raised hover:text-ink'
                   }`
                 }
               >
-                <div className="flex items-center gap-3">
-                  <Icon className="w-5 h-5 shrink-0" />
-                  <span>{item.name}</span>
-                </div>
-                {item.badge ? (
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold text-white ${item.badgeColor}`}
-                  >
-                    {item.badge}
-                  </span>
-                ) : null}
+                <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                <span>{item.name}</span>
               </NavLink>
             );
           })}
         </nav>
 
-        {/* User Card & Logout */}
-        <div className="p-4 border-t border-[#1e3825] bg-[#0e1d11]/50">
-          <div className="flex items-center justify-between p-2 rounded-xl bg-[#162a1d]/60 mb-2">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-full bg-[#4a9e6a]/20 border border-[#4a9e6a]/40 flex items-center justify-center text-[#4a9e6a] shrink-0">
-                <User className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-[#dcd5c4] truncate">Admin Quản Lý</p>
-                <p className="text-[11px] text-[#8e9e8f] truncate">admin@terraguard.vn</p>
-              </div>
+        <div className="border-t border-hairline bg-field/50 p-4">
+          {/* The account block. The name and role are the server's (`GET /auth/me`), never a literal. */}
+          <div className="mb-2 flex items-center gap-3 rounded-xl bg-raised/60 p-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-brand/40 bg-brand/20 text-brand">
+              <User className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-ink">{user?.username ?? '—'}</p>
+              <p className="truncate text-[11px] text-muted">
+                {user?.email ?? '—'}
+                {user?.role ? ` · ${user.role}` : ''}
+              </p>
             </div>
           </div>
+
           <button
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-[#e05530] hover:bg-[#e05530]/10 rounded-lg transition-colors border border-transparent hover:border-[#e05530]/20"
+            type="button"
+            onClick={() => setAccountOpen((open) => !open)}
+            aria-expanded={accountOpen}
+            className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised"
           >
-            <LogOut className="w-4 h-4" />
-            <span>Đăng xuất</span>
+            <KeyRound className="h-4 w-4" aria-hidden="true" />
+            <span>{t('changePassword')}</span>
+          </button>
+
+          {accountOpen ? (
+            <form onSubmit={submitPasswordChange} className="mt-3 space-y-2">
+              <p className="text-[11px] text-muted">{t('changePasswordPrompt')}</p>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                placeholder={t('currentPassword')}
+                autoComplete="current-password"
+                required
+                className="w-full rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+              />
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder={t('newPassword')}
+                autoComplete="new-password"
+                required
+                className="w-full rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+              />
+              <p className="text-[11px] text-muted">{t('passwordHint')}</p>
+              {error ? (
+                <div className="rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
+                  <p>{describeError(t, error)}</p>
+                  {fieldMessages(t, error.errors).map((message) => (
+                    <p key={message}>{message}</p>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="submit"
+                disabled={busy}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-70"
+              >
+                {busy ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    <span>{t('changingPassword')}</span>
+                  </>
+                ) : (
+                  <span>{t('changePasswordSubmit')}</span>
+                )}
+              </button>
+            </form>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => void handleSignOut()}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-transparent px-3 py-2 text-xs font-medium text-critical transition-colors hover:border-critical/20 hover:bg-critical/10"
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            <span>{t('signOut')}</span>
           </button>
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Honesty notice: nothing this app renders is a measurement (ADR-017, task 4.14) */}
-        <div className="px-4 sm:px-8 pt-4">
-          <MockDataNotice />
-        </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex h-18 items-center justify-between border-b border-hairline bg-surface/80 px-4 backdrop-blur-md sm:px-8">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-lg bg-raised p-2 text-ink hover:bg-hairline md:hidden"
+            aria-label={t('navDashboard')}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
 
-        {/* Header */}
-        <header className="h-18 px-4 sm:px-8 border-b border-[#1e3825] bg-[#112016]/80 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden p-2 rounded-lg bg-[#162a1d] text-[#dcd5c4] hover:bg-[#1e3825]"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2 text-xs text-[#8e9e8f]">
-              <span className="hidden sm:inline">Trang chủ</span>
-              <ChevronRight className="w-3.5 h-3.5 hidden sm:inline" />
-              <span className="font-medium text-[#4a9e6a]">Bảng điều khiển Giám sát</span>
-            </div>
-          </div>
-
-          {/* Quick status bar */}
           <div className="flex items-center gap-3 sm:gap-5">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#0b1a0d] border border-[#1e3825] text-xs">
-              <span className="w-2 h-2 rounded-full bg-[#4a9e6a] animate-pulse"></span>
-              <span className="text-[#8e9e8f]">Trạng thái:</span>
-              <span className="font-semibold text-[#4a9e6a]">Trực tuyến (Live)</span>
+            {/* Browser connectivity, which is not the same claim as "the API answered" — the pages say that. */}
+            <div className="hidden items-center gap-2 rounded-full border border-hairline bg-canvas px-3 py-1.5 text-xs sm:flex">
+              <span
+                className={`h-2 w-2 rounded-full ${online ? 'bg-inrange' : 'bg-unknown'}`}
+                aria-hidden="true"
+              />
+              <span className="text-muted">{t('navLive')}</span>
+              <span className="font-mono text-[11px] text-muted">{apiBaseUrl}</span>
             </div>
 
-            <NavLink
-              to="/alerts"
-              className="relative p-2 rounded-xl bg-[#162a1d] border border-[#1e3825] text-[#dcd5c4] hover:bg-[#1e3825] transition-colors"
-              title="Xem thông báo cảnh báo"
-            >
-              <Bell className="w-5 h-5" />
-              {pendingAlertCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#e05530] text-white text-[10px] font-mono font-bold flex items-center justify-center animate-bounce">
-                  {pendingAlertCount}
-                </span>
-              )}
-            </NavLink>
+            <div className="flex items-center gap-1">
+              {LANGUAGES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setLang(option)}
+                  aria-pressed={lang === option}
+                  className={`rounded-lg px-2.5 py-1 text-xs transition-colors ${
+                    lang === option ? 'bg-raised text-ink' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  {option.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
-        {/* Page body */}
-        <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto">
+        <main className="mx-auto w-full max-w-7xl flex-1 p-4 sm:p-8">
+          {showsMockNotice ? (
+            <div className="mb-6">
+              <MockDataNotice />
+            </div>
+          ) : null}
           <Outlet />
         </main>
       </div>
     </div>
   );
 };
-

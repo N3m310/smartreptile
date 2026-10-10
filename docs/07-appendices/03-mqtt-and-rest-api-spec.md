@@ -88,6 +88,29 @@ that client's session is closed, because a device reaching outside its own prefi
 Refusals are counted (`mqtt_refused_subscriptions_total`, `mqtt_refused_publications_total`) and logged with the
 reason.
 
+Every payload on every channel is a JSON object carrying `deviceId`. That id must equal the one the transport
+authenticated — the topic's — exactly as rule V-04 requires of a batch on the telemetry channel, and a payload that
+names another device is refused under `schema_invalid` rather than trusted. Each channel's payload is otherwise the
+object below its own heading, plus these two optional members:
+
+| Member | Rule |
+|---|---|
+| `at` (or `ts`) | ISO-8601 UTC device instant. **Optional**: a node whose clock has not synced still reports, and the server stamps the row with the arrival time instead (NFR-10) |
+| `fw` | Firmware version, ≤ 16 chars, denormalised onto the device row the way a batch's `fw` is |
+
+```json
+// sr/v1/d/{id}/health — the health object of §3.2, without the samples around it
+{"deviceId":"sr-3f9a2c","rssi":-63,"up_s":86400,"heap_kb":142,"bat":null,"src":"mains","fw":"1.0.0","at":"…"}
+```
+A health field that is absent leaves the device's stored value alone, exactly as it does inside a batch: reporting
+only `rssi` is not reporting "no battery".
+
+**Consumed since 2026-10-09** (roadmap task 2.4's "only telemetry is forwarded" gap). `telemetry`, `health`,
+`status` and `events` all reach the ingest worker; `ack` does not, because command results are FR-14's and accepting
+one would acknowledge a command this build cannot issue. A payload the pipeline cannot use — malformed JSON, a
+`status` outside its three words, an event `type` outside the closed vocabulary — is refused under `schema_invalid`
+and counted in `ingest_rejected_total`, so a firmware typo is visible rather than becoming a new category.
+
 ### 3.2 Telemetry batch (device → broker)
 
 ```json
@@ -108,12 +131,11 @@ reason.
 | Field | Type | Required | Rules |
 |---|---|---|---|
 | `deviceId` | string | ✓ | must match the authenticated device |
-| `seq` | int64 | ✓ | strictly increasing per device; first sample of the batch |
+| `seq` | int64 | ✓ | strictly increasing per device; the **first** sample of the batch. The samples that follow continue from there — sample *i* is stored under `seq + i` — because that is what makes `(DeviceId, seq)` the dedupe key (V-04/DI-02). A device that publishes batches of three therefore advances this counter by three, not by one |
 | `fw` | string | ✓ | ≤ 16 chars |
 | `ts` | string | ✓ | ISO-8601 UTC (`Z`); the instant of `t = 0` |
 | `samples[]` | array | ✓ | 1…120 items |
-| `samples[].t` | int32 | ✓ | seconds offset from `ts`, strictly increasing, ≤ 86 400 |
-| `samples[].tf` | float | ✓ | filtered air temperature, °C |
+| `samples[].t` | int32 | ✓ | seconds offset from `ts`, strictly increasing, ≤ 86 400 || `samples[].tf` | float | ✓ | filtered air temperature, °C |
 | `samples[].rh` | float | ✓ | relative humidity, % |
 | `samples[].lux` | float | ○ | illuminance, lx |
 | `samples[].uvi` | float | ○ | UV index |
@@ -173,6 +195,27 @@ Content-Type: application/json
 Rate limit 6 requests/min/device. Same `IngestPipeline` as MQTT, so the only difference observable in the data
 is `TelemetrySample.Source`.
 
+**Built 2026-10-06** (`Api/Endpoints/IngestEndpoints.cs`). Three things about it are worth knowing before writing
+a device against it:
+
+| Situation | Answer | Why that answer |
+|---|---|---|
+| Batch stored | `202 {accepted, duplicates, rejected: 0, reasons: []}` | The counts are the pipeline's own outcome, not a guess, which is what lets a device **clear its ring buffer** after an outage instead of re-sending until someone looks. The status stays `202` because this contract says so and the firmware is written against it |
+| Same batch again | `202 {accepted: 0, duplicates: N}` | Idempotency is `(DeviceId, Sequence)` in the database, not the `Idempotency-Key` header — so a re-delivery is a success and the header is optional. A device that lost the response can simply send the batch again |
+| Credential missing, malformed, wrong, or naming a device the payload does not | `401 auth_failed`, **one** body for all four | Two distinguishable answers would tell a caller which public ids exist (BR-02.2). The specific reason (revoked, unbound, secret mismatch) reaches the operator through the log, never the device |
+| Payload unparseable, or over the 32 KB limit | `400 schema_invalid` / `400 payload_too_large`, message describing the payload | These describe data the caller sent, so echoing them leaks nothing. A 4xx is the contract with a back-filling device: **do not re-send this payload**, it will fail identically |
+
+`rejected` and `reasons` are always `0` and `[]` today, and not because nothing is ever refused: the validator
+decides a batch all-or-nothing, so a refusal leaves through the `4xx` rows above and the `202` body only ever
+describes a batch that was stored. The fields stay because the contract has them; a partial-acceptance path is the
+only thing that could fill them.
+
+**The per-device rate limit is a fairness rule, not a defence.** Its partition key is the device id from a
+caller-supplied header, so a hostile caller can mint a fresh budget per request by varying it. What actually bounds
+that caller is that every forged id still costs a parse and a failed device lookup, plus the address-keyed policy
+on the auth group. It is per device rather than per address on purpose: two boards behind one home router are two
+budgets, and a device coming back from an outage is the one that needs to back-fill.
+
 ---
 
 ## 4. REST API reference
@@ -185,15 +228,15 @@ return `nextCursor`.
 
 | Method | Path | Role | Body / params | Success | Errors |
 |---|---|---|---|---|---|
-| POST | `/auth/register` | A | `{username, email, password}` | `202 {status, recoveryCode}` | `400 registration_invalid` |
+| POST | `/auth/register` | A | `{username, email, password}` | `202 {status, recoveryCode}` | `400 registration_invalid`, `409 registration_conflict` |
 | POST | `/auth/login` | A | `{username, password}` | `200 {accessToken, refreshToken, expiresIn, user}` | `401 invalid_credentials`, `423 account_locked` |
 | POST | `/auth/refresh` | A | `{refreshToken}` | `200 {accessToken, refreshToken}` | `401 token_invalid`, `401 token_reused` |
 | POST | `/auth/logout` | U | `{refreshToken}` | `204` | — |
 | GET | `/auth/me` | U | — | `200 {user, preferences}` | `401` |
 | PATCH | `/auth/me` | U | preferences, timezone, language | `200` | `400 validation_failed` |
-| POST | `/auth/change-password` | U | `{currentPassword, newPassword}` | `204` (all refresh tokens revoked) | `400 weak_password`, `401 invalid_credentials` |
+| POST | `/auth/change-password` | U | `{currentPassword, newPassword}` | `204` (all refresh tokens revoked) | `400 password_policy_violation`, `401 invalid_credentials`, `429 account_locked` |
 | POST | `/auth/recover` | A | `{usernameOrEmail, recoveryCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_recovery_code`, `429 account_locked` |
-| POST | `/auth/forgot-password` | A | `{usernameOrEmail}` | `202` (empty body, **always**) | `429 rate_limited` |
+| POST | `/auth/forgot-password` | A | `{usernameOrEmail}` | `202` (empty body) | `404 identifier_unknown`, `429 rate_limited` |
 | POST | `/auth/reset-password` | A | `{usernameOrEmail, resetCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_reset_code`, `429 account_locked` |
 
 **Where a code comes from, and why there are two.** Registration is the only moment the server can hand the keeper
@@ -207,20 +250,24 @@ single-use code that expires after `PasswordReset:CodeMinutes` (default 30) and 
 code is stored **unsalted** (SHA-256 of the presented value) for the same reason a refresh token is: the row has to
 be findable by the value presented, and the code is high-entropy and short-lived, so there is nothing to brute-force.
 
-`/auth/forgot-password` answers `202` with **no body on every path** — unknown identifier, disabled account, live
-account — because any difference would make it an account-existence oracle (BR-02.2). The difference shows only in
-the delivery channel, and only to the account's owner. Both reset paths are throttled exactly like login (5 per
-identifier / 20 per address per 15 min) and answer a failure with the single opaque code `invalid_reset_code` /
-`invalid_recovery_code` — never "no such account". Where the code goes is a deployment decision: the demo has no
-mail server, so `LogPasswordResetNotifier` writes it to the server log when `PasswordReset:LogCode` is true
+`/auth/forgot-password` answers `202` with **no body** when it issued a code, and `404 identifier_unknown` when no
+account uses the identifier. That difference is deliberate (`ADR-020`): the non-disclosing version of this endpoint
+left a keeper who had mistyped their address waiting for a code that was never generated, and the address they typed
+is their own. Login, `recover`, `reset-password` and every terrarium route stay non-disclosing, so the account
+enumeration this endpoint now allows is available nowhere else in the API. Both reset paths are throttled exactly
+like login (5 per identifier / 20 per address per 15 min) and answer every *code* failure with the single opaque
+`invalid_reset_code` / `invalid_recovery_code` — never "no such account", and never a difference between a spent
+code, another account's code and a code that never existed. Where the code goes is a deployment decision: the demo
+has no mail server, so `LogPasswordResetNotifier` writes it to the server log when `PasswordReset:LogCode` is true
 (development only) and otherwise says plainly that it reached nobody (limitation L-02).
 
 **Built so far (2026-10-06):** every row above except `PATCH /auth/me` is implemented. Three cells still describe
 the intended shape rather than the built one: `register` answers `202 {status, recoveryCode}` (not `201`), the
 session body carries `accessTokenExpiresAtUtc`/`refreshTokenExpiresAtUtc` instead of `expiresIn`, and a lockout is
 `429 account_locked` (not `423`) because it is produced by the same throttle that answers `429 rate_limited`. The
-registration errors are a single `400 registration_invalid` that carries `errors[]` per field rather than a
-`409 username_taken`. `03-implementation/03` §6 is the as-built table.
+registration errors are a `400 registration_invalid` that carries `errors[]` per field, and a taken identifier is the
+`409 registration_conflict` the table always asked for (`ADR-020`, built 2026-10-07). `03-implementation/03` §6 is
+the as-built table.
 
 ### 4.2 Terrariums, thresholds, readings
 
@@ -256,9 +303,63 @@ Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5). A
 every bucket in the window, empty ones included. A `raw` series carries one point per sample instead: a sample's own
 timestamp is its bucket, so a gap shows up as absent points rather than as nulls.
 
-**Built so far (roadmap 2.8, 2026-10-06):** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
-`GET /terrariums/{id}/readings/latest`, `GET /terrariums/{id}/readings` and `GET /terrariums/{id}/coverage`. The
-rest of this table — `PATCH`/`DELETE`, thresholds, silences, summaries, exports — is specified and not built.
+**Built so far (roadmap 2.8).** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
+`GET /terrariums/{id}/readings/latest`, `GET /terrariums/{id}/readings` and `GET /terrariums/{id}/coverage`; plus,
+since 2026-10-09, `PATCH /terrariums/{id}` and `DELETE /terrariums/{id}` — FR-03's update and delete halves — and
+`GET /terrariums/{id}/thresholds` — 3.1's read half. The rest of this table — threshold write, silences,
+summaries, exports — is specified and not built; the threshold write half is 3.1's remainder, silences 3.4 and
+summaries 3.6.
+
+**`GET /terrariums/{id}/thresholds` as built.** Authenticated, not role-gated (`U`), scoped to the caller like
+every other route here, and read-only:
+
+```json
+{
+  "terrariumId": "…",
+  "capturedAtUtc": "2026-10-09T14:20:11Z",
+  "timeZoneId": "Asia/Ho_Chi_Minh",
+  "effectiveThresholds": [
+    { "metric": "humidityPct", "unit": "%RH", "phase": "any", "source": "profile",
+      "targetMin": 60.0, "targetMax": 80.0, "criticalMin": 40.0, "criticalMax": 95.0,
+      "dwellWarnMinutes": 15, "dwellCritMinutes": 2, "recoveryMargin": 3.0 }
+  ]
+}
+```
+
+Three shape rules worth knowing before wiring the editor. **The entry list is the resolved set, not the
+dictionary**: a metric with no band for the phase in force is *absent*, which is exactly how the editor tells
+"unconfigured" from "configured wrong" — absent is not an error. **`source` is the provenance, `phase` is the
+instant**: the same terrarium read at 21:00 local reports `phase: "night"` and the night band, because the
+response is a statement about now rather than about configuration. **`capturedAtUtc` and `timeZoneId` are part of
+the answer** so a phase-dependent result can be reproduced instead of argued about. Entries are ordered by metric
+key (`humidityPct` before `tempC`), matching `readings/latest`, so rows keep their places between reloads.
+
+**`PATCH /terrariums/{id}` requires `If-Match`.** `GET`/`POST`/`PATCH` return the row's SQL Server `rowversion` as
+a strong `ETag`, and the update must send it back:
+
+| Situation | Answer |
+|---|---|
+| `If-Match` matches the stored `rowversion` | `200` with the updated item and the **new** `ETag` |
+| `If-Match` is stale, or the row moved between the read and the write | `412 precondition_failed` |
+| `If-Match` is absent or unparseable | `428 precondition_required` |
+| `If-Match: *` | accepted — existence is enough, and the token is not compared |
+| A provided field fails validation | `400 validation_failed` with field-level `errors[]`, **after** the precondition check |
+
+The body is a partial update: an **omitted** member is left unchanged, and `location`/`description` sent as an empty
+string clear the field — the one way a JSON body can say "clear it" once it has been bound to a record. The
+validation codes are `POST`'s (`terrarium_name_required`, `terrarium_name_too_long`, `terrarium_location_too_long`,
+`terrarium_description_too_long`, `terrarium_timezone_invalid`, `species_profile_not_found`). The precondition is
+checked before the body because a stale client should be told to reload, not handed a validation report about a
+version of the terrarium it is not looking at.
+
+**`DELETE /terrariums/{id}` is a soft delete** — readings, alerts and summaries survive — and it refuses to remove
+an enclosure a live device is still reporting into: `409 conflict_device_bound` unless the request carries
+`?allowUnboundDevice=true`. The flag's name counts the device, not the terrarium: passing it is the caller's
+explicit permission to detach the board, which returns to `Provisioning` with its credentials and owner intact so the
+same account can still rotate or revoke it. A *revoked* device has already released the slot (the DI-04 filtered
+index excludes it), so it does not make the caller ask twice. `204` on success, `404 not_found` for a missing or
+foreign id. Neither route writes an audit row: `BR-18.4` does not name terrarium edits and `02-design/02` §3.18's
+closed vocabulary has no `terrarium.*` verb.
 
 `GET /terrariums` answers `{ "items": [ … ] }` and is **not paginated**: the per-account count is small and the
 `?cursor=&pageSize=` convention in the legend above is not implemented yet, so no `nextCursor` is returned.
@@ -402,18 +503,23 @@ be probed (BR-02.2).
 | 400 | `payload_too_large` | > 32 KB batch or > 120 samples |
 | 400 | `password_policy_violation` | New password failed the policy (see `errors`) |
 | 400 | `registration_invalid` | Username, email or password failed validation (see `errors`) |
+| 400 | `malformed_request` | The body could not be read as JSON for this endpoint — nothing was processed |
 | 401 | `invalid_credentials` | Wrong username/password |
+| 401 | `auth_failed` | Device credential missing, malformed, wrong, revoked, unbound, or naming a different device than the payload — **one** answer for all of them, on `/ingest/http` only |
 | 401 | `invalid_recovery_code` | Wrong, spent, malformed or account-less backup recovery code — one answer for all of them |
 | 401 | `invalid_reset_code` | Wrong, spent, expired, foreign or account-less reset code — one answer for all of them |
 | 401 | `token_invalid` / `token_reused` | Expired, consumed, or replayed refresh token (family revoked) |
 | 403 | `insufficient_role` | Role not permitted for the action |
 | 403 | `builtin_immutable` | Attempt to edit a built-in species profile |
 | 404 | `not_found` | Unknown id **or a foreign resource** (deliberate: no id probing) |
+| 404 | `identifier_unknown` | No account uses that username or email — `/auth/forgot-password` only, a deliberate disclosure (`ADR-020`) |
 | 404 | `claim_code_invalid` | Unknown, expired or consumed claim code |
 | 409 | `terrarium_already_bound` / `conflict_device_bound` | Binding conflicts |
+| 409 | `registration_conflict` | Username and/or email already has an account (see `errors` for which) |
 | 409 | `alert_not_open` | Ack/resolve on a resolved alert |
 | 409 | `version_conflict` | Optimistic concurrency (`rowversion` mismatch) |
 | 409 | `profile_in_use` | Deleting an assigned profile |
+| 413 | `request_too_large` | The transport refused to read the body (an in-app limit such as `[RequestSizeLimit]`). Kestrel answers its own 30 MB default itself, before the application sees the request, so this row is defensive. **Not** the same as `400 payload_too_large`, which is the ingest endpoint's own batch limit |
 | 422 | `quality_rejected` | Sample accepted but excluded from evaluation (informational) |
 | 423 | `account_locked` | Login throttle active |
 | 429 | `rate_limited` (+ `Retry-After`) | Per-endpoint limits (§6) |
@@ -442,7 +548,18 @@ be probed (BR-02.2).
 | `commandChanged` | `{deviceId, cmdId, status}` | command ack/failure |
 
 Client methods: `JoinTerrarium(terrariumId)`, `LeaveTerrarium(terrariumId)` — **membership is authorised on
-join**, otherwise the hub would become a cross-tenant leak (`03-implementation/03` §7).
+join**, otherwise the hub would become a cross-tenant leak (`03-implementation/03` §7). A refused join throws a
+`HubException` carrying one message for both "not yours" and "does not exist", so the hub cannot be used to find
+out whether an id exists (BR-02.2).
+
+**Emitted so far.** `readingAdded` (after a sample commits, since 2.9) and, since 2026-10-09, `statusChanged` —
+from the device's own `status` topic, so the transition is the device's declaration rather than an inference from
+silence. What is **not** pushed yet is the `Provisioning → Online` transition a sample or health message causes: the
+fan-out boundary for samples carries committed readings, which have no status in them. `alertChanged` arrives with
+3.4 and `commandChanged` with FR-14.
+
+**Auth:** the JWT travels in the query string (`/hubs/telemetry?access_token=…`), because a browser cannot set a
+header on the WebSocket handshake. It is accepted on `/hubs` only — nowhere else does a token belong in a URL.
 
 **Client obligations:** re-subscribe after reconnect, and re-fetch `readings/latest` before resuming the stream
 so a reconnected socket never leaves pre-disconnect values on screen (UC-02, `03-implementation/05` §3).

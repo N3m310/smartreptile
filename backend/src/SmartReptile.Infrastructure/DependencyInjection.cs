@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Evaluation;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Infrastructure.Evaluation;
 using SmartReptile.Infrastructure.Health;
 using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Infrastructure.Mqtt;
@@ -128,9 +130,20 @@ public static class DependencyInjection
         services.AddScoped<DeviceStateUpdater>();
         services.AddScoped<IngestPipeline>();
 
-        // Placeholders with a real boundary: 2.9 replaces the broadcaster, 3.2/3.3 replace the queue.
-        services.AddSingleton<ITelemetryBroadcaster, PendingTelemetryBroadcaster>();
-        services.AddSingleton<IEvaluationQueue, PendingEvaluationQueue>();
+        // The device channels that are not telemetry — health, status, events. Registered here because they are the
+        // same ingestion path as telemetry with a different payload, sharing its store and its worker.
+        services.AddSingleton<IDeviceChannelParser, JsonDeviceChannelParser>();
+        services.AddScoped<DeviceChannelPipeline>();
+
+        // The evaluator's hand-off (roadmap 3.2). This replaced the PendingEvaluationQueue placeholder on
+        // 2026-10-09: the queue is a real bounded channel and the worker drains it into SampleEvaluator, so a
+        // committed sample is now handed to something that reads its quality flags instead of to nothing.
+        services.AddSingleton<InProcessEvaluationQueue>();
+        services.AddSingleton<IEvaluationQueue>(sp => sp.GetRequiredService<InProcessEvaluationQueue>());
+        services.AddScoped<IEvaluationStore, EfEvaluationStore>();
+        services.AddScoped<SampleEvaluator>();
+        services.AddHostedService<EvaluatorWorker>();
+
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();
 

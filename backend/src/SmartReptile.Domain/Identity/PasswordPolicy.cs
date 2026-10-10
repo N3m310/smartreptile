@@ -1,19 +1,24 @@
 namespace SmartReptile.Domain.Identity;
 
 /// <summary>
-/// Password rules from §02-design/06 §2: at least <see cref="MinLength"/> characters with at least one letter
-/// and one digit, no longer than <see cref="MaxLength"/>, and not one of the most frequently used passwords.
-/// Deliberately no composition theatre beyond that — length plus a deny-list is what actually helps.
+/// Password rules from §02-design/06 §2 (BR-01.2): at least <see cref="MinLength"/> characters containing at
+/// least one letter, one digit, one upper-case letter and one special character; no longer than
+/// <see cref="MaxLength"/>; and not one of the most frequently used passwords.
 /// </summary>
 /// <remarks>
 /// Pure, so the rules are unit-testable and identical wherever a password is set (registration and
 /// change-password). The deny-list is embedded rather than fetched: a password check must not depend on a
 /// network call, and a service outage must never become a "no policy" path.
+/// <para>
+/// The composition rules are what the product brief asks for. On their own they add little over length plus the
+/// deny-list — which is why the deny-list and the length cap stay — but a form that states a rule the server
+/// does not check is worse than either, so the two are kept in step here and in the dashboard hint.
+/// </para>
 /// </remarks>
 public static class PasswordPolicy
 {
     /// <summary>Minimum length (BR-01.2).</summary>
-    public const int MinLength = 10;
+    public const int MinLength = 8;
 
     /// <summary>Maximum length — a bound on PBKDF2 work per request (BR-01.2).</summary>
     public const int MaxLength = 128;
@@ -61,6 +66,22 @@ public static class PasswordPolicy
                 "password", "password_digit_required", "A password must contain at least one digit."));
         }
 
+        if (!ContainsUppercase(password))
+        {
+            violations.Add(new IdentityViolation(
+                "password",
+                "password_uppercase_required",
+                "A password must contain at least one upper-case letter."));
+        }
+
+        if (!ContainsSpecial(password))
+        {
+            violations.Add(new IdentityViolation(
+                "password",
+                "password_special_required",
+                "A password must contain at least one special character (a symbol that is not a letter or a digit)."));
+        }
+
         if (IsCommon(password))
         {
             violations.Add(new IdentityViolation(
@@ -96,6 +117,36 @@ public static class PasswordPolicy
         foreach (var c in value)
         {
             if (char.IsAsciiDigit(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsUppercase(string value)
+    {
+        foreach (var c in value)
+        {
+            if (char.IsUpper(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Any character that is neither a letter nor a digit, whitespace excluded — a space must not satisfy the
+    /// rule.
+    /// </summary>
+    private static bool ContainsSpecial(string value)
+    {
+        foreach (var c in value)
+        {
+            if (!char.IsLetterOrDigit(c) && !char.IsWhiteSpace(c))
             {
                 return true;
             }

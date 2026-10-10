@@ -212,7 +212,7 @@ see their acceptance criteria in `03-functional-requirements.md`.
 **Main flow**
 1. Evaluator notices the missing sample window and raises `DeviceSilent` (Warning) — no metric alerts from missing data.
 2. Dashboard marks the device `offline` with `last seen`; a banner explains that threshold evaluation is paused for this terrarium.
-3. At 30 minutes of silence the alert escalates to `Critical` and notifies by FCM/Telegram.
+3. At 30 minutes of silence the alert escalates to `Critical` and notifies by FCM/email.
 4. Device reconnects (Wi-Fi restored) and back-fills the ring buffer with quality bit `8`.
 5. Ingest stores the back-filled samples in chronological order; the evaluator processes them for reporting but does not notify for excursions older than 6 h (BR-06.6).
 6. `DeviceSilent` auto-resolves; daily summaries for affected days are recomputed; coverage reflects the gap honestly.

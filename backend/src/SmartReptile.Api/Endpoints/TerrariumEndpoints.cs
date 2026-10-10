@@ -46,6 +46,7 @@ public static class TerrariumEndpoints
 
         group.MapPost(string.Empty, async (
             CreateTerrariumRequest request,
+            HttpResponse response,
             ClaimsPrincipal principal,
             TerrariumService service,
             CancellationToken cancellationToken) =>
@@ -55,9 +56,13 @@ public static class TerrariumEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken);
 
-            return outcome.Succeeded
-                ? Results.Created($"/api/v1/terrariums/{outcome.Terrarium!.Id}", outcome.Terrarium)
-                : Problem(outcome.Problem!);
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            SetETag(response, outcome.RowVersion);
+            return Results.Created($"/api/v1/terrariums/{outcome.Terrarium!.Id}", outcome.Terrarium);
         })
         .RequireAuthorization(AuthorizationPolicies.Owner)
         .WithSummary("Create a terrarium")
@@ -65,6 +70,7 @@ public static class TerrariumEndpoints
 
         group.MapGet("/{terrariumId:guid}", async (
             Guid terrariumId,
+            HttpResponse response,
             ClaimsPrincipal principal,
             TerrariumService service,
             CancellationToken cancellationToken) =>
@@ -74,9 +80,108 @@ public static class TerrariumEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken);
 
-            return outcome.Succeeded ? Results.Ok(outcome.Terrarium) : Problem(outcome.Problem!);
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            SetETag(response, outcome.RowVersion);
+            return Results.Ok(outcome.Terrarium);
         })
-        .WithSummary("One terrarium");
+        .WithSummary("One terrarium")
+        .WithDescription("Carries the rowversion as an `ETag`; send it back as `If-Match` to update the terrarium.");
+
+        group.MapPatch("/{terrariumId:guid}", async (
+            Guid terrariumId,
+            UpdateTerrariumRequest request,
+            HttpRequest httpRequest,
+            HttpResponse response,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            // No token, no update: the whole point of the round trip is that the client states which version it
+            // edited, and a missing header means it did not read one.
+            if (ParseIfMatch(httpRequest.Headers.IfMatch) is not { } expectedRowVersion)
+            {
+                return PreconditionRequired();
+            }
+
+            var outcome = await service.UpdateAsync(
+                terrariumId,
+                request,
+                principal.GetUserId() ?? Guid.Empty,
+                expectedRowVersion,
+                cancellationToken);
+
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            SetETag(response, outcome.RowVersion);
+            return Results.Ok(outcome.Terrarium);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .WithSummary("Update a terrarium")
+        .WithDescription("Requires the Owner role and an `If-Match` header carrying the current `ETag`. Omitted "
+                       + "fields are left unchanged; an empty `location` or `description` clears it. A stale ETag "
+                       + "answers `412 precondition_failed`.");
+
+        group.MapDelete("/{terrariumId:guid}", async (
+            Guid terrariumId,
+            bool? allowUnboundDevice,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.DeleteAsync(
+                terrariumId,
+                principal.GetUserId() ?? Guid.Empty,
+                allowUnboundDevice ?? false,
+                cancellationToken);
+
+            return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .WithSummary("Delete a terrarium")
+        .WithDescription("Requires the Owner role. A soft delete: readings and alert history survive. When a live "
+                       + "device is bound the request must pass `?allowUnboundDevice=true`, which detaches the "
+                       + "board; without it the answer is `409 conflict_device_bound`.");
+
+        group.MapGet("/{terrariumId:guid}/thresholds", async (
+            Guid terrariumId,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.EffectiveThresholdsAsync(
+                terrariumId,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken);
+
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            var thresholds = outcome.Thresholds!;
+
+            // Named `effectiveThresholds` on the wire, which is the field name `07-appendices/03` §4.2 and
+            // BR-10.3 use; the container's member is spelled the same so the two cannot drift.
+            return Results.Ok(new
+            {
+                terrariumId = thresholds.TerrariumId,
+                capturedAtUtc = thresholds.CapturedAtUtc,
+                timeZoneId = thresholds.TimeZoneId,
+                effectiveThresholds = thresholds.EffectiveThresholds,
+            });
+        })
+        .WithSummary("The effective band per metric")
+        .WithDescription("Resolves terrarium override → species profile (BR-10.3) at this instant and reports "
+                       + "`source` per metric, so a limit can be explained rather than guessed at. A metric with "
+                       + "no band for the current phase is absent. Read-only: `PUT`/`DELETE` overrides are not "
+                       + "built yet.");
 
         group.MapGet("/{terrariumId:guid}/readings/latest", async (
             Guid terrariumId,
@@ -173,6 +278,8 @@ public static class TerrariumEndpoints
         {
             "not_found" => StatusCodes.Status404NotFound,
             "device_not_bound" => StatusCodes.Status409Conflict,
+            "conflict_device_bound" => StatusCodes.Status409Conflict,
+            "precondition_failed" => StatusCodes.Status412PreconditionFailed,
             _ => StatusCodes.Status400BadRequest,
         };
 
@@ -194,4 +301,65 @@ public static class TerrariumEndpoints
             type: $"https://smartreptile.example/problems/{problem.Code}",
             extensions: extensions);
     }
+
+    /// <summary>
+    /// Publishes the rowversion as an <c>ETag</c>. Quoted and strong, not weak: the value is the database's own
+    /// byte-exact concurrency token, so a weak validator would misdescribe it.
+    /// </summary>
+    private static void SetETag(HttpResponse response, byte[]? rowVersion)
+    {
+        if (rowVersion is { Length: > 0 })
+        {
+            response.Headers.ETag = $"\"{Convert.ToBase64String(rowVersion)}\"";
+        }
+    }
+
+    /// <summary>
+    /// Reads the concurrency token out of <c>If-Match</c>. Null means the header was missing or unusable, which the
+    /// caller sees as <c>428</c>; an empty array is the <c>*</c> wildcard, meaning "any current version will do"
+    /// and leaving the token unchecked.
+    /// </summary>
+    private static byte[]? ParseIfMatch(string? header)
+    {
+        if (string.IsNullOrWhiteSpace(header))
+        {
+            return null;
+        }
+
+        var value = header.Trim();
+
+        if (value == "*")
+        {
+            return [];
+        }
+
+        if (value.StartsWith("W/", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value[2..].Trim();
+        }
+
+        value = value.Trim('"');
+
+        try
+        {
+            return Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            // A token that is not even base64 cannot match any rowversion, so it is reported as "you did not tell
+            // me which version" rather than being decoded into a token that is guaranteed to fail the compare.
+            return null;
+        }
+    }
+
+    /// <summary>An update without <c>If-Match</c>: the client has not stated which version it edited (FR-03).</summary>
+    private static IResult PreconditionRequired() =>
+        Results.Problem(
+            title: "An If-Match header carrying the terrarium's current ETag is required to update it.",
+            statusCode: StatusCodes.Status428PreconditionRequired,
+            type: "https://smartreptile.example/problems/precondition_required",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = "precondition_required",
+            });
 }

@@ -127,7 +127,7 @@ screenshot with no narrative is not evidence of understanding.
 | `ingest_rejected_total` increasing | `/metrics` | Firmware/schema mismatch or a credential problem |
 | `alerts_opened_total` flat while `out_of_range_minutes` rises | `/metrics` + summaries | Evaluator failure (documented heuristic, `02-design/03` §8) |
 | `device_last_seen_age_seconds` > 180 | `/metrics` | Wi-Fi or power problem |
-| `notifications_sent_total{status=failed}` | `/metrics` | Channel credentials expired (Telegram token, FCM service account) |
+| `notifications_sent_total{status=failed}` | `/metrics` | Channel credentials expired (FCM service account, SMTP password) |
 | `eval_duration_ms` p95 climbing | `/metrics` | Database contention |
 
 Logging rules: structured JSON, one correlation id per ingest batch propagated through evaluation and

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -15,6 +16,7 @@ using SmartReptile.Api.Middleware;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
+using SmartReptile.Application.Ingest;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure;
@@ -36,6 +38,10 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddProblemDetails();
 builder.Services.AddSignalR();
+
+// The live push of FR-09: an Application port implemented here, because the hub it broadcasts through belongs to
+// this project. A singleton like the hub context it holds, and resolved by the ingest pipeline's fan-out.
+builder.Services.AddSingleton<ITelemetryBroadcaster, SignalRTelemetryBroadcaster>();
 
 builder.Services.AddSmartReptileInfrastructure(builder.Configuration);
 
@@ -117,6 +123,23 @@ builder.Services
             },
             OnForbidden = async context =>
                 await WriteProblemAsync(context.HttpContext, StatusCodes.Status403Forbidden, forbiddenBody),
+
+            // A browser cannot put a header on the WebSocket handshake, so SignalR's own convention is to pass the
+            // token in the query string. Accepted on the hub path only: a token in a URL reaches logs, proxies and
+            // referrer headers, which is a cost worth paying for the one route that cannot avoid it and nowhere
+            // else.
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            },
         };
     });
 
@@ -204,6 +227,36 @@ builder.Services.AddRateLimiter(options =>
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
+
+    // The ingest fallback is limited per device (6/min, `07-appendices/03` §3.6) rather than per address, because
+    // two boards behind one home router are two budgets - which is the point of the fallback: a device that has
+    // been offline is the one that needs to back-fill, and it must not be starved by the other one.
+    //
+    // The key comes from a header the caller supplies, so this is a *fairness* limit and not a security control:
+    // a hostile caller can mint a fresh partition per request by varying the id. What bounds that caller is the
+    // authentication that follows - every forged id costs a parse and a failed device lookup - plus the
+    // address-keyed policy above on the auth group. Stated here because a limit that reads like a defence and is
+    // not one is worse than a documented fairness rule.
+    options.AddPolicy("ingest", context =>
+    {
+        // The same parse the endpoint uses, deliberately: a limit keyed on a different reading of the header than
+        // the one that authorises the request is a limit that can be pointed at someone else's budget.
+        var key = DeviceCredentialHeader.TryParse(
+                context.Request.Headers.Authorization.ToString(),
+                out var devicePublicId,
+                out _)
+            ? devicePublicId
+            : context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: key,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 6,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            });
+    });
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -243,19 +296,64 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler(handler => handler.Run(async context =>
 {
     // RFC 7807 for unexpected failures; expected failures return Result-based problems from the endpoints.
-    var problem = new ProblemDetails
-    {
-        Title = "An unexpected error occurred",
-        Status = StatusCodes.Status500InternalServerError,
-        Type = "https://smartreptile.example/problems/internal_error",
-        Detail = "The request could not be completed. Quote the traceId when reporting this.",
-    };
+    //
+    // A body the framework could not bind is the caller's mistake, not the server's. Answering 500 would send
+    // someone hunting a server fault for a malformed payload, and a client that *can* fix its request cannot tell
+    // that apart from one that should stop retrying. BadHttpRequestException carries the status the framework
+    // chose: 400 for a body that will not parse, 413 for one over the endpoint's limit.
+    var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    var status = StatusCodes.Status500InternalServerError;
+    ProblemDetails problem;
 
-    problem.Extensions["code"] = "internal_error";
+    if (error is BadHttpRequestException badRequest && badRequest.StatusCode is >= 400 and < 500)
+    {
+        status = badRequest.StatusCode;
+
+        // 413 is deliberately *not* called `payload_too_large`: that code is documented as a 400 raised by the
+        // ingest endpoint for a batch over its own 32 KB limit (`07-appendices/03` §5), and giving the same name
+        // two different statuses would make the code useless to a client. This is the transport refusing to read
+        // the body at all. Kestrel answers its own request-size limit before the application sees the request, so
+        // in practice this branch only fires for an in-app limit such as [RequestSizeLimit].
+        var tooLarge = status == StatusCodes.Status413PayloadTooLarge;
+        var code = tooLarge ? "request_too_large" : "malformed_request";
+
+        problem = new ProblemDetails
+        {
+            Title = tooLarge ? "The request body is too large" : "The request body could not be read",
+            Status = status,
+            Type = $"https://smartreptile.example/problems/{code}",
+            Detail = tooLarge
+                ? "The request body is larger than this endpoint accepts. Nothing was processed."
+                : "The request body was not valid JSON for this endpoint. Nothing was processed.",
+        };
+
+        problem.Extensions["code"] = code;
+    }
+    else
+    {
+        problem = new ProblemDetails
+        {
+            Title = "An unexpected error occurred",
+            Status = status,
+            Type = "https://smartreptile.example/problems/internal_error",
+            Detail = "The request could not be completed. Quote the traceId when reporting this.",
+        };
+
+        problem.Extensions["code"] = "internal_error";
+    }
+
     problem.Extensions["traceId"] = context.TraceIdentifier;
 
-    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-    await context.Response.WriteAsJsonAsync(problem);
+    context.Response.StatusCode = status;
+
+    // `application/problem+json` is what RFC 7807 specifies and what `07-appendices/03` §5 documents. Passing it
+    // to the writer rather than assigning `ContentType` first is deliberate: WriteAsJsonAsync sets the header
+    // itself when the parameter is null, and assigning beforehand is silently overwritten (verified: the response
+    // came back as application/json until this overload was used).
+    await context.Response.WriteAsJsonAsync(
+        problem,
+        options: null,
+        contentType: "application/problem+json");
 }));
 
 if (app.Environment.IsDevelopment())
@@ -278,6 +376,7 @@ app.MapOpsEndpoints(applicationVersion);
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
 app.MapTerrariumEndpoints();
+app.MapIngestEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
 app.MapGet("/", () => Results.Ok(new

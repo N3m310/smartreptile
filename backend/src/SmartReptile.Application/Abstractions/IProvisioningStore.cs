@@ -1,3 +1,4 @@
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Terrariums;
 
@@ -32,6 +33,13 @@ public interface IProvisioningStore
     void AddCredential(DeviceCredential credential);
 
     /// <summary>
+    /// Stages an audit row. It lives on this port rather than one of its own so the row is committed by the same
+    /// <see cref="SaveChangesAsync"/> as the change it describes (BR-18.4): an audited change that commits without
+    /// its entry is worse than no trail at all, because the gap reads as "nothing happened".
+    /// </summary>
+    void AddAuditEntry(AuditLog entry);
+
+    /// <summary>
     /// The terrarium, but only when it belongs to <paramref name="ownerUserId"/> and is not soft-deleted.
     /// A foreign or missing id therefore looks identical, which is what keeps ids from being probed (BR-02.2).
     /// </summary>
@@ -42,4 +50,11 @@ public interface IProvisioningStore
 
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Commits a claim, reporting a lost race on the DI-04 binding index instead of throwing. False means another
+    /// claim bound a device to that terrarium between the pre-check and this write, which is the
+    /// <c>terrarium_already_bound</c> the caller must answer rather than a 500 (TC-I-05).
+    /// </summary>
+    Task<bool> TrySaveClaimAsync(CancellationToken cancellationToken);
 }

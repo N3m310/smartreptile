@@ -67,6 +67,8 @@ Notes to record:
 | 3.11 | Language switch | Switch to `en` then back to `vi` | All screens switch, no untranslated keys, layout does not break (Vietnamese strings are longer) | ☐ |
 | 3.12 | Deep links | Tap a push notification | Opens the alert detail directly, back navigation sane | ☐ |
 | 3.13 | Empty state | Delete all terrariums | Empty state names the next action, no crash, no misleading zero values | ☐ |
+| 3.14 | Change password | Signed in, use the header's *Đổi mật khẩu* / *Change password* form — first with a wrong current password, then with the right one | The wrong one is refused with a message and the session survives; the right one ends every session and returns to the sign-in form; the new password signs in and the old one does not | ☐ |
+| 3.15 | Password rule (`BR-01.2`) | In the same form, submit a new password with no upper-case letter, then one with no special character, then one of 7 characters, then a compliant one | Each refusal **names the rule it broke** (not just "refused") — and the form states the rule above the field in both languages; the compliant one is accepted and signs in afterwards | ☐ |
 
 ---
 
@@ -160,7 +162,7 @@ This is the single rule that turns a coursework project into something a reviewe
 | 9.2 | Device online, in-range readings visible on the wallboard | ☐ |
 | 9.3 | Release APK installed on the phone (release-mode screenshot already captured) | ☐ |
 | 9.4 | Induced-excursion demo rehearsed: lamp/ice ready, dwell timing known (5 min warn / 2 min critical) | ☐ |
-| 9.5 | Telegram channel tested within the last 30 min | ☐ |
+| 9.5 | Notification channel tested within the last 30 min (in-app inbox, plus FCM to the phone; SMTP only if a relay is up) | ☐ |
 | 9.6 | Fallback: recorded video of the alert path on a USB stick | ☐ |
 | 9.7 | Seeded dataset reset script tested (restores a clean, pretty 7-day history for charts) | ☐ |
 | 9.8 | Battery/power for the node, spare USB cable, phone charger | ☐ |

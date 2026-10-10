@@ -91,7 +91,9 @@ parameters*, not biology — which is exactly why they are editable here.
 3. **BR-10.5's climate sanity has no floors in its source table.** `07-appendices/05` §4 lists *ceilings*, and
    BR-10.5's own example needs a floor. Reading the range as "the band a normal day target maximum falls in", and
    judging the **day** band only, is the interpretation that neither flags the seeded profiles nor loses the example.
-   A night drop is expected to be cooler than any daytime ceiling.
+   A night drop is expected to be cooler than any daytime ceiling. A second exception was needed on 2026-10-07: the
+   Arid row's 40–44 °C describes the *basking* zone, so the seeded ambient variant (28–33 °C, `Arid-cool`) is judged
+   against its own envelope (`ClimateRange.aridAmbient`) instead of being flagged by the very band §3 gives it.
 4. **A recovery notice inherited the alert's escalated severity and bypassed quiet hours.** A resolved alert keeps
    its Critical severity, so "back in range" could wake a keeper at 03:00. The policy now evaluates the *event*, not
    the alert's history — with a regression test named after the bug.

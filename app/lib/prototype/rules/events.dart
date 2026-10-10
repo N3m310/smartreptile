@@ -146,9 +146,6 @@ enum Channel {
   /// FCM push (Android).
   push('Push'),
 
-  /// Telegram bot — the primary demo channel.
-  telegram('Telegram'),
-
   /// SMTP email.
   email('Email');
 
@@ -222,7 +219,7 @@ class NotificationRecord {
   /// Outcome: `none` means delivered, anything else is the suppression reason.
   final SuppressedReason outcome;
 
-  /// Attempt number; FCM/Telegram retry 3× with backoff (BR-13.5).
+  /// Attempt number; FCM retries 3× with backoff (BR-13.5).
   final int attempt;
 
   /// Notification title, using the content contract in `02-design/05` §7.

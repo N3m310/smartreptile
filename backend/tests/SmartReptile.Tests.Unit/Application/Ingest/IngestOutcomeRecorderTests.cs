@@ -124,6 +124,8 @@ public class IngestOutcomeRecorderTests
     {
         public List<PersistedSample> Received { get; } = [];
 
+        public List<DeviceStatusChanged> ReceivedStatuses { get; } = [];
+
         public Exception? Failure { get; set; }
 
         public Task BroadcastAsync(IReadOnlyList<PersistedSample> samples, CancellationToken cancellationToken)
@@ -134,6 +136,17 @@ public class IngestOutcomeRecorderTests
             }
 
             Received.AddRange(samples);
+            return Task.CompletedTask;
+        }
+
+        public Task BroadcastStatusAsync(DeviceStatusChanged statusChanged, CancellationToken cancellationToken)
+        {
+            if (Failure is not null)
+            {
+                return Task.FromException(Failure);
+            }
+
+            ReceivedStatuses.Add(statusChanged);
             return Task.CompletedTask;
         }
     }

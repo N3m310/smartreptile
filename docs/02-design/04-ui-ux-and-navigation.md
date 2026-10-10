@@ -40,23 +40,26 @@ semantics and status vocabulary are shared; the component implementations are no
 | W7 | Report | Daily summary table + export button (report screenshots come from here) |
 | W8 | Admin | Audit log viewer, retention status, `/metrics` snapshot |
 
-**Where TERRAGUARD sits (revised 2026-10-06, `ADR-019`).** `web/` also contains the **TERRAGUARD** client: React
-+ Vite + Tailwind, eight screens (login, dashboard, terrariums, terrarium detail, devices, alerts, history,
-settings). It arrived as a mock-data prototype with no API client and no engine rules (ADR-017), and `ADR-018` kept
-it a reference. **`ADR-019` revokes that and promotes it to the M4 web surface**: the inventory above is what it must grow into —
-note that W1's wallboard is *not* one of its eight screens, so that page is new work (4.19) — `web/legacy/` is
-retired at the end of the switch, and the promotion is staged by endpoint availability (4.15–4.20, with the
-per-screen readiness table in `03-implementation/07`). While a screen still renders `src/data/mockData.ts` it keeps
-its mock-data notice and counts for nothing in the DoD; the notice is removed when the mock data is, not before.
+**Where the client sits (revised 2026-10-06 by `ADR-019`; promotion complete 2026-10-07; **renamed VIVARIUMGUARD
+2026-10-09**).** `web/` holds the client: React + Vite + Tailwind, eight screens (login, dashboard, terrariums,
+terrarium detail, devices, alerts, history, settings). It arrived as a mock-data prototype with no API client and
+no engine rules (ADR-017), and `ADR-018` kept it a reference. **`ADR-019` revoked that and promoted it to the M4 web
+surface**; tasks
+4.15–4.19 carried the promotion out, and `web/legacy/` is deleted. What the inventory below asked for is now in
+place: W1's wallboard is a React route (`/wallboard`, kiosk layout), W2's live view and W3's history are wired to
+`readings/latest` and the bucketed range route, and the ops diagnosis that the retired `health.html` owned lives at
+`/system`. Three screens — `Devices`, `Alerts`, `Settings` — still render `data/mockData.ts` because their endpoints
+do not exist yet (roadmap 4.20); the shell renders the mock-data notice on exactly those routes, and it goes when
+the mock data does, not before.
 
-Three things were decided while it was a reference (task 4.14) and are **superseded by that promotion**. Each was
-correct for a prototype that never ships and is wrong for a surface that does:
+Three things were decided while it was a reference (task 4.14) and were **superseded by that promotion** (task 4.18,
+2026-10-07). Each was correct for a prototype that never ships and wrong for a surface that does:
 
-| Question | Was (task 4.14) | Is now (`ADR-019`, task 4.18) |
+| Question | Was (task 4.14) | Is now (`ADR-019`, task 4.18 — done 2026-10-07) |
 |---|---|---|
-| Status colours | A **prototype-only palette** mapping one-to-one onto §3's four roles (`--status-normal/warning/danger/offline` ↔ `color.inRange/warning/critical/unknown`), with different hues because §3's tokens are tuned for the app's theme-based surface: they fall to **3.0–3.5:1** on this client's `#0b1a0d` / `#112016` surfaces, under the 4.5:1 body-text budget of `04-quality/03` §4.4, where the prototype's own hues measure **4.7–8.6:1** | §3's tokens, at ≥ 4.5:1 for body text. §3 was already the source of truth for the shipped clients and this client is one of them now; the prototype's measured ratios stay at the top of `web/src/index.css` as the record of why the swap needs the contrast check re-run rather than a hue copy |
-| Copy | **Vietnamese-only, by intent.** No ARB keys, so `TC-I-15` could not reach it and there was no translation set to drift. Localising it was worth doing "only if it is ever promoted to a shipped surface, which `ADR-018` declines" | **Bilingual, vi default + en** (NFR-06, ADR-013), with a key set shared with the app so `TC-I-15`'s key-parity half covers it. That key-parity check is now a real gate rather than an unreachable one |
-| Coverage | Outside every `TC-*` case and outside CI (`ADR-017`), with the mock-data notice as the compensating control | `tsc`, `vite build` and key parity in CI; each screen enters the walkthrough of `04-quality/03` §3 as it is wired, and the screens stop being excluded from measurement by being measured |
+| Status colours | A **prototype-only palette** mapping one-to-one onto §3's four roles (`--status-normal/warning/danger/offline` ↔ `color.inRange/warning/critical/unknown`), with different hues because §3's tokens are tuned for the app's theme-based surface: they fall to **3.0–3.5:1** on this client's `#0b1a0d` / `#112016` surfaces, under the 4.5:1 body-text budget of `04-quality/03` §4.4, where the prototype's own hues measure **4.7–8.6:1** | §3's four **roles**, with hues measured on this client's surfaces (`web/src/index.css` — canvas `#0b1a0d`, surface `#112016`): in-range `#4a9e6a` 5.47/5.14, warning `#e8a832` 8.63/8.11, critical `#e8613a` 5.31/4.99, unknown `#8e9e8f` 6.37/5.99. §3's own values cannot satisfy §4.4 on **either** surface — on white they fail on warning (3.11:1), on this canvas on in-range, critical and unknown (3.30/3.01/2.73) — so the roles were kept and the hues measured per surface, which is what this row asked for. Two values changed: critical (was `#e05530`, 4.72/**4.44** — under budget on a card) and unknown (was `#556055`, 2.73/2.57; it reuses the theme's muted text colour). Colour is still never the only signal, and the tokens are the only status colours the wired screens carry |
+| Copy | **Vietnamese-only, by intent.** No ARB keys, so `TC-I-15` could not reach it and there was no translation set to drift. Localising it was worth doing "only if it is ever promoted to a shipped surface, which `ADR-018` declines" | **Bilingual, vi default + en** (NFR-06, ADR-013), reading `app/lib/l10n/app_{en,vi}.arb` directly — 164 keys, one deck, two clients, so there is no second set to drift. `web/scripts/check-strings.mjs` runs in CI: a key used but undefined, or a key in one locale only, fails the build |
+| Coverage | Outside every `TC-*` case and outside CI (`ADR-017`), with the mock-data notice as the compensating control | `tsc`, `vite build` and key parity in a CI `web` job; the wired screens enter the walkthrough of `04-quality/03` §3 as they were wired (dashboard, terrariums, terrarium detail, history, wallboard, auth, `/system`), and the three screens whose endpoints do not exist keep the notice and the exclusion |
 
 ## 2. Navigation graph (app)
 

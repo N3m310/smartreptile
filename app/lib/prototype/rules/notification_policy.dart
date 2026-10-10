@@ -12,7 +12,7 @@ import 'events.dart';
 class NotificationPreferences {
   /// Creates preferences.
   const NotificationPreferences({
-    this.channels = const {Channel.inApp, Channel.telegram},
+    this.channels = const {Channel.inApp},
     this.minSeverity = Severity.warning,
     this.quietHoursEnabled = true,
     this.quietHoursStartHour = 22,

@@ -21,7 +21,8 @@ public sealed record TelemetryEnvelope(
     byte[] Payload,
     DateTimeOffset ReceivedAt,
     IngestSource Source,
-    string? PresentedSecret = null);
+    string? PresentedSecret = null,
+    DeviceChannel Channel = DeviceChannel.Telemetry);
 
 /// <summary>Result of turning bytes into a <see cref="TelemetryPayloadDocument"/>.</summary>
 /// <param name="Document">The parsed batch, when the bytes were a JSON object.</param>
@@ -75,6 +76,9 @@ public interface ITelemetryStore
     /// <summary>Stages a health row.</summary>
     void AddHealthSample(DeviceHealthSample health);
 
+    /// <summary>Stages a device event (boot, sensor fault, buffer overflow, clock, calibration).</summary>
+    void AddDeviceEvent(DeviceEvent deviceEvent);
+
     /// <summary>Commits everything staged by this scope in one transaction.</summary>
     /// <returns>
     /// True when the batch was committed. False when the unique <c>(DeviceId, Sequence)</c> index refused the
@@ -113,6 +117,13 @@ public interface ITelemetryBroadcaster
 {
     /// <summary>Broadcasts samples that are already committed.</summary>
     Task BroadcastAsync(IReadOnlyList<PersistedSample> samples, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Broadcasts a device status transition that is already committed (the <c>statusChanged</c> event of
+    /// `07-appendices/03` §6). Separate from <see cref="BroadcastAsync"/> because a status message commits no
+    /// samples: there is nothing to carry, only the new state.
+    /// </summary>
+    Task BroadcastStatusAsync(DeviceStatusChanged statusChanged, CancellationToken cancellationToken);
 }
 
 /// <summary>

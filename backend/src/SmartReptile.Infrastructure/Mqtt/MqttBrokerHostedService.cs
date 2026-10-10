@@ -162,8 +162,17 @@ public sealed class MqttBrokerHostedService(
 {
     private MqttServer? _server;
 
-    /// <summary>The one channel the broker forwards to the ingest worker (roadmap task 2.4).</summary>
-    private const string TelemetryChannel = "telemetry";
+    /// <summary>
+    /// The channels the broker hands to the ingest worker. <c>ack</c> is deliberately absent: command results are
+    /// FR-14's, and accepting one here would acknowledge a command this build cannot issue.
+    /// </summary>
+    private static readonly Dictionary<string, DeviceChannel> ForwardedChannels = new(StringComparer.Ordinal)
+    {
+        ["telemetry"] = DeviceChannel.Telemetry,
+        ["health"] = DeviceChannel.Health,
+        ["status"] = DeviceChannel.Status,
+        ["events"] = DeviceChannel.Events,
+    };
 
     /// <summary>
     /// The host's shutdown token, kept so a publish that is waiting on a full ingest queue releases when the
@@ -407,13 +416,14 @@ public sealed class MqttBrokerHostedService(
     }
 
     /// <summary>
-    /// Hands an accepted telemetry publication to the ingest worker.
+    /// Hands an accepted publication to the ingest worker, tagged with the channel it arrived on.
     /// </summary>
     /// <remarks>
-    /// Only <c>telemetry</c> is forwarded today: the health, status and events channels are part of the topic
-    /// scheme but their consumers are later tasks (§02-design/02 §4.1 lifts a device out of <c>Offline</c> on a
-    /// sample, and the <c>DeviceSilent</c>/<c>SensorFault</c> signals are 3.3). Leaving them unforwarded rather
-    /// than half-handled is deliberate — a status payload accepted and then ignored would look like it worked.
+    /// All four device → server channels are forwarded; <c>ack</c> is not, because command results belong to FR-14
+    /// and accepting one would acknowledge a command this build cannot issue. The channels were left unforwarded
+    /// until 2026-10-09 rather than half-handled — a status payload accepted and then ignored would have looked
+    /// like it worked — and each is now consumed by <c>DeviceChannelPipeline</c>: <c>status</c> sets the lifecycle
+    /// state, <c>health</c> updates the fleet figures, <c>events</c> is stored for the derived signals of task 3.3.
     /// <para>
     /// The batch is awaited, not fired and forgotten: see <see cref="InProcessTelemetryBus"/> for why the
     /// acknowledgement has to wait behind the queue.
@@ -423,7 +433,7 @@ public sealed class MqttBrokerHostedService(
     {
         if (deviceId is null
             || !MqttTopicScheme.TryParse(args.ApplicationMessage.Topic, options.DeviceTopicPrefix, out var topic)
-            || !string.Equals(topic.Channel, TelemetryChannel, StringComparison.Ordinal))
+            || !ForwardedChannels.TryGetValue(topic.Channel, out var channel))
         {
             return;
         }
@@ -433,7 +443,8 @@ public sealed class MqttBrokerHostedService(
                 topic.DeviceId,
                 args.ApplicationMessage.PayloadSegment.ToArray(),
                 DateTimeOffset.UtcNow,
-                IngestSource.Mqtt),
+                IngestSource.Mqtt,
+                Channel: channel),
             _stopping).ConfigureAwait(false);
     }
 

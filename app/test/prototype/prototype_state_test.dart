@@ -79,19 +79,30 @@ void main() {
 
     test('registration validates before it accepts anything', () {
       expect(
-        state.register(name: 'L', email: 'a@b.c', password: 'longenough'),
+        state.register(name: 'L', email: 'a@b.c', password: 'Longenough1!'),
         isNotEmpty,
       );
       expect(
-        state.register(name: 'Linh', email: 'nope', password: 'longenough'),
+        state.register(name: 'Linh', email: 'nope', password: 'Longenough1!'),
         isNotEmpty,
       );
       expect(
-        state.register(name: 'Linh', email: 'a@b.c', password: 'short'),
+        state.register(name: 'Linh', email: 'a@b.c', password: 'Short1!'),
         isNotEmpty,
+        reason: 'the password is shorter than the policy allows (BR-01.2)',
       );
       expect(
-        state.register(name: 'Linh', email: 'a@b.c', password: 'longenough'),
+        state.register(name: 'Linh', email: 'a@b.c', password: 'longenough1!'),
+        isNotEmpty,
+        reason: 'no upper-case letter',
+      );
+      expect(
+        state.register(name: 'Linh', email: 'a@b.c', password: 'Longenough12'),
+        isNotEmpty,
+        reason: 'no special character',
+      );
+      expect(
+        state.register(name: 'Linh', email: 'a@b.c', password: 'Longenough1!'),
         isEmpty,
       );
       expect(state.isSignedIn, isTrue);

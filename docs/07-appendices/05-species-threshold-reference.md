@@ -58,7 +58,7 @@ list (`03-implementation/06` §8).
 | Metric | Phase | Target | Critical | Dwell warn/crit | Recovery margin | Rationale |
 |---|---|---|---|---|---|---|
 | Temperature | Day (basking) | 38.0 – 42.0 | 30.0 – 45.0 | 5 / 2 min | 1.0 °C | A true heliotherm needs a hot spot; the air temperature alone understates its needs |
-| Temperature | Day (ambient/cool side) | 28.0 – 33.0 | 24.0 – 36.0 | 5 / 2 min | 1.0 °C | Provided as a second profile variant (`Arid-cool`) so both zones can be monitored |
+| Temperature | Day (ambient/cool side) | 28.0 – 33.0 | 24.0 – 36.0 | 5 / 2 min | 1.0 °C | Provided as a second profile variant (`Arid-cool`) so both zones can be monitored. **Seeded 2026-10-07** as `Arid-cool (bearded dragon, ambient)`, which ships this band and the humidity band and nothing else — no surface or UV band, because both belong to the basking zone the variant does not describe |
 | Temperature | Night | 24.0 – 28.0 | 18.0 – 32.0 | 10 / 3 min | 1.0 °C | Desert nights are cool; a warm night is not automatically harmful but is not the target |
 | Temperature (surface, optional) | Day | 38.0 – 45.0 | 28.0 – 50.0 | 5 / 2 min | 1.0 °C | The probe sits **on the basking rock, not in the air**: a heliotherm's surface runs well above the air above it, which is why this band is warmer than the air band above. `GradientWarning` also fires if surface − air > 12 °C |
 | Humidity | Any | 30 – 40 | 20 – 55 | 15 / 5 min | 3 %RH | Low ambient humidity; persistently wet conditions cause respiratory problems |
@@ -86,6 +86,15 @@ measuring a surface band against an air ceiling would flag the very shape the se
 target max would trip its own sanity warning — exactly the false positive a *non-blocking* notice must never
 produce.
 
+**The mirrored split applies to a profile that monitors the ambient side** (added 2026-10-07, when the
+`Arid-cool` variant was seeded). The Arid row's 40–44 °C is a **basking** maximum, so the variant's documented
+28–33 °C day band would trip the very warning the profile ships with. A profile that declares itself an
+ambient/cool-side variant is therefore judged against the ambient envelope — **28–33 °C**, the range §3 gives that
+variant — and the `SurfaceTempC` rule is skipped for it, because it ships no surface band to judge. This case was
+found the same way the surface one was: by seeding the band and running the validation test, not by reading the
+table. What the rule needs from a client is a way to know which zone a profile monitors; the prototype holds that
+as a per-profile envelope override, and `03-implementation/06` §2 records the API half as still open.
+
 ## 5. Verification checklist — **gate before the demo**
 
 Each row: locate the number in a source, record the exact page/table, and have a second team member confirm it.
@@ -111,6 +120,17 @@ A row without a page reference is not verified, even if the number "looks right"
 Row 13 matters: dwell time and hysteresis come from engineering judgement about sensor noise and alert
 fatigue. The report must not imply they are sourced from biology.
 
+**Drafted wording for rows 12 and 13** (2026-10-07 — both are statements rather than numbers, so neither needs a
+source; paste them into the report once a second member signs the row).
+
+- *Row 12 — the illuminance targets.* "The illuminance values (500 / 1 000 / 2 000 lx) are husbandry practice
+  rather than physiology: they are the figures the cited husbandry references use to describe a usable day/night
+  cycle, not measured thresholds below which an animal is harmed. SmartReptile therefore applies them as an
+  accumulated light-hours rule with a 15-minute dwell, and reports a deficit rather than a severity."
+- *Row 13 — dwell and recovery.* "The dwell times, recovery margins and hysteresis in §1–§3 are engineering
+  choices about sensor noise and alert fatigue, not literature values. `Threshold.SourceRef` says so in the
+  database itself. No source is offered for them, and the report does not imply one."
+
 Row 14 was added on 2026-09-29 and is the one row that exists because of a *documentation* gap rather than a
 number: the database has always shipped this band, but neither §3 nor this checklist mentioned it (item 2 below).
 
@@ -126,22 +146,42 @@ item 2 updated 2026-09-29):
    `SchemaAndSeedingTests.Bands_awaiting_verification_match_the_declared_count` fails if the two drift, so the
    stamp cannot outlive this checklist.
 2. **Coverage against the seeded bands** (found by comparing §3 with the seeder rather than reading either one
-   alone). One of the two gaps found on 2026-09-23 is now closed and the other is deliberately still open:
+   alone). Both gaps found on 2026-09-23 are now closed:
    - **Closed 2026-09-29 — was gap (b).** The seeded `Arid` **surface** band (target 38.0–45.0 °C, critical
      28.0–50.0 °C, margin 1.0 °C) was in neither §3 nor this checklist, so the database shipped a band that no
-     document described. It is now the §3 row and row 14 above, so §3, §5 and the seeder describe the same 17
-     bands. No count changed: this band was already one of the 14 pending ones.
-   - **Still open — gap (a).** Row 7 verifies an *Arid ambient 28–33 °C* band belonging to an `Arid-cool` variant
-     that §3 describes but the seeder never creates. It is a decision rather than a typo — seed the variant, or
-     drop the row together with the §3 line — and it was left open on 2026-09-29 rather than resolved for
-     convenience: seeding a fourth profile changes the band counts quoted in `README`, `03-implementation/07`
-     (task 1.8) and `05-release/01`, while dropping the row changes what §3 promises. Until it is decided, §3
-     describes one band the database does not hold.
+     document described. It is now the §3 row and row 14 above, so §3, §5 and the seeder described the same 17
+     bands as of that date. No count changed: this band was already one of the 14 pending ones.
+   - **Closed 2026-10-07 — was gap (a).** Row 7 verifies an *Arid ambient 28–33 °C* band belonging to an
+     `Arid-cool` variant that §3 described and the seeder did not create. The decision taken on 2026-10-07 was to
+     **seed the variant** rather than drop the row: `ReferenceDataSeeder` now ships `Arid-cool (bearded dragon,
+     ambient)` with that band plus the humidity band, and with no surface or UV band, because both belong to the
+     basking zone the variant does not describe. This is the decision that moves band counts, so the counts were
+     updated wherever they were quoted — `README`, `03-implementation/07` (task 1.8), `03-implementation/08` and
+     `05-release/01` — and `SchemaAndSeedingTests` now pins four profile names, 19 bands and the variant's shape.
+     §3, §5 and the database describe the same 19 bands over four profiles.
 3. **Row 14 was appended, not inserted, and rows 1–13 keep their numbers on purpose.** The seeder writes row
    numbers into the data: `Threshold.SourceRef` literally reads `…docs/07-appendices/05 §5 row 13` for the dwell
    statement and `…§5 row 12` for the light bands. Renumbering would leave every already-seeded row — including
    rows already written into a deployed database — citing the wrong row, so the new row sorts after the `All`
    rows; read the **Profile** column, not the position.
+
+**Bibliographic pre-pass — 2026-10-07 (no row signed by it).** A metadata pass was run against the open
+bibliographic indexes (OpenAlex, Crossref) to shorten the sitting this checklist needs. It resolved what an index
+can resolve and **recorded no page number it had not read** (§6's rule: a fabricated page is worse than a missing
+one). The `Page/table` column is still empty for every row on purpose.
+
+| Source | What the pre-pass resolved | What a person must still do |
+|---|---|---|
+| 1 — UV-Tool | The title is *How much **UVB** does my reptile need?* (**not** "UV-B"); 2016; DOI `10.19227/jzar.v4i1.150`, which places it in *JZAR* 4(1); open access at `jzar.org/index/article/view/150`; ISSN 2214-7594 | Locate the page/table that states the Arid UVI band (row 8). `jzar.org` did not resolve from the build machine and Crossref holds no record for this DOI, so its page range is still unknown |
+| 2 — Vitt & Caldwell | The 2nd edition (2001, Academic Press) is **Zug**, Vitt & Caldwell; later editions are Vitt & Caldwell alone | Name the edition used. §6 below cited no edition, and the two differ in authorship |
+| 3 — Seebacher & Franklin | **Fully resolved:** *Journal of Comparative Physiology B* **175**(8): 533–541, 2005, DOI `10.1007/s00360-005-0007-1` | Locate a preferred-body-temperature figure inside it. No checklist row cites source 3 today, so this is a §2 rationale upgrade rather than a row |
+| 4 — Mader & Divers | Not in the open indexes. Their nearest match was a *different* Elsevier title, *Current Therapy in Reptile Medicine and Surgery* (2014, DOI `10.1016/c2010-0-67117-3`) — it is not the cited work and must not be substituted for it | Edition, year and page from the physical copy |
+| 5–8 — husbandry books | Not indexed in OpenAlex or Crossref (small-press husbandry books) | Edition, year and page from the copies. This is the majority of the remaining work: rows 1, 5, 6, 7, 9, 10, 11 and 14 lean on 4, 6 and 7 |
+| 9–10 — AZA / RSPCA / BIAZA | Not reachable from the build machine: `aza.org` returned `403`, the guessed `rspca.org.uk` care URLs `404` and its site search is client-rendered, and the search engines that could have located the sheets (DuckDuckGo, Bing, Ecosia, Mojeek) were blocked or returned no usable results | Produce the care sheets, or replace them with guidance that can be produced. A source nobody can open should be dropped from §6 rather than cited |
+
+What the pass does **not** change: `ReferenceDataSeeder.BandsAwaitingVerification` stays **14**, because no range
+has been verified by a person yet. What it also leaves behind is a warning for §6 — the hygiene note there asks for
+a "page used" column that only §5 carries, and §5's `Page/table` is therefore where those references belong.
 
 ## 6. Candidate literature and reference list
 
@@ -153,10 +193,10 @@ item 2 updated 2026-09-29):
 
 | # | Reference | Used for | Type |
 |---|---|---|---|
-| 1 | Baines, F. M., Chattell, J., Dale, J., Garrick, D., Gill, I., Goetz, M., Skelton, T., & Swatman, M. — *How much UV-B does my reptile need? The UV-Tool, a guide to the selection of UV lighting for reptiles and amphibians in captivity*, Journal of Zoo and Aquarium Research, 4(1) | UV index targets, UVB reasoning, UVI vs µW/cm² distinction | Peer-reviewed |
-| 2 | Vitt, L. J., & Caldwell, J. P. — *Herpetology: An Introductory Biology of Amphibians and Reptiles*, Academic Press | Ectothermy, thermoregulation behaviour, why duration matters | Textbook |
-| 3 | Seebacher, F., & Franklin, C. E. — *Physiological mechanisms of thermoregulation in reptiles: a review*, Journal of Comparative Physiology B | Preferred body temperature ranges, thermal performance curves | Review |
-| 4 | Mader, D. R., & Divers, S. J. (Eds.) — *Reptile Medicine and Surgery*, Saunders/Elsevier | Clinical consequences of temperature/humidity extremes; husbandry-related disease | Textbook |
+| 1 | Baines, F. M., Chattell, J., Dale, J., Garrick, D., Gill, I., Goetz, M., Skelton, T., & Swatman, M. — *How much UVB does my reptile need? The UV-Tool, a guide to the selection of UV lighting for reptiles and amphibians in captivity*, Journal of Zoo and Aquarium Research, 4(1), 2016. DOI `10.19227/jzar.v4i1.150`; open access: `jzar.org/index/article/view/150` | UV index targets, UVB reasoning, UVI vs µW/cm² distinction | Peer-reviewed |
+| 2 | Vitt, L. J., & Caldwell, J. P. — *Herpetology: An Introductory Biology of Amphibians and Reptiles*, Academic Press — **name the edition used:** the 2nd edition (2001) is Zug, Vitt & Caldwell, later editions are Vitt & Caldwell alone | Ectothermy, thermoregulation behaviour, why duration matters | Textbook |
+| 3 | Seebacher, F., & Franklin, C. E. — *Physiological mechanisms of thermoregulation in reptiles: a review*, Journal of Comparative Physiology B **175**(8): 533–541, 2005. DOI `10.1007/s00360-005-0007-1` | Preferred body temperature ranges, thermal performance curves | Review |
+| 4 | Mader, D. R., & Divers, S. J. (Eds.) — *Reptile Medicine and Surgery*, Saunders/Elsevier — edition and year still to be pinned; it is **not** in OpenAlex or Crossref (their nearest match was a different title, *Current Therapy in Reptile Medicine and Surgery*, 2014) | Clinical consequences of temperature/humidity extremes; husbandry-related disease | Textbook |
 | 5 | De Vosjoli, P., Fast, F., & Repashy, A. — *Rhacodactylus: The Complete Guide to their Selection and Care* | Tropical (crested/mourning gecko) bands | Husbandry book |
 | 6 | De Vosjoli, P., Tremper, R., & Klingenberg, R. — *The Leopard Gecko Manual*, Advanced Vivarium Systems | Leopard gecko bands, humid-hide requirement, night drop | Husbandry book |
 | 7 | De Vosjoli, P., et al. — *The Bearded Dragon Manual*, Advanced Vivarium Systems | Arid species basking/ambient bands, UVB requirement | Husbandry book |

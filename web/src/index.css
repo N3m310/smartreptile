@@ -1,55 +1,71 @@
 @import "tailwindcss";
 
 /*
- * Status palette — prototype-only, and deliberately NOT the token set in `docs/02-design/04` §3.
+ * Tokens — the one palette, from `docs/02-design/04` §3's four status roles (ADR-019, task 4.18).
  *
- * The §3 tokens are tuned for the app's theme-based surface. On this prototype's dark surfaces they
- * fall under the 4.5:1 body-text budget that `docs/04-quality/03` §4.4 checks — measured 2026-10-03
- * as WCAG contrast against `--bg-main` (#0b1a0d) / `--bg-card` (#112016):
+ * The prototype shipped its own palette and said so. The promotion ends that: this client is a shipped surface
+ * now, so §3's *roles* are authoritative here (`color.inRange/warning/critical/unknown` → `--color-inrange`,
+ * `--color-warning`, `--color-critical`, `--color-unknown`) and no screen carries a hex of its own.
  *
- *   role (§3)     §3 token   on bg-main / on bg-card   prototype token      on bg-main / on bg-card
- *   color.inRange #2E7D32    3.51 / 3.30               --status-normal      5.47 / 5.14
- *   color.warning #ED6C02    5.78 / 5.43               --status-warning     8.63 / 8.11
- *   color.critical #C62828   3.20 / 3.01               --status-danger      4.72 / 4.44
- *   color.unknown #616161    2.90 / 2.73               --status-offline     2.73 / 2.57
+ * The hues are not §3's values verbatim, and that is measured rather than preferred. §3 tunes them for the
+ * app's theme-based surface; on this client's dark surfaces three of the four would fall under the 4.5:1
+ * body-text budget of `04-quality/03` §4.4. Measured 2026-10-07 as WCAG contrast against canvas (#0b1a0d) and
+ * surface (#112016):
  *
- * The four roles therefore map one-to-one onto the tokens below (inRange→normal, warning→warning,
- * critical→danger, unknown→offline); only the hues differ, so that the two states that matter most
- * stay legible on this surface. Colour is never the only signal (NFR-06) — every status also carries
- * a label or an icon. Recorded in `docs/02-design/04` §1.2, task 4.14.
+ *   role (§3)      §3 token   canvas / surface   shipped token   canvas / surface
+ *   color.inRange   #2E7D32   3.51 / 3.30        #4a9e6a         5.47 / 5.14   (was already the brand green)
+ *   color.warning   #ED6C02   5.78 / 5.43        #e8a832         8.63 / 8.11   (§3's own value also passes;
+ *                                                                            this one is the existing hue)
+ *   color.critical  #C62828   3.20 / 3.01        #e8613a         5.31 / 4.99   (lightened from #e05530, which
+ *                                                                            measured 4.72 / 4.44 — it failed)
+ *   color.unknown   #616161   2.90 / 2.73        #8e9e8f         6.37 / 5.99   (reuses --color-muted; the old
+ *                                                                            #556055 measured 2.73 / 2.57)
  *
- * `--accent` (#c87f3a) is the brand amber, used for the mock-data notice and links; it is not a status.
+ * Copying §3 verbatim cannot satisfy §4.4 on *either* surface: on white it fails on warning (3.11:1), on this
+ * canvas on in-range, critical and unknown. So the roles are §3's and the hues are measured per surface — which
+ * is what §1.2 asks for ("re-run the contrast check rather than copy a hue"). Recorded in `02-design/04` §1.2 and
+ * the QA log; colour is never the only signal (NFR-06) — every status also carries its label.
+ *
+ * The screens still on mock data (`Devices`, `Alerts`, `Settings`) keep the prototype's hex literals until task
+ * 4.20 wires them; there is one palette in this file for everything that ships today, and those three screens are
+ * still outside `TC-*` coverage by the same note.
  */
 
+@theme {
+  /* Surfaces and text */
+  --color-canvas: #0b1a0d;
+  --color-surface: #112016;
+  --color-raised: #162a1d;
+  --color-field: #0e1d11;
+  --color-hairline: #1e3825;
+  --color-ink: #dcd5c4;
+  --color-muted: #8e9e8f;
+
+  /* Brand */
+  --color-brand: #4a9e6a;
+  --color-brand-dark: #3d8558;
+  --color-accent: #c87f3a;
+
+  /* Status roles (§3), measured above */
+  --color-inrange: #4a9e6a;
+  --color-warning: #e8a832;
+  --color-critical: #e8613a;
+  --color-unknown: #8e9e8f;
+
+  --font-heading: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
 @layer base {
-  :root {
-    --bg-main: #0b1a0d;
-    --bg-card: #112016;
-    --bg-card-hover: #162a1d;
-    --bg-input: #0e1d11;
-    --border-color: #1e3825;
-    --text-main: #dcd5c4;
-    --text-muted: #8e9e8f;
-    --primary: #4a9e6a;
-    --accent: #c87f3a;
-    --status-normal: #4a9e6a;
-    --status-warning: #e8a832;
-    --status-danger: #e05530;
-    --status-offline: #556055;
-  }
-
   body {
-    font-family: 'DM Sans', sans-serif;
-    background-color: var(--bg-main);
-    color: var(--text-main);
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
   }
 
-  h1, h2, h3, h4, h5, h6, .font-heading {
-    font-family: 'Outfit', sans-serif;
-  }
-
-  .font-mono, .sensor-value {
-    font-family: 'JetBrains Mono', monospace;
+  /* A value that is not current must look different from one that is (§6: never show a stale value as current). */
+  .is-stale {
+    opacity: 0.6;
   }
 }
 
@@ -59,13 +75,14 @@
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b1a0d;
+  background: var(--color-canvas);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e3825;
+  background: var(--color-hairline);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a9e6a;
+  background: var(--color-brand);
 }
+
 

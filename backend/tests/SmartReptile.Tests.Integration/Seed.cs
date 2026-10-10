@@ -31,9 +31,9 @@ public static class Seed
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO [User] (Id, Username, Email, PasswordHash, PasswordSalt, PasswordIterations, Role,
                                 PreferredLanguage, TimeZoneId, MinNotifySeverity, ChannelFcmEnabled,
-                                ChannelTelegramEnabled, ChannelEmailEnabled, CreatedAt)
+                                ChannelEmailEnabled, CreatedAt)
             VALUES ({id}, {"it-" + tag}, {tag + "@example.test"}, 0x00, 0x00, 100000, 1,
-                    'en', 'Asia/Ho_Chi_Minh', 2, 1, 0, 0, SYSDATETIMEOFFSET())
+                    'en', 'Asia/Ho_Chi_Minh', 2, 1, 0, SYSDATETIMEOFFSET())
             """);
 
         return id;
