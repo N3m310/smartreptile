@@ -103,6 +103,20 @@ export function thresholdPhaseLabel(t: TFunc, phase: string): string {
   return key ? t(key) : phase;
 }
 
+/** The four climate zones of §4.3, whose values are the enum's own names rather than translations. */
+const CLIMATE_ZONE_KEY: Record<string, string> = {
+  Tropical: 'climateZoneTropical',
+  SemiArid: 'climateZoneSemiArid',
+  Arid: 'climateZoneArid',
+  Temperate: 'climateZoneTemperate',
+};
+
+/** Like the maps above: a zone this build does not know renders as its own name, not as a wrong label. */
+export function climateZoneLabel(t: TFunc, zone: string): string {
+  const key = CLIMATE_ZONE_KEY[zone];
+  return key ? t(key) : zone;
+}
+
 /**
  * §6's freshness rule: a card older than three sampling intervals is stale, and stale values are dimmed and
  * labelled instead of being shown as if they were current. This compares *age*, not a value against a band, so

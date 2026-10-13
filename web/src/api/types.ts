@@ -142,6 +142,60 @@ export interface CreateTerrariumBody {
 }
 
 /**
+ * One band of `POST`/`PATCH /species-profiles` (`07-appendices/03` §4.3). `metric`, `targetMin` and `targetMax` are
+ * required and the rest are optional on the wire, so a missing field becomes a field-level violation addressed by
+ * position (`bands[0].targetMin`) rather than a deserialisation failure.
+ */
+export interface SpeciesProfileBandInput {
+  metric: string;
+  phase?: string;
+  /**
+   * Required by the contract, and nullable here because a form can send a box nobody filled: the server then
+   * answers `threshold_target_required` by field name instead of failing to deserialise the body.
+   */
+  targetMin: number | null;
+  targetMax: number | null;
+  criticalMin?: number | null;
+  criticalMax?: number | null;
+  dwellWarnMinutes?: number | null;
+  dwellCritMinutes?: number | null;
+  recoveryMargin?: number | null;
+  enabled?: boolean;
+  sourceRef?: string | null;
+}
+
+/** Body of `POST /species-profiles` — Owner only. At least one band, and a name this account already uses is `409 profile_name_taken`. */
+export interface CreateSpeciesProfileBody {
+  name: string;
+  scientificName?: string | null;
+  climateZone: string;
+  photoperiodHours?: number | null;
+  lightsOnLocalTime?: string | null;
+  lightThresholdLux?: number | null;
+  minLightHoursPerDay?: number | null;
+  notes?: string | null;
+  bands: SpeciesProfileBandInput[];
+}
+
+/**
+ * Body of `PATCH /species-profiles/{id}` — Owner only. An **omitted** member is left unchanged; sending `bands`
+ * replaces the whole set, because merging a band field by field could leave it in a state neither the band nor the
+ * request described. An empty `scientificName` or `notes` clears it, since JSON cannot tell "absent" from "null"
+ * once the body is bound.
+ */
+export interface UpdateSpeciesProfileBody {
+  name?: string | null;
+  scientificName?: string | null;
+  climateZone?: string | null;
+  photoperiodHours?: number | null;
+  lightsOnLocalTime?: string | null;
+  lightThresholdLux?: number | null;
+  minLightHoursPerDay?: number | null;
+  notes?: string | null;
+  bands?: SpeciesProfileBandInput[] | null;
+}
+
+/**
  * The band one metric is judged against right now, resolved by the server (`TerrariumService.EffectiveThresholds`).
  * Nothing here is computed on this side: `source` says which layer it came from, so a limit can be explained rather
  * than guessed at (BR-10.3, ADR-005).

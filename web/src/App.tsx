@@ -7,6 +7,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Terrariums } from './pages/Terrariums';
 import { TerrariumDetail } from './pages/TerrariumDetail';
+import { SpeciesProfiles } from './pages/SpeciesProfiles';
 import { Devices } from './pages/Devices';
 import { Alerts } from './pages/Alerts';
 import { History } from './pages/History';
@@ -40,6 +41,7 @@ export const App: React.FC = () => (
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/terrariums" element={<Terrariums />} />
               <Route path="/terrariums/:id" element={<TerrariumDetail />} />
+              <Route path="/species-profiles" element={<SpeciesProfiles />} />
               <Route path="/devices" element={<Devices />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/history" element={<History />} />

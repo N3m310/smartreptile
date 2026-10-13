@@ -247,5 +247,67 @@
   "errorValidationFailed": "Some fields were refused.",
 
   "mockDataNoticeTitle": "Simulated data.",
-  "mockDataNoticeBody": "This screen is still the mock-data prototype — it does not call the API and shows no real measurement."
+  "mockDataNoticeBody": "This screen is still the mock-data prototype — it does not call the API and shows no real measurement.",
+
+  "navSpeciesProfiles": "Species profiles",
+  "speciesProfilesTitle": "Species profiles",
+  "speciesProfilesCaption": "The bands each species is judged against. A terrarium uses them unless it holds an override, and every new terrarium picks one of these.",
+  "speciesProfileNew": "New profile",
+  "speciesProfileBuiltIn": "Built-in",
+  "speciesProfileReadOnlyHint": "A built-in is read-only. Duplicate it and edit the copy.",
+  "speciesProfileBands": "Bands",
+  "speciesProfileBandCount": "{count} bands",
+  "@speciesProfileBandCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "speciesProfileEdit": "Edit",
+  "speciesProfileDuplicate": "Duplicate",
+  "speciesProfileDuplicateName": "Copy name (empty lets the server name it)",
+  "speciesProfileDelete": "Delete",
+  "speciesProfileDeleteConfirm": "Confirm delete",
+  "speciesProfileCreated": "Profile created.",
+  "speciesProfileUpdated": "Profile saved.",
+  "speciesProfileDuplicated": "Profile duplicated.",
+  "speciesProfileDeleted": "Profile deleted.",
+
+  "profileName": "Name",
+  "profileScientificName": "Scientific name",
+  "profileClimateZone": "Climate zone",
+  "profilePhotoperiodHours": "Photoperiod (hours)",
+  "profileLightsOn": "Lights on at (HH:mm)",
+  "profileLightThreshold": "Light threshold (lx)",
+  "profileMinLightHours": "Minimum light hours",
+  "profileNotes": "Husbandry notes",
+  "climateZoneTropical": "Tropical",
+  "climateZoneSemiArid": "Semi-arid",
+  "climateZoneArid": "Arid",
+  "climateZoneTemperate": "Temperate",
+
+  "bandMetric": "Metric",
+  "bandPhase": "Phase",
+  "bandEnabled": "In use",
+  "bandDisabled": "Disabled",
+  "bandSourceRef": "Source",
+  "bandAdd": "Add band",
+  "bandRemove": "Remove band",
+  "metricBatteryPct": "Battery",
+  "metricRssiDbm": "Wi-Fi signal",
+
+  "profileNameRequired": "A profile needs a name.",
+  "profileNameTooLong": "A name may be at most 80 characters.",
+  "profileNameTaken": "You already have a profile with that name.",
+  "climateZoneInvalid": "That is not a climate zone.",
+  "scientificNameTooLong": "A scientific name may be at most 120 characters.",
+  "profileNotesTooLong": "Notes may be at most 1000 characters.",
+  "photoperiodInvalid": "A photoperiod must be longer than 0 and at most 24 hours.",
+  "lightsOnInvalid": "Use HH:mm for the time the lights come on, for example 07:00.",
+  "lightThresholdInvalid": "A light threshold cannot be negative.",
+  "minLightHoursInvalid": "Minimum light hours must be between 0 and 24.",
+  "profileBandsRequired": "A profile needs at least one band.",
+  "thresholdPhaseInvalid": "A phase is any, day or night.",
+  "sourceRefTooLong": "A source reference may be at most 300 characters.",
+  "builtinImmutable": "A built-in cannot be changed — duplicate it and edit the copy.",
+  "profileInUse": "A terrarium is using this profile, so it cannot be deleted."
 }

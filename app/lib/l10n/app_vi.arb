@@ -240,5 +240,67 @@
   "errorValidationFailed": "Một số trường chưa hợp lệ.",
 
   "mockDataNoticeTitle": "Dữ liệu mô phỏng.",
-  "mockDataNoticeBody": "Màn hình này vẫn là nguyên mẫu dữ liệu mô phỏng — không gọi API và không hiển thị số đo thật."
+  "mockDataNoticeBody": "Màn hình này vẫn là nguyên mẫu dữ liệu mô phỏng — không gọi API và không hiển thị số đo thật.",
+
+  "navSpeciesProfiles": "Hồ sơ loài",
+  "speciesProfilesTitle": "Hồ sơ loài",
+  "speciesProfilesCaption": "Ngưỡng của từng loài. Bể nuôi dùng ngưỡng này trừ khi có ghi đè riêng, và mỗi bể nuôi mới chọn một hồ sơ ở đây.",
+  "speciesProfileNew": "Thêm hồ sơ",
+  "speciesProfileBuiltIn": "Hồ sơ gốc",
+  "speciesProfileReadOnlyHint": "Hồ sơ gốc chỉ đọc. Hãy nhân bản rồi chỉnh bản sao.",
+  "speciesProfileBands": "Dải ngưỡng",
+  "speciesProfileBandCount": "{count} dải",
+  "@speciesProfileBandCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "speciesProfileEdit": "Sửa",
+  "speciesProfileDuplicate": "Nhân bản",
+  "speciesProfileDuplicateName": "Tên bản sao (bỏ trống để máy chủ tự đặt)",
+  "speciesProfileDelete": "Xoá",
+  "speciesProfileDeleteConfirm": "Xác nhận xoá",
+  "speciesProfileCreated": "Đã tạo hồ sơ.",
+  "speciesProfileUpdated": "Đã lưu hồ sơ.",
+  "speciesProfileDuplicated": "Đã nhân bản hồ sơ.",
+  "speciesProfileDeleted": "Đã xoá hồ sơ.",
+
+  "profileName": "Tên hồ sơ",
+  "profileScientificName": "Tên khoa học",
+  "profileClimateZone": "Vùng khí hậu",
+  "profilePhotoperiodHours": "Thời gian chiếu sáng (giờ)",
+  "profileLightsOn": "Bật đèn lúc (HH:mm)",
+  "profileLightThreshold": "Ngưỡng sáng (lx)",
+  "profileMinLightHours": "Số giờ sáng tối thiểu",
+  "profileNotes": "Ghi chú chăm sóc",
+  "climateZoneTropical": "Nhiệt đới",
+  "climateZoneSemiArid": "Bán khô hạn",
+  "climateZoneArid": "Khô hạn",
+  "climateZoneTemperate": "Ôn đới",
+
+  "bandMetric": "Chỉ số",
+  "bandPhase": "Pha",
+  "bandEnabled": "Đang dùng",
+  "bandDisabled": "Tạm tắt",
+  "bandSourceRef": "Nguồn",
+  "bandAdd": "Thêm dải",
+  "bandRemove": "Xoá dải",
+  "metricBatteryPct": "Pin",
+  "metricRssiDbm": "Sóng Wi-Fi",
+
+  "profileNameRequired": "Hồ sơ phải có tên.",
+  "profileNameTooLong": "Tên tối đa 80 ký tự.",
+  "profileNameTaken": "Bạn đã có hồ sơ trùng tên này.",
+  "climateZoneInvalid": "Đây không phải vùng khí hậu hợp lệ.",
+  "scientificNameTooLong": "Tên khoa học tối đa 120 ký tự.",
+  "profileNotesTooLong": "Ghi chú tối đa 1000 ký tự.",
+  "photoperiodInvalid": "Thời gian chiếu sáng phải lớn hơn 0 và tối đa 24 giờ.",
+  "lightsOnInvalid": "Giờ bật đèn theo dạng HH:mm, ví dụ 07:00.",
+  "lightThresholdInvalid": "Ngưỡng sáng không được âm.",
+  "minLightHoursInvalid": "Số giờ sáng tối thiểu phải trong khoảng 0–24.",
+  "profileBandsRequired": "Hồ sơ cần ít nhất một dải ngưỡng.",
+  "thresholdPhaseInvalid": "Pha chỉ có thể là any, day hoặc night.",
+  "sourceRefTooLong": "Nguồn tham chiếu tối đa 300 ký tự.",
+  "builtinImmutable": "Hồ sơ gốc không sửa được — hãy nhân bản rồi chỉnh bản sao.",
+  "profileInUse": "Đang có bể nuôi dùng hồ sơ này nên chưa xoá được."
 }

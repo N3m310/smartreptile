@@ -7,6 +7,7 @@ import {
   History,
   KeyRound,
   LayoutDashboard,
+  Leaf,
   Loader2,
   LogOut,
   Menu,
@@ -61,6 +62,7 @@ export const Layout: React.FC = () => {
   const navItems = [
     { name: t('navDashboard'), path: '/dashboard', icon: LayoutDashboard },
     { name: t('navTerrariums'), path: '/terrariums', icon: Box },
+    { name: t('navSpeciesProfiles'), path: '/species-profiles', icon: Leaf },
     { name: t('navDevices'), path: '/devices', icon: Cpu },
     { name: t('navAlerts'), path: '/alerts', icon: AlertTriangle },
     { name: t('navHistory'), path: '/history', icon: History },

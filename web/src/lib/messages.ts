@@ -39,6 +39,11 @@ const CODE_KEY: Record<string, string> = {
   metric_invalid: 'errorMetricInvalid',
   invalid_range: 'errorInvalidRange',
   species_profile_not_found: 'errorProfileNotFound',
+  // The catalogue's own refusals (FR-10). Top-level codes rather than field names, because their answers are "a
+  // built-in cannot be edited" and "a terrarium is using it" — neither is a message about one input.
+  builtin_immutable: 'builtinImmutable',
+  profile_in_use: 'profileInUse',
+  profile_name_taken: 'profileNameTaken',
   maintenance: 'maintenanceNotice',
   timeout: 'errorServiceUnavailable',
   network_unreachable: 'errorBackendUnreachable',
@@ -79,6 +84,21 @@ const FIELD_KEY: Record<string, string> = {
   threshold_recovery_margin_invalid: 'thresholdMarginInvalid',
   threshold_implausible_band: 'thresholdImplausibleBand',
   threshold_duplicate: 'thresholdDuplicate',
+  // The catalogue's field rules (`SpeciesProfileService.ParseFields`/`ParseBands`), addressed by field name or by
+  // position, so the editor marks the input that is wrong rather than showing one opaque refusal.
+  profile_name_required: 'profileNameRequired',
+  profile_name_too_long: 'profileNameTooLong',
+  profile_name_taken: 'profileNameTaken',
+  climate_zone_invalid: 'climateZoneInvalid',
+  scientific_name_too_long: 'scientificNameTooLong',
+  profile_notes_too_long: 'profileNotesTooLong',
+  photoperiod_invalid: 'photoperiodInvalid',
+  lights_on_invalid: 'lightsOnInvalid',
+  light_threshold_invalid: 'lightThresholdInvalid',
+  min_light_hours_invalid: 'minLightHoursInvalid',
+  profile_bands_required: 'profileBandsRequired',
+  threshold_phase_invalid: 'thresholdPhaseInvalid',
+  source_ref_too_long: 'sourceRefTooLong',
 };
 
 /** The sentence for a failed call. `apiBaseUrl` and the code are shown when the table has no entry. */

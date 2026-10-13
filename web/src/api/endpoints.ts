@@ -2,25 +2,28 @@
  * One function per route the web client calls, typed against `07-appendices/03` §4.
  *
  * Only the routes that exist: the auth set (FR-01), the terrarium surface including its threshold read and write
- * (2.8, 3.1) and the species-profile catalogue (3.9). Nothing here reaches for an endpoint that is merely
- * specified — `02-design/04` §6's rule is that an unbuilt route must surface as "not built yet", which can only
- * stay true if the client does not pretend to call it.
+ * (2.8, 3.1) and the species-profile catalogue, reads and writes (3.9). Nothing here reaches for an endpoint that is
+ * merely specified — `02-design/04` §6's rule is that an unbuilt route must surface as "not built yet", which can
+ * only stay true if the client does not pretend to call it.
  */
 
 import { apiRequest } from './client';
 import type {
   AuthSession,
   Coverage,
+  CreateSpeciesProfileBody,
   CreateTerrariumBody,
   HealthReport,
   LatestReadings,
   MetricsSnapshot,
   RangeSeries,
+  SpeciesProfileItem,
   SpeciesProfileList,
   TerrariumItem,
   TerrariumList,
   TerrariumThresholds,
   ThresholdOverrideInput,
+  UpdateSpeciesProfileBody,
   UserProfile,
   VersionInfo,
 } from './types';
@@ -103,6 +106,41 @@ export async function createTerrarium(body: CreateTerrariumBody): Promise<Terrar
 /** `GET /species-profiles` — the built-ins plus this account's own, each with its bands (roadmap 3.9). */
 export async function listSpeciesProfiles(): Promise<SpeciesProfileList> {
   return apiRequest('/api/v1/species-profiles');
+}
+
+/**
+ * `POST /species-profiles` — Owner only. Answers the created profile whole, bands included, so the caller can
+ * render what it just authored without a second read (there is no read-by-id route).
+ */
+export async function createSpeciesProfile(body: CreateSpeciesProfileBody): Promise<SpeciesProfileItem> {
+  return apiRequest('/api/v1/species-profiles', { method: 'POST', body });
+}
+
+/**
+ * `PATCH /species-profiles/{id}` — Owner only. Omitted fields are left alone and `bands` replaces the set; a
+ * built-in answers `403 builtin_immutable`.
+ */
+export async function updateSpeciesProfile(
+  profileId: string,
+  body: UpdateSpeciesProfileBody
+): Promise<SpeciesProfileItem> {
+  return apiRequest(`/api/v1/species-profiles/${encodeURIComponent(profileId)}`, { method: 'PATCH', body });
+}
+
+/**
+ * `POST /species-profiles/{id}/duplicate` — Owner only. The copy is always a custom profile: a built-in is
+ * read-only (FR-10 A2), so this is the way one is tuned. An omitted name derives "<source> (copy)".
+ */
+export async function duplicateSpeciesProfile(profileId: string, name?: string): Promise<SpeciesProfileItem> {
+  return apiRequest(`/api/v1/species-profiles/${encodeURIComponent(profileId)}/duplicate`, {
+    method: 'POST',
+    body: { name: name?.trim() ? name : null },
+  });
+}
+
+/** `DELETE /species-profiles/{id}` — Owner only. Answers `204`, or `409 profile_in_use` when a terrarium uses it. */
+export async function deleteSpeciesProfile(profileId: string): Promise<void> {
+  await apiRequest(`/api/v1/species-profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
 }
 
 /**

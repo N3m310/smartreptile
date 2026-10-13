@@ -19,6 +19,7 @@ that now carries the detail.
 | Create path | **BUG-11** — a valid token naming an account this database does not have answered `500` | Fixed | `TerrariumServiceTests.Create_refuses_a_caller_that_is_not_an_account_of_this_database`, live 500 → 401 |
 | Swagger | **BUG-10** — the login response was undocumented, so nothing said which token to paste | Fixed | `.Produces<AuthSession>` on login/refresh, `$ref` verified in the live document |
 | Web | **4.16** — the create form, filled from the catalogue | Done | Wired and driven in a real browser; `web/dist` rebuilt |
+| Web | **4.21** — the catalogue's own screen: list, create, edit, duplicate, delete | Done, later the same day (§11) | Driven in a real browser against the API and SQL Server; `403 builtin_immutable` and `409 profile_in_use` rendered from their codes; 54 deck keys, 270 total |
 | Docs | The four documents that claimed the catalogue was unbuilt, the roadmap row for 3.9, the new problem code | Updated | §8 |
 
 ## 2. The report that started it
@@ -168,10 +169,26 @@ Recorded here because the commit carries it, not because it came from this sessi
 
 ## 10. Deliberately still open
 
-- **No screen manages species profiles.** The catalogue's writes exist and nothing calls them: the web client uses
-  `GET` only. A profile-editing screen (and the mobile app's equivalent) is the next thing this unblocks, together
+- **No screen manages species profiles.** *Closed later the same day — see §11.* What stays open is the mobile
+  app's equivalent, and the fact that a screen is now the only way to author a profile: nothing imports or exports
+  one, and `sourceUrl` (below) still has no writer. A profile-editing screen (and the mobile app's equivalent) is the next thing this unblocks, together
   with 4.20's threshold editor, which can now preview and author bands against a real catalogue.
 - **`sourceUrl` is unused.** Custom bands carry `sourceRef`; nothing writes a URL, so the field stays reserved for a
   citation someone has actually opened.
 - **`SystemDefault`,** the third tier of `BR-10.3`, still has no values anywhere in the doc set and is therefore
   still unimplemented.
+
+## 11. Later the same day — the two screens the day's work unblocked
+
+Both were built after this file was first written, for the same reason: the API had just landed and had no caller.
+
+- **4.20's threshold editor** (commit `eb127bd`). `TerrariumDetail.tsx` gains a `ThresholdsSection` that reads
+  `GET /terrariums/{id}/thresholds` and, for an Owner, writes `PUT /terrariums/{id}/thresholds` and
+  `DELETE /terrariums/{id}/thresholds/{metric}`; every row renders the band, its `source`, the phase in force and
+  `capturedAt`. `Settings.tsx`'s mock threshold form was deleted in the same change — it accepted edits, reported
+  that they had been saved and never called the API, which beside a real editor is a screen that teaches the
+  opposite of what the editor does — and `mockData.ts` lost the 130 lines that form was the last consumer of
+  (`Terrarium`, `ThresholdConfig`, `HistoryDataPoint`, `initialTerrariums`, `generateHistoryData`).
+- **4.21, the catalogue's screen.** `SpeciesProfiles.tsx`: the five routes of 3.9 with a caller at last, Owner-only
+  for the writes, with a built-in offering only *Duplicate*. Its three client-side readings, its evidence and the
+  3.16 walkthrough are in the roadmap's 4.21 row, `04-quality/03` §3 and the §5 log of `05-release/03`.
