@@ -141,6 +141,60 @@ export interface CreateTerrariumBody {
   timeZoneId?: string | null;
 }
 
+/**
+ * The band one metric is judged against right now, resolved by the server (`TerrariumService.EffectiveThresholds`).
+ * Nothing here is computed on this side: `source` says which layer it came from, so a limit can be explained rather
+ * than guessed at (BR-10.3, ADR-005).
+ */
+export interface EffectiveThreshold {
+  metric: string;
+  unit: string;
+  /** Phase it was resolved in: `day`, `night`, or `any` when the metric is not split day/night. */
+  phase: string;
+  /** Which layer holds it: `override`, `profile` or `default`. */
+  source: string;
+  targetMin: number;
+  targetMax: number;
+  criticalMin: number | null;
+  criticalMax: number | null;
+  dwellWarnMinutes: number;
+  dwellCritMinutes: number;
+  recoveryMargin: number;
+}
+
+/**
+ * `GET`, `PUT` and `DELETE` on `/terrariums/{id}/thresholds` all answer this shape, so a write can be rendered
+ * without a follow-up read. A metric with no band for the phase in force is **absent** rather than null-bounded:
+ * a metric configured for Day alone is missing at night, which is what the evaluator will act on.
+ */
+export interface TerrariumThresholds {
+  terrariumId: string;
+  capturedAtUtc: string;
+  timeZoneId: string;
+  effectiveThresholds: EffectiveThreshold[];
+}
+
+/** One band a client writes (UC-03). Nullable members so a missing field is a refusal, not a binding failure. */
+export interface ThresholdOverrideInput {
+  metric: string;
+  /** Phase the override applies in; omitted means `any`. The editor sends the phase the row resolved in. */
+  phase?: string | null;
+  targetMin: number;
+  targetMax: number;
+  criticalMin?: number | null;
+  criticalMax?: number | null;
+  /** Omitted falls back to the stored band's value, or the domain default (5) when there is none. */
+  dwellWarnMinutes?: number | null;
+  /** Omitted falls back to the stored band's value, or the domain default (2) when there is none. */
+  dwellCritMinutes?: number | null;
+  /** Omitted falls back to the stored band's value, or the domain default (0.5) when there is none. */
+  recoveryMargin?: number | null;
+  /** Why this terrarium differs from its profile; at most 300 characters. */
+  note?: string | null;
+  /** False keeps the numbers without judging against them; defaults to true. */
+  enabled?: boolean | null;
+}
+
 /** The band a value was judged against — phase-resolved by the server, `null` when no band is configured. */
 export interface TargetBand {
   min: number | null;

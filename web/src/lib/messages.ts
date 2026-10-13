@@ -70,6 +70,15 @@ const FIELD_KEY: Record<string, string> = {
   terrarium_description_too_long: 'terrariumDescriptionTooLong',
   terrarium_timezone_invalid: 'terrariumTimeZoneInvalid',
   species_profile_not_found: 'errorProfileNotFound',
+  // The band rules of `03-implementation/06` §2, one code per rule so the editor marks the input that is wrong
+  // rather than showing one opaque refusal (BR-10.2).
+  threshold_target_required: 'thresholdTargetRequired',
+  threshold_ordering_invalid: 'thresholdOrderingInvalid',
+  threshold_critical_invalid: 'thresholdCriticalInvalid',
+  threshold_dwell_invalid: 'thresholdDwellInvalid',
+  threshold_recovery_margin_invalid: 'thresholdMarginInvalid',
+  threshold_implausible_band: 'thresholdImplausibleBand',
+  threshold_duplicate: 'thresholdDuplicate',
 };
 
 /** The sentence for a failed call. `apiBaseUrl` and the code are shown when the table has no entry. */

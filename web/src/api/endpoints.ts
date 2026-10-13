@@ -1,10 +1,10 @@
 /*
  * One function per route the web client calls, typed against `07-appendices/03` §4.
  *
- * Only the routes that exist: the auth set (FR-01), the terrarium read surface (2.8) and the species-profile
- * catalogue (3.9). Nothing here reaches for an endpoint that is merely specified — `02-design/04` §6's rule is
- * that an unbuilt route must surface as "not built yet", which can only stay true if the client does not pretend
- * to call it.
+ * Only the routes that exist: the auth set (FR-01), the terrarium surface including its threshold read and write
+ * (2.8, 3.1) and the species-profile catalogue (3.9). Nothing here reaches for an endpoint that is merely
+ * specified — `02-design/04` §6's rule is that an unbuilt route must surface as "not built yet", which can only
+ * stay true if the client does not pretend to call it.
  */
 
 import { apiRequest } from './client';
@@ -19,6 +19,8 @@ import type {
   SpeciesProfileList,
   TerrariumItem,
   TerrariumList,
+  TerrariumThresholds,
+  ThresholdOverrideInput,
   UserProfile,
   VersionInfo,
 } from './types';
@@ -101,6 +103,43 @@ export async function createTerrarium(body: CreateTerrariumBody): Promise<Terrar
 /** `GET /species-profiles` — the built-ins plus this account's own, each with its bands (roadmap 3.9). */
 export async function listSpeciesProfiles(): Promise<SpeciesProfileList> {
   return apiRequest('/api/v1/species-profiles');
+}
+
+/**
+ * `GET /terrariums/{id}/thresholds` — the effective band per metric with its `source` (BR-10.3, roadmap 3.1's read
+ * half). `capturedAtUtc` dates the answer, because which bands resolve depends on the phase in force.
+ */
+export async function terrariumThresholds(id: string): Promise<TerrariumThresholds> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}/thresholds`);
+}
+
+/**
+ * `PUT /terrariums/{id}/thresholds` — Owner only. Upserts the bands the body names (a metric it does not mention
+ * keeps its override) and answers the resulting effective set. Every band is validated before anything is written,
+ * so one incoherent band changes nothing.
+ */
+export async function putTerrariumThresholds(
+  id: string,
+  overrides: ThresholdOverrideInput[]
+): Promise<TerrariumThresholds> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}/thresholds`, {
+    method: 'PUT',
+    body: { overrides },
+  });
+}
+
+/**
+ * `DELETE /terrariums/{id}/thresholds/{metric}` — Owner only. Drops every override the terrarium holds for the
+ * metric, whichever phase, and answers the resulting effective set. Idempotent.
+ */
+export async function deleteTerrariumThresholdOverride(
+  id: string,
+  metric: string
+): Promise<TerrariumThresholds> {
+  return apiRequest(
+    `/api/v1/terrariums/${encodeURIComponent(id)}/thresholds/${encodeURIComponent(metric)}`,
+    { method: 'DELETE' }
+  );
 }
 
 export async function getTerrarium(id: string): Promise<TerrariumItem> {

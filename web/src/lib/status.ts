@@ -70,6 +70,39 @@ export function deviceStatusLabel(t: TFunc, deviceStatus: string | null): string
   return deviceStatus === 'online' ? t('deviceOnline') : t('deviceOffline');
 }
 
+/** Which layer an effective band came from (`override` | `profile` | `default`, BR-10.3). */
+const THRESHOLD_SOURCE_KEY: Record<string, string> = {
+  override: 'sourceOverride',
+  profile: 'sourceProfile',
+  default: 'sourceDefault',
+};
+
+/**
+ * The sentence for a band's `source`. Total like the status map above: a value this build does not know renders as
+ * its own code, which is a visible gap rather than a sentence about the wrong layer.
+ */
+export function thresholdSourceLabel(t: TFunc, source: string): string {
+  const key = THRESHOLD_SOURCE_KEY[source];
+  return key ? t(key) : source;
+}
+
+/** An override is the layer the keeper authored, so it is the one that gets the accent colour. */
+export function thresholdSourceClass(source: string): string {
+  return source === 'override' ? 'text-accent' : 'text-muted';
+}
+
+/** The phase a band was resolved in: `any`, `day` or `night`. */
+const THRESHOLD_PHASE_KEY: Record<string, string> = {
+  any: 'phaseAny',
+  day: 'phaseDay',
+  night: 'phaseNight',
+};
+
+export function thresholdPhaseLabel(t: TFunc, phase: string): string {
+  const key = THRESHOLD_PHASE_KEY[phase];
+  return key ? t(key) : phase;
+}
+
 /**
  * §6's freshness rule: a card older than three sampling intervals is stale, and stale values are dimmed and
  * labelled instead of being shown as if they were current. This compares *age*, not a value against a band, so
