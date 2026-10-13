@@ -25,11 +25,16 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
     private readonly List<TelemetrySample> _samples = [];
     private readonly List<Alert> _alerts = [];
     private readonly List<SpeciesProfile> _profiles = [];
+    private readonly List<ThresholdSnapshot> _snapshots = [];
+    private readonly HashSet<Guid> _users = [];
 
     /// <summary>How many times the store was committed — asserted so "nothing was written" is a real assertion.</summary>
     public int SaveCount { get; private set; }
 
     public IReadOnlyList<Terrarium> Terrariums => _terrariums;
+
+    /// <summary>Snapshots staged by the threshold change path, newest last.</summary>
+    public IReadOnlyList<ThresholdSnapshot> ThresholdSnapshots => _snapshots;
 
     /// <summary>A species profile the create path will accept.</summary>
     public SpeciesProfile AddProfile(string name = "Test species", TimeOnly? lightsOn = null, decimal photoperiodHours = 12m)
@@ -216,7 +221,22 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
     public Task<bool> SpeciesProfileExistsAsync(Guid speciesProfileId, CancellationToken cancellationToken) =>
         Task.FromResult(_profiles.Any(profile => profile.Id == speciesProfileId));
 
+    /// <summary>Registers an account, so the create path's caller check accepts it.</summary>
+    public void AddUser(Guid userId) => _users.Add(userId);
+
+    public Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken) =>
+        Task.FromResult(_users.Contains(userId));
+
     public void AddTerrarium(Terrarium terrarium) => _terrariums.Add(terrarium);
+
+    public void AddThresholdOverride(ThresholdOverride row) => Owner(row.TerrariumId)?.ThresholdOverrides.Add(row);
+
+    public void RemoveThresholdOverride(ThresholdOverride row) => Owner(row.TerrariumId)?.ThresholdOverrides.Remove(row);
+
+    public void AddThresholdSnapshot(ThresholdSnapshot snapshot) => _snapshots.Add(snapshot);
+
+    /// <summary>The stored terrarium a child row belongs to, so staging a child mirrors the adapter's fix-up.</summary>
+    private Terrarium? Owner(Guid terrariumId) => _terrariums.FirstOrDefault(terrarium => terrarium.Id == terrariumId);
 
     public Task<IReadOnlyDictionary<Guid, TerrariumActivity>> SummariseActivityAsync(
         IReadOnlyCollection<Guid> terrariumIds,

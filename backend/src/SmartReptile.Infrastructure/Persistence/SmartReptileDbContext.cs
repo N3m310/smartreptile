@@ -8,6 +8,7 @@ using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Terrariums;
+using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Infrastructure.Persistence;
 
@@ -37,6 +38,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
 
     /// <summary>Per-terrarium band overrides.</summary>
     public DbSet<ThresholdOverride> ThresholdOverrides => Set<ThresholdOverride>();
+
+    /// <summary>Effective bands captured whenever a terrarium's overrides change (§02-design/02 §3.13).</summary>
+    public DbSet<ThresholdSnapshot> ThresholdSnapshots => Set<ThresholdSnapshot>();
 
     /// <summary>Sensor nodes.</summary>
     public DbSet<Device> Devices => Set<Device>();
@@ -237,6 +241,29 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
                     "CK_ThresholdOverride_CriticalOrder",
                     "[CriticalMin] IS NULL OR ([CriticalMin] <= [TargetMin] AND [CriticalMax] >= [TargetMax])");
             });
+        });
+
+        modelBuilder.Entity<ThresholdSnapshot>(entity =>
+        {
+            entity.HasKey(snapshot => snapshot.Id);
+            entity.Property(snapshot => snapshot.EffectiveThresholdsJson).IsRequired();
+
+            // SHA-256 as lower-case hex: fixed width, so char(64) and not nvarchar(64).
+            entity.Property(snapshot => snapshot.ThresholdVersionHash)
+                .HasMaxLength(64)
+                .IsFixedLength()
+                .IsUnicode(false)
+                .IsRequired();
+
+            // "the snapshot in force at an instant" is the only query: newest for one terrarium, so the index leads
+            // with the terrarium and orders by time descending.
+            entity.HasIndex(snapshot => new { snapshot.TerrariumId, snapshot.CapturedAtUtc })
+                .IsDescending(false, true);
+
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(snapshot => snapshot.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("ThresholdSnapshot");
         });
     }
 

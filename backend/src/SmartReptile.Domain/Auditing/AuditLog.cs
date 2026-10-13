@@ -29,6 +29,24 @@ public static class AuditAction
 
     /// <summary>A silence window was cancelled before it expired (FR-13).</summary>
     public const string SilenceCancelled = "silence.cancelled";
+
+    /// <summary>A custom species profile was created (FR-10, BR-10.4).</summary>
+    public const string ProfileCreated = "profile.created";
+
+    /// <summary>
+    /// A species profile was edited: its fields, its band set, or both, with the before and after state on the row
+    /// (FR-10, BR-10.4).
+    /// </summary>
+    public const string ProfileUpdated = "profile.updated";
+
+    /// <summary>A custom species profile was deleted (FR-10, BR-10.4).</summary>
+    public const string ProfileDeleted = "profile.deleted";
+
+    /// <summary>
+    /// A profile was copied into one the caller owns — its own verb rather than <see cref="ProfileCreated"/>,
+    /// because "where did this profile come from?" is the question a copied profile's numbers always raise.
+    /// </summary>
+    public const string ProfileDuplicated = "profile.duplicated";
 }
 
 /// <summary>
@@ -122,7 +140,7 @@ public class AuditLog
         string? afterJson = null) =>
         Build(
             action,
-            "Device",
+            AuditEntity.Device,
             devicePublicId,
             deviceId,
             userId,
@@ -155,7 +173,7 @@ public class AuditLog
         string? afterJson = null) =>
         Build(
             action,
-            "Alert",
+            AuditEntity.Alert,
             alertId.ToString(CultureInfo.InvariantCulture),
             deviceId,
             userId,
@@ -181,7 +199,29 @@ public class AuditLog
         DateTimeOffset occurredAt,
         string? beforeJson = null,
         string? afterJson = null) =>
-        Build(action, "MetricSilence", silenceId.ToString(), null, userId, actor, occurredAt, beforeJson, afterJson);
+        Build(action, AuditEntity.MetricSilence, silenceId.ToString(), null, userId, actor, occurredAt, beforeJson, afterJson);
+
+    /// <summary>
+    /// Builds a row for an action a keeper took on a species profile. The entity id is the profile's own identity,
+    /// spelled the way the routes spell it (<c>/species-profiles/{id}</c>).
+    /// </summary>
+    /// <param name="action">Verb from <see cref="AuditAction"/>.</param>
+    /// <param name="profileId">Identity of the profile.</param>
+    /// <param name="userId">Acting user.</param>
+    /// <param name="actor">Request provenance; <see cref="AuditActor.Unknown"/> when there is none.</param>
+    /// <param name="occurredAt">When the change happened.</param>
+    /// <param name="beforeJson">State before the change, when worth keeping.</param>
+    /// <param name="afterJson">State after the change.</param>
+    /// <returns>The staged row.</returns>
+    public static AuditLog ForSpeciesProfile(
+        string action,
+        Guid profileId,
+        Guid? userId,
+        AuditActor actor,
+        DateTimeOffset occurredAt,
+        string? beforeJson = null,
+        string? afterJson = null) =>
+        Build(action, AuditEntity.SpeciesProfile, profileId.ToString(), null, userId, actor, occurredAt, beforeJson, afterJson);
 
     /// <summary>
     /// The one place the row is built, so every entity's entry truncates, defaults and dates the same way.

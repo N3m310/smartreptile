@@ -1,6 +1,8 @@
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Terrariums;
+using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Application.Abstractions;
 
@@ -43,8 +45,28 @@ public interface ITerrariumStore
     /// <summary>True when the species profile exists — the create path refuses an unknown band source.</summary>
     Task<bool> SpeciesProfileExistsAsync(Guid speciesProfileId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// True when an account with this id exists. The create path checks it because it is the one write that keys a
+    /// new row on the caller's own subject: a token this server signed can still name an account it does not have,
+    /// and the insert would otherwise report that as a foreign-key failure.
+    /// </summary>
+    Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken);
+
     /// <summary>Stages a new terrarium.</summary>
     void AddTerrarium(Terrarium terrarium);
+
+    /// <summary>
+    /// Stages a new per-terrarium override. The row also has to join the loaded aggregate, because the snapshot the
+    /// change path writes in the same unit of work resolves the set the change produced — the adapter attaches it to
+    /// the terrarium through the relationship, so the caller does not touch the collection itself.
+    /// </summary>
+    void AddThresholdOverride(ThresholdOverride row);
+
+    /// <summary>Stages the removal of an override and drops it from the loaded aggregate's collection.</summary>
+    void RemoveThresholdOverride(ThresholdOverride row);
+
+    /// <summary>Stages a threshold snapshot (roadmap 3.1's write half).</summary>
+    void AddThresholdSnapshot(ThresholdSnapshot snapshot);
 
     /// <summary>
     /// Newest sample timestamp and open-alert count for each id, in one query per collection. Ids with nothing to

@@ -66,6 +66,36 @@ public static class ThresholdNames
         ThresholdPhase.Night => "night",
         _ => "any",
     };
+
+    /// <summary>
+    /// Parses a phase from a request. An absent value means <see cref="ThresholdPhase.Any"/> — a band that is not
+    /// split day/night is the default a client gets when it says nothing — while a value that is present but not in
+    /// the vocabulary is a refusal rather than a silent fallback. Case-insensitive, like the metric keys.
+    /// </summary>
+    public static bool TryParsePhase(string? value, out ThresholdPhase phase)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            phase = ThresholdPhase.Any;
+            return true;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "any":
+                phase = ThresholdPhase.Any;
+                return true;
+            case "day":
+                phase = ThresholdPhase.Day;
+                return true;
+            case "night":
+                phase = ThresholdPhase.Night;
+                return true;
+            default:
+                phase = ThresholdPhase.Any;
+                return false;
+        }
+    }
 }
 
 /// <summary>
@@ -112,6 +142,42 @@ public sealed record TerrariumThresholds(
     DateTimeOffset CapturedAtUtc,
     string TimeZoneId,
     IReadOnlyList<EffectiveThresholdView> EffectiveThresholds);
+
+/// <summary>
+/// One band a client wants to write for a terrarium (UC-03, roadmap 3.1's write half). Nullable members so a
+/// missing field becomes a field-level violation rather than a deserialisation failure, the same rule the
+/// create/update contracts follow; everything optional carries the documented default.
+/// </summary>
+/// <param name="Metric">Metric key from the dictionary, e.g. <c>tempC</c>; required.</param>
+/// <param name="Phase">Phase the band applies in: <c>any</c> (the default when omitted), <c>day</c> or <c>night</c>.</param>
+/// <param name="TargetMin">Lower bound of the target band; required.</param>
+/// <param name="TargetMax">Upper bound of the target band; required.</param>
+/// <param name="CriticalMin">Lower critical bound; omitted derives it from the target band.</param>
+/// <param name="CriticalMax">Upper critical bound; omitted derives it from the target band.</param>
+/// <param name="DwellWarnMinutes">Minutes out of band before a Warning; defaults to 5.</param>
+/// <param name="DwellCritMinutes">Minutes critically out of band before escalation; defaults to 2.</param>
+/// <param name="RecoveryMargin">Distance back inside the band that counts as recovered; defaults to 0.5.</param>
+/// <param name="Note">Why this terrarium differs from the profile; at most 300 characters.</param>
+/// <param name="Enabled">False disables the override without deleting it, so the profile band applies; defaults to true.</param>
+public sealed record ThresholdOverrideInput(
+    string? Metric,
+    string? Phase,
+    decimal? TargetMin,
+    decimal? TargetMax,
+    decimal? CriticalMin,
+    decimal? CriticalMax,
+    int? DwellWarnMinutes,
+    int? DwellCritMinutes,
+    decimal? RecoveryMargin,
+    string? Note,
+    bool? Enabled);
+
+/// <summary>
+/// The body of <c>PUT /terrariums/{id}/thresholds</c> (UC-03). Each entry upserts the override for its
+/// (metric, phase); a metric the body does not mention is left alone, and an empty list is a valid no-op.
+/// </summary>
+/// <param name="Overrides">Bands to upsert. A metric and phase may appear at most once.</param>
+public sealed record UpdateThresholdsRequest(IReadOnlyList<ThresholdOverrideInput>? Overrides);
 
 /// <summary>
 /// Create input. Nullable members so a missing field becomes a field-level violation rather than a

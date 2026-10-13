@@ -357,7 +357,7 @@ Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of de
 | `/api/v1/devices` | `GET`, `GET {id}`, `POST self-register`, `POST claim`, `PATCH {id}`, `POST {id}/rebind`, `POST {id}/rotate-secret`, `POST {id}/revoke`, `POST {id}/calibration`, `POST {id}/commands`, `POST {id}/snapshots` | `self-register` anonymous + rate-limited |
 | `/api/v1/ingest` | **built:** `POST http` | Device-auth header (`Device {id}.{secret}`); the HTTP fallback path, 6 requests/min/device |
 | `/api/v1/alerts` | **built:** `GET`, `GET {id}`, `GET {id}/timeline`, `POST {id}/ack`, `POST {id}/resolve` | Ack and resolve name the `Technician` policy (Owner or Technician), so a Viewer reads the same list and cannot change it; a foreign alert is a `404`, a closed one a `409 alert_not_open` |
-| `/api/v1/species-profiles` | `GET`, `POST`, `PATCH {id}`, `DELETE {id}`, `POST {id}/duplicate` | Built-ins immutable |
+| `/api/v1/species-profiles` | **built 2026-10-13:** `GET`, `POST`, `POST {id}/duplicate`, `PATCH {id}`, `DELETE {id}` | Built-ins immutable (`403 builtin_immutable`); a foreign profile is a `404` and a profile a terrarium is assigned to is `409 profile_in_use`; every write is audited (`profile.created`/`updated`/`deleted`/`duplicated`, BR-10.4) |
 | `/api/v1/notifications` | `GET`, `POST {id}/read`, `POST read-all` | In-app inbox |
 | `/api/v1/exports` | `GET {jobId}`, `GET {jobId}/download` | Token-based download |
 | `/api/v1/audit` | `GET` | Owner-scoped |

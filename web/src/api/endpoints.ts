@@ -1,19 +1,22 @@
 /*
  * One function per route the web client calls, typed against `07-appendices/03` §4.
  *
- * Only the routes that exist: the auth set (FR-01) and the terrarium read surface (2.8). Nothing here reaches
- * for an endpoint that is merely specified — `02-design/04` §6's rule is that an unbuilt route must surface as
- * "not built yet", which can only stay true if the client does not pretend to call it.
+ * Only the routes that exist: the auth set (FR-01), the terrarium read surface (2.8) and the species-profile
+ * catalogue (3.9). Nothing here reaches for an endpoint that is merely specified — `02-design/04` §6's rule is
+ * that an unbuilt route must surface as "not built yet", which can only stay true if the client does not pretend
+ * to call it.
  */
 
 import { apiRequest } from './client';
 import type {
   AuthSession,
   Coverage,
+  CreateTerrariumBody,
   HealthReport,
   LatestReadings,
   MetricsSnapshot,
   RangeSeries,
+  SpeciesProfileList,
   TerrariumItem,
   TerrariumList,
   UserProfile,
@@ -84,6 +87,20 @@ export async function resetPassword(body: {
 /** `GET /terrariums` — not paginated; the per-account count is small and the cursor convention is unimplemented. */
 export async function listTerrariums(): Promise<TerrariumList> {
   return apiRequest('/api/v1/terrariums');
+}
+
+/**
+ * `POST /terrariums` — requires the Owner role. Answers the created terrarium, so a caller can render it without
+ * a second read; it needs a `speciesProfileId` from the catalogue below, which is why it could not be wired before
+ * roadmap 3.9 built that route.
+ */
+export async function createTerrarium(body: CreateTerrariumBody): Promise<TerrariumItem> {
+  return apiRequest('/api/v1/terrariums', { method: 'POST', body });
+}
+
+/** `GET /species-profiles` — the built-ins plus this account's own, each with its bands (roadmap 3.9). */
+export async function listSpeciesProfiles(): Promise<SpeciesProfileList> {
+  return apiRequest('/api/v1/species-profiles');
 }
 
 export async function getTerrarium(id: string): Promise<TerrariumItem> {

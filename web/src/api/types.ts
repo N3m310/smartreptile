@@ -92,6 +92,55 @@ export interface TerrariumList {
   items: TerrariumItem[];
 }
 
+/** One band of a species profile (`07-appendices/03` §4.3) — the numbers a terrarium is judged against. */
+export interface SpeciesProfileBand {
+  metric: string;
+  unit: string;
+  phase: string;
+  targetMin: number;
+  targetMax: number;
+  criticalMin: number | null;
+  criticalMax: number | null;
+  dwellWarnMinutes: number;
+  dwellCritMinutes: number;
+  recoveryMargin: number;
+  enabled: boolean;
+  sourceRef: string | null;
+  sourceUrl: string | null;
+}
+
+/**
+ * The item shape of `GET /species-profiles`. The bands travel with the profile, so a picker needs one request
+ * rather than one per row.
+ */
+export interface SpeciesProfileItem {
+  id: string;
+  name: string;
+  scientificName: string;
+  climateZone: string;
+  /** True for the seeded profiles: read-only, and the ones a keeper copies to tune (FR-10 A2). */
+  isBuiltIn: boolean;
+  photoperiodHours: number;
+  lightsOnLocalTime: string;
+  lightThresholdLux: number;
+  minLightHoursPerDay: number;
+  notes: string | null;
+  bands: SpeciesProfileBand[];
+}
+
+export interface SpeciesProfileList {
+  items: SpeciesProfileItem[];
+}
+
+/** Body of `POST /terrariums`. `timeZoneId` omitted means the deployment's default (ADR-015). */
+export interface CreateTerrariumBody {
+  name: string;
+  speciesProfileId: string;
+  location?: string | null;
+  description?: string | null;
+  timeZoneId?: string | null;
+}
+
 /** The band a value was judged against — phase-resolved by the server, `null` when no band is configured. */
 export interface TargetBand {
   min: number | null;

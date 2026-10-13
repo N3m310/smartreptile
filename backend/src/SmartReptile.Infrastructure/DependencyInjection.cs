@@ -5,11 +5,13 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Application.Alerts;
+using SmartReptile.Application.Auditing;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Evaluation;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Alerts;
+using SmartReptile.Infrastructure.Auditing;
 using SmartReptile.Infrastructure.Devices;
 using SmartReptile.Infrastructure.Evaluation;
 using SmartReptile.Infrastructure.Health;
@@ -19,6 +21,7 @@ using SmartReptile.Infrastructure.Observability;
 using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
 using SmartReptile.Infrastructure.Security;
+using SmartReptile.Infrastructure.Species;
 using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Infrastructure;
@@ -106,6 +109,7 @@ public static class DependencyInjection
 
         // Terrarium read surface (FR-03, FR-08, FR-09 — roadmap task 2.8).
         services.AddScoped<ITerrariumStore, EfTerrariumStore>();
+        services.AddScoped<ISpeciesProfileStore, EfSpeciesProfileStore>();
 
         // Broker session registry (FR-05 BR-05.4): the broker writes it, the revoke use case reads it.
         services.AddSingleton<DeviceSessionRegistry>();
@@ -168,6 +172,11 @@ public static class DependencyInjection
         services.AddScoped<AlertService>();
         services.AddScoped<IMetricSilenceStore, EfMetricSilenceStore>();
         services.AddScoped<MetricSilenceService>();
+
+        // The audit query (roadmap 3.7). A port of its own: the trail spans every entity the other ports own, while
+        // the alert store's audit read answers for exactly one alert.
+        services.AddScoped<IAuditStore, EfAuditStore>();
+        services.AddScoped<AuditService>();
 
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();

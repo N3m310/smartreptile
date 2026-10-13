@@ -310,12 +310,14 @@ timestamp is its bucket, so a gap shows up as absent points rather than as nulls
 since 2026-10-09, `PATCH /terrariums/{id}` and `DELETE /terrariums/{id}` — FR-03's update and delete halves — and
 `GET /terrariums/{id}/thresholds` — 3.1's read half. Since 2026-10-10 the three silence routes are built too (3.4;
 see §4.5), including one this table did not have: `GET /terrariums/{id}/silences`, because the contract asks for a
-silence to be "visible on the dashboard" and the client has no other way to learn the id it must cancel. The rest of
-this table — threshold write, summaries, exports — is specified and not built; the threshold write half is 3.1's
-remainder and summaries are 3.6.
+silence to be "visible on the dashboard" and the client has no other way to learn the id it must cancel. And since
+2026-10-13 the threshold write half is built — `PUT /terrariums/{id}/thresholds` and
+`DELETE /terrariums/{id}/thresholds/{metric}`, described below — which closes 3.1. The rest of this table —
+`GET /terrariums/{id}/summaries` and `POST /terrariums/{id}/exports` — is specified and not built; the summaries are
+3.6 and the export task is M4's.
 
 **`GET /terrariums/{id}/thresholds` as built.** Authenticated, not role-gated (`U`), scoped to the caller like
-every other route here, and read-only:
+every other route here:
 
 ```json
 {
@@ -337,6 +339,38 @@ instant**: the same terrarium read at 21:00 local reports `phase: "night"` and t
 response is a statement about now rather than about configuration. **`capturedAtUtc` and `timeZoneId` are part of
 the answer** so a phase-dependent result can be reproduced instead of argued about. Entries are ordered by metric
 key (`humidityPct` before `tempC`), matching `readings/latest`, so rows keep their places between reloads.
+
+**`PUT`/`DELETE` overrides as built (3.1's write half, 2026-10-13).** Both are role `Owner` — the policy `POST`,
+`PATCH` and `DELETE` on the terrarium already use — and both answer with the **resulting effective set**, in exactly
+the shape `GET` returns, so an editor re-renders from one payload rather than two:
+
+```json
+PUT /terrariums/{id}/thresholds
+{ "overrides": [ { "metric": "tempC", "phase": "any", "targetMin": 28, "targetMax": 30,
+                   "criticalMin": 22, "criticalMax": 34.5, "dwellWarnMinutes": 5, "dwellCritMinutes": 2,
+                   "recoveryMargin": 0.5, "note": "summer", "enabled": true } ] }
+```
+
+`metric` and both target bounds are required; `phase` defaults to `any`, `criticalMin`/`criticalMax` to the derived
+margin, and the three engine parameters to the engine's own defaults. The body is a **patch over the override set**:
+a metric it does not mention keeps its override, so `{"overrides":[]}` is a valid no-op. Every entry is validated
+before anything is written, so one incoherent band changes nothing at all, and the answer is `400 validation_failed`
+with one entry per problem addressed by position (`overrides[1].targetMin`) carrying the stable codes
+`metric_invalid`, `threshold_phase_invalid`, `threshold_target_required`, `threshold_note_too_long`,
+`threshold_duplicate`, or the band rules' own (`threshold_ordering_invalid`, `threshold_critical_invalid`,
+`threshold_dwell_invalid`, `threshold_recovery_margin_invalid`, `threshold_implausible_band`). A band identical to
+the stored one writes nothing and records no history.
+
+`DELETE /terrariums/{id}/thresholds/{metric}` removes **every** override the terrarium holds for the metric,
+whichever phase — "revert this metric" is the metric, not the phase the caller happened to be looking at. It is
+idempotent (a metric carrying no override is not an error) and refuses only an unknown key, which is a client
+mistake rather than a no-op.
+
+Both write a `ThresholdSnapshot` of the set now in force, in the same unit of work as the change. That is what makes
+`TC-U-26` hold: an alert **already open** keeps its denormalised `BandMin`/`BandMax` for the record while the next
+sample is judged against the new band, and the normal recovery path — never a special "threshold changed" outcome —
+is what closes it if the new band puts the reading back in range (UC-03 A4). Neither route takes an `If-Match`:
+§4.2 lists the precondition for `PATCH /terrariums/{id}` alone.
 
 **`PATCH /terrariums/{id}` requires `If-Match`.** `GET`/`POST`/`PATCH` return the row's SQL Server `rowversion` as
 a strong `ETag`, and the update must send it back:
@@ -451,6 +485,28 @@ be probed (BR-02.2).
 | POST | `/species-profiles/{id}/duplicate` | O | copy a built-in into an editable custom profile |
 | PATCH | `/species-profiles/{id}` | O | built-ins return `403 builtin_immutable` |
 | DELETE | `/species-profiles/{id}` | O | `409 profile_in_use` if assigned to a terrarium |
+
+**As built (roadmap 3.9, 2026-10-13).** All five routes are implemented. What follows is contract rather than
+implementation, because a client written against either reading would break:
+
+- **The list carries the bands**, and is unpaged. It is four built-ins plus whatever the account authored, and the
+  picker in `POST /terrariums` needs all of them at once.
+- **Create and duplicate answer `200` with the profile, not `201` with a `Location`** — the contract has no
+  read-by-id route to point one at, the reading the silence routes took. The profile comes back whole, so a client
+  can render what it just made. A duplicate is named `"<source> (copy)"` when the body names nothing, and carries
+  its source's `sourceRef`, because a copy whose numbers lost their citation would be a second, quieter way of
+  shipping an unsourced range.
+- **`PATCH` replaces the band set when `bands` is sent.** An omitted member is left alone and an empty string clears
+  a text field; a sent `bands` is the complete set afterwards, never a merge — half a band cannot be validated.
+- **The three refusals are distinguished**: `403 builtin_immutable` (the row is visible and immutable — the client
+  can offer to duplicate it), `404 not_found` (a foreign profile, indistinguishable from a made-up id, BR-02.2), and
+  `409 profile_in_use`. Soft-deleted terrariums count towards "in use": their rows still hold the foreign key, so
+  ignoring them would turn a documented `409` into a constraint violation.
+- **`sourceUrl` stays reserved** for a verified citation: a custom band may carry `sourceRef`, and nothing this build
+  writes sets a URL.
+- **`BR-10.5`'s climate-zone warning is the client's**, not this API's: `climateZone` travels on every profile so a
+  client can judge a band against the zone's ranges in `07-appendices/05` §4. The server refuses only what BR-10.2
+  and the metric dictionary's plausible range make impossible.
 
 ### 4.4 Devices
 
@@ -570,7 +626,8 @@ and the dispatcher of 3.5 reads the same `IsActiveAt`/`Covers` rule that the lis
 | 409 | `registration_conflict` | Username and/or email already has an account (see `errors` for which) |
 | 409 | `alert_not_open` | Ack/resolve on a resolved alert |
 | 409 | `version_conflict` | Optimistic concurrency (`rowversion` mismatch) |
-| 409 | `profile_in_use` | Deleting an assigned profile |
+| 409 | `profile_in_use` | Deleting an assigned profile — including a terrarium that was soft-deleted, whose row still holds the foreign key |
+| 409 | `profile_name_taken` | A custom species profile with that name already exists for this account (the unique index is `(createdByUserId, name)`) |
 | 413 | `request_too_large` | The transport refused to read the body (an in-app limit such as `[RequestSizeLimit]`). Kestrel answers its own 30 MB default itself, before the application sees the request, so this row is defensive. **Not** the same as `400 payload_too_large`, which is the ingest endpoint's own batch limit |
 | 422 | `quality_rejected` | Sample accepted but excluded from evaluation (informational) |
 | 423 | `account_locked` | Login throttle active |

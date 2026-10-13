@@ -64,6 +64,12 @@ const FIELD_KEY: Record<string, string> = {
   username_too_short: 'usernameTooShort',
   username_invalid: 'usernameInvalid',
   email_invalid: 'emailInvalid',
+  terrarium_name_required: 'terrariumNameRequired',
+  terrarium_name_too_long: 'terrariumNameTooLong',
+  terrarium_location_too_long: 'terrariumLocationTooLong',
+  terrarium_description_too_long: 'terrariumDescriptionTooLong',
+  terrarium_timezone_invalid: 'terrariumTimeZoneInvalid',
+  species_profile_not_found: 'errorProfileNotFound',
 };
 
 /** The sentence for a failed call. `apiBaseUrl` and the code are shown when the table has no entry. */

@@ -3,7 +3,9 @@ using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Terrariums;
+using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Infrastructure.Persistence;
 
@@ -48,7 +50,20 @@ public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
         db.SpeciesProfiles.AnyAsync(profile => profile.Id == speciesProfileId, cancellationToken);
 
     /// <inheritdoc />
+    public Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken) =>
+        db.Users.AnyAsync(user => user.Id == userId, cancellationToken);
+
+    /// <inheritdoc />
     public void AddTerrarium(Terrarium terrarium) => db.Terrariums.Add(terrarium);
+
+    /// <inheritdoc />
+    public void AddThresholdOverride(ThresholdOverride row) => db.ThresholdOverrides.Add(row);
+
+    /// <inheritdoc />
+    public void RemoveThresholdOverride(ThresholdOverride row) => db.ThresholdOverrides.Remove(row);
+
+    /// <inheritdoc />
+    public void AddThresholdSnapshot(ThresholdSnapshot snapshot) => db.ThresholdSnapshots.Add(snapshot);
 
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<Guid, TerrariumActivity>> SummariseActivityAsync(

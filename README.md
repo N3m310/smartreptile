@@ -102,7 +102,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Gate | Command / method | Result |
 |---|---|---|
 | Backend builds, warnings as errors | `dotnet build backend/SmartReptile.sln -c Release` | ✅ Build succeeded, 0 warnings |
-| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **545 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery, 453 after the disclosed-conflict change, 455 after the password-policy change, 497 after the M2 close-out and the M3 scaffolding, 513 after 3.1's read half, **545 after the threshold engine (3.2)**) |
+| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **655 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery, 453 after the disclosed-conflict change, 455 after the password-policy change, 497 after the M2 close-out and the M3 scaffolding, 513 after 3.1's read half, 545 after the threshold engine (3.2), **655 after 3.1's write half (2026-10-13)**) |
 | Formatting gate (CI parity) | `dotnet format SmartReptile.sln --verify-no-changes --severity error` | ✅ clean (generated migrations excluded via `.editorconfig`) |
 | Web client type-checks and builds | `npm run typecheck && npm run build` in `web/` | ✅ **clean** — `tsc --noEmit` exit 0, `vite build` produced `index-DX1qiJCO.js` (793 kB / 226 kB gzip) + `index-BLifHLg9.css` (39.6 kB), refreshed 2026-10-09 |
 | Web i18n key parity (`TC-I-15`) | `npm run check:strings` in `web/` | ✅ **164 keys**, identical in vi and en, every key referenced by `src/` defined — and the check was verified to *fail* on a deliberate typo before it was trusted |
@@ -125,7 +125,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | MQTT plaintext is loopback-only | `netstat -ano` with TLS on, then again with `Mqtt:DisablePlaintextEndpoint=true` | ✅ **2.3**: `127.0.0.1:1883` **and** `[::1]:1883` only (no wildcard bind — binding the IPv4 address alone leaves the IPv6 socket open); in the release shape nothing listens on `1883` at all and TLS kept authenticating devices |
 | Ingest: broker → bus → worker → SQL Server | `paho-mqtt` publish over a real MQTT listener against a live API + SQL Server, then `curl /metrics` and read the rows back | ✅ **2.4 done 2026-10-04**: a two-sample batch published twice stored **2** `TelemetrySample` rows (sequences `1, 2`), **8** `MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, set `LastSeenAt` / `FirmwareVersion` / `SignalStrengthDbm` / `FreeHeapKb` and wrote a `DeviceHealthSample`; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`, `ingest_rejected_total=0`. A `tf = 85` sample was stored with `QualityFlags = 2`; a 121-sample batch was `payload_too_large` and a malformed body `schema_invalid`, taking `ingest_rejected_total` to **2** |
 | The alert lifecycle over HTTP (M3 task 3.4) | the API started headlessly with **no** SQL Server — which is what makes a *route* check possible without a database: `curl` with a minted Viewer token, a Technician token and no token at all (14 assertions, all green) | ✅ **2026-10-10**: no token → `401 unauthenticated`; **Viewer** → `403 insufficient_role` on `POST /alerts/1/ack`, `POST /alerts/1/resolve`, `POST /terrariums/{id}/silences` and `DELETE …/silences/{id}` (the RBAC half of `TC-U-36`, measured); `?state=Nonsense`, `?cursor=not-a-cursor` and an unknown resolve reason → `400` (`validation_failed`, `invalid_cursor`, `validation_failed`) **before** any database call; with a Technician token every handler ran and failed only on the absent SQL Server (`500 internal_error`, not the `404` a missing route would give); and `swagger.json` carried **35 operations, 22 requiring the bearer scheme** — the 14 that already did plus all eight new ones. The three silence routes and five alert routes are also what `GET /` advertises. The *data* half (`TC-I-07` over HTTP: ack → resolve → second ack refused, read back through the API) still needs SQL Server |
-| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **24 cases** — 19 green as of 2026-10-09: migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium. The five added 2026-10-10 (task 3.4) assert what a fake cannot answer: an alert of another account is invisible to both the list and the lookup, the soft-delete filter on `Terrarium` reaches an alert through its foreign key, the cursor predicate translates and pages without repeating a row, one transaction leaves the resolved row + the re-armed `EvaluationState` + the audit entry together, and a silence window round-trips through create, list and cancel |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **26 cases, 25 green** — 19 green as of 2026-10-09: migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium. The five added 2026-10-10 (task 3.4) assert what a fake cannot answer: an alert of another account is invisible to both the list and the lookup, the soft-delete filter on `Terrarium` reaches an alert through its foreign key, the cursor predicate translates and pages without repeating a row, one transaction leaves the resolved row + the re-armed `EvaluationState` + the audit entry together, and a silence window round-trips through create, list and cancel. The two added 2026-10-13 (3.1's write half) assert what the schema and the adapter have to answer: an override change and its `ThresholdSnapshot` commit together, the evaluator's own band source then resolves the new band while an alert already open keeps its denormalised `BandMin`/`BandMax`, and a revert deletes the override row rather than disabling it. **25 of the 26 are green** — `AlertLifecycleTests.The_cursor_pages…` expects one alert fewer than its own fixture creates and fails identically with the 2026-10-13 edits reverted, so it is recorded here rather than patched |
 | Terrarium update and delete over HTTP | `curl` a live API + SQL Server: create, `PATCH` with the current `ETag`, then a stale one, then none, then `DELETE` with and without the flag (26 assertions, all green) | ✅ **2.8's update/delete halves done 2026-10-09**: `201` + `ETag` on create, `200` and a **new** `ETag` on a matching `If-Match`, `412 precondition_failed` on a stale one with the row provably not overwritten, `428 precondition_required` with no header, `If-Match: *` accepted, `400 validation_failed` on a bad body, `409 conflict_device_bound` while a live device is bound, `204` with `?allowUnboundDevice=true` (the board returns to `Provisioning` with its credentials intact), and `404 not_found` after |
 | MQTT device channels are consumed, not dropped | `paho-mqtt` publishing `status`, `health`, `events` and `telemetry` over loopback from a **scripted** node (no hardware), then reading the rows back | ✅ **2026-10-09**: `flags=1.2.0`, `rssi=-64`, `heap=140`, `bat=87.00` on the `Device` row; **2** `DeviceHealthSample` rows (one from the `health` topic, one from a batch's health block); **1** `DeviceEvent` (a `sensor_fault` on `humidityPct`) with an unknown event type refused as `schema_invalid`; **2** `TelemetrySample` rows; and **2** `EvaluationState` rows written by the evaluator worker **for the keys the profile actually bands** (`TempC`/Night and `HumidityPct`/Any, watermark 20) |
 | The threshold engine raises and closes an alert (M3 task 3.2) | `paho-mqtt` publishing a scripted excursion over a real broker against a live API + SQL Server, then reading `Alert` and `EvaluationState` back — 48 assertions, all green | ✅ **2026-10-09**: a faulted out-of-band reading opened nothing and created no state row; an out-of-band reading opened nothing while the dwell window was open; when it elapsed **exactly one Warning opened, back-dated to the first out-of-band reading**, with `TriggeringValue` = that reading and `PeakValue` = the window's worst reading (`32.6 °C` opened it, `33.0 °C` was the peak — a value only the stored readings know); a critical reading short of its own dwell touched the row without escalating; when that dwell elapsed the **same** alert escalated once (`Severity` and `DedupeKey` → Critical, id and `TriggeredAt` unchanged); three readings inside the band by the margin resolved it (`Recovered`, pointer and excursion cleared, three ticks counted); a later excursion opened a **second** row while the first stayed resolved; and `/metrics` moved by exactly the two openings and the ten published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard gecko band asks for five) because FR-10's write route is 3.1's remainder |
@@ -154,8 +154,12 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   degrading to its empty state; the empty state now means an account with no terrarium, and one can be created,
   renamed and removed over HTTP. `GET .../thresholds` reports the effective band per metric with the layer it came
   from, so the threshold editor (M4's 4.20) can be built against it and show *why* a limit is what it is.
-  **Thresholds are read-only over HTTP**: writing an override (`PUT`/`DELETE`) is 3.1's other half and is not
-  built. Alerts have a full API since 2026-10-10 (task 3.4): `/api/v1/alerts` lists them newest-first with
+  **Thresholds are writable since 2026-10-13** (3.1's write half), so the editor can author and not only preview:
+  `PUT /terrariums/{id}/thresholds` upserts the bands the body names and
+  `DELETE /terrariums/{id}/thresholds/{metric}` reverts one metric to its profile — both `Owner`-gated, both
+  answering with the resulting effective set, and every change recording a `ThresholdSnapshot` so an alert already
+  open keeps the band it was judged against.
+  Alerts have a full API since 2026-10-10 (task 3.4): `/api/v1/alerts` lists them newest-first with
   `?cursor=&pageSize=`, and `GET /api/v1/alerts/{id}` carries the band in force with an excerpt of the values the
   episode was judged on; `POST /alerts/{id}/ack` and `POST /alerts/{id}/resolve` close the response loop for a
   Technician or Owner, `GET /alerts/{id}/timeline` shows what happened to one alert and who did it, and
@@ -428,10 +432,19 @@ curl -s -X POST http://localhost:8080/api/v1/auth/reset-password \
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings/latest"
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings?metric=tempC&from=2026-10-06T00:00:00Z&to=2026-10-07T00:00:00Z"
 
-# The effective band per metric, with the layer each one came from (no route writes an override yet):
+# The effective band per metric, with the layer each one came from:
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/thresholds"
 # -> {"terrariumId":"…","capturedAtUtc":"…","timeZoneId":"Asia/Ho_Chi_Minh",
 #     "effectiveThresholds":[{"metric":"tempC","unit":"°C","phase":"night","source":"profile", …}]}
+
+# Writing one records a snapshot of the new set, so an alert already open keeps the band it was judged against while
+# the next sample is judged against this one; reverting a metric gives the profile's band back (Owner only):
+curl -s -X PUT -H "Authorization: ******" -H 'Content-Type: application/json' \
+     -d '{"overrides":[{"metric":"tempC","phase":"any","targetMin":28,"targetMax":30,"note":"summer"}]}' \
+     "http://localhost:8080/api/v1/terrariums/$ID/thresholds"
+# -> 200 …{"metric":"tempC","unit":"°C","phase":"any","source":"override","targetMin":28,"targetMax":30,…}
+curl -s -X DELETE -H "Authorization: ******" "http://localhost:8080/api/v1/terrariums/$ID/thresholds/tempC"
+# -> 200 with source "profile" again; a metric with no override answers 200 too (idempotent)
 
 # The engine's output: alerts are raised, escalated, acknowledged, resolved and pushed to the clients watching the
 # terrarium. Delivery to a phone or an inbox is M3 task 3.5, so today the alert itself is read back over the API:
@@ -449,3 +462,26 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/
 # The counters behind it (alerts_opened_total counts openings, not escalations):
 curl -s http://localhost:8080/metrics
 ```
+
+**Added 2026-10-13 (backend, M3 task 3.1's write half — the override write path and `ThresholdSnapshot`).** 3.1 is
+complete, and the server side the threshold editor (M4's 4.20) was waiting for now exists.
+`PUT /api/v1/terrariums/{id}/thresholds` upserts the band for each `(metric, phase)` the body names, and
+`DELETE /api/v1/terrariums/{id}/thresholds/{metric}` reverts one metric to its profile — both `Owner`-gated, both
+answering with the resulting effective set in the same shape the read route returns. Every entry is validated
+against the band rules before anything is written, reported field by field and addressed by position
+(`overrides[1].targetMin`), so one incoherent band changes nothing at all; a band byte-for-byte identical to the
+stored one is a no-op; and a real change writes one `ThresholdSnapshot` of the set now in force, in the same unit of
+work — the table `docs/02-design/02` §3.13 promised and the change path 3.2/3.4 were waiting for. That is what makes
+`TC-U-26` hold: an alert already open keeps its denormalised band for the record while the next sample is judged
+against the new one, and the ordinary recovery path is what closes it if the reading is back in range. Recorded in
+the roadmap (the task's write-half block), `07-appendices/03` §4.2, `04-quality/02` B3 and the design's §3.13;
+**655 backend unit tests pass** (was 638, 17 new), and the suite is 26 integration cases of which 25 are green.
+
+Two things from this task are worth the ink rather than a line in a table. **The unit suite could not have caught the
+first cut's defect**: staging a new override by adding it to the loaded terrarium's collection made EF treat the
+client-assigned key as an existing row, so it emitted `UPDATE [ThresholdOverride] … WHERE [Id] = …`, affected zero
+rows and threw `DbUpdateConcurrencyException` — only a real database said so, which is why new rows now go through
+`AddThresholdOverride` and its fixture mirrors the adapter. And **`AlertLifecycleTests.The_cursor_pages…` fails
+independently of this change**, verified by reverting these edits and watching it fail the same way on pristine
+`main`: it expects one alert fewer than its own fixture creates, and it is recorded here rather than quietly fixed
+inside a task about thresholds.

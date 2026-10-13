@@ -1003,6 +1003,37 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.ToTable("Terrarium", (string)null);
                 });
 
+            modelBuilder.Entity("SmartReptile.Domain.Thresholds.ThresholdSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CapturedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("EffectiveThresholdsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("TerrariumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ThresholdVersionHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("char(64)")
+                        .IsFixedLength();
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerrariumId", "CapturedAtUtc")
+                        .IsDescending(false, true);
+
+                    b.ToTable("ThresholdSnapshot", (string)null);
+                });
+
             modelBuilder.Entity("SmartReptile.Domain.Alerts.Alert", b =>
                 {
                     b.HasOne("SmartReptile.Domain.Devices.Device", null)
@@ -1164,6 +1195,15 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("SpeciesProfile");
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Thresholds.ThresholdSnapshot", b =>
+                {
+                    b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
+                        .WithMany()
+                        .HasForeignKey("TerrariumId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Devices.Device", b =>

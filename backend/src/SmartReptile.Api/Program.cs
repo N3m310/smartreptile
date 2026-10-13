@@ -18,6 +18,7 @@ using SmartReptile.Api.Security;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
 using SmartReptile.Application.Ingest;
+using SmartReptile.Application.Species;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure;
@@ -196,6 +197,10 @@ builder.Services.AddSingleton(sp =>
     return new TerrariumSettings(defaults.TimeZoneId, defaults.SilentAfterIntervals);
 });
 
+// The species-profile catalogue (FR-10 — roadmap 3.9). No settings of its own: a profile's defaults are the
+// domain defaults, so there is nothing here for a deployment to move.
+builder.Services.AddScoped<SpeciesProfileService>();
+
 // The silence watchdog's settings (FR-07, roadmap task 3.3). The missed-interval count is the one the read surface
 // already derives the online badge from, so a deployment that changes it moves the stored status and the badge
 // together; the 30-minute critical threshold is a rule, not a setting.
@@ -301,9 +306,11 @@ builder.Services.AddSwaggerGen(options =>
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
         Scheme = "bearer",
         BearerFormat = "JWT",
-        Description = "Paste a user access token (15 minute lifetime) — paste the token only, without a 'Bearer ' "
-                    + "prefix, which Swagger UI adds itself. The token comes from POST /api/v1/auth/login and is "
-                    + "valid for 15 minutes.",
+        Description = "The accessToken field of POST /api/v1/auth/login's response — not its refreshToken, which no "
+                    + "bearer route accepts. Paste the value alone, without a 'Bearer ' prefix, which Swagger UI adds "
+                    + "itself. It is valid for 15 minutes and nothing here rotates it for you, so a call that answers "
+                    + "401 unauthenticated after a while means the token aged out: run POST /api/v1/auth/refresh with "
+                    + "the refreshToken and paste the accessToken it returns.",
     });
 
     // The document has to *require* the scheme on the operations that use it, or Swagger UI accepts a token in its
@@ -405,7 +412,9 @@ app.MapOpsEndpoints(applicationVersion);
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
 app.MapTerrariumEndpoints();
+app.MapSpeciesProfileEndpoints();
 app.MapAlertEndpoints();
+app.MapAuditEndpoints();
 app.MapIngestEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
@@ -421,11 +430,15 @@ app.MapGet("/", () => Results.Ok(new
         "/api/v1/devices/self-register", "/api/v1/devices/claim",
         "/api/v1/devices/{deviceId}/rotate-secret", "/api/v1/devices/{deviceId}/revoke",
         "/api/v1/terrariums", "/api/v1/terrariums/{terrariumId}",
+        "/api/v1/species-profiles", "/api/v1/species-profiles/{profileId}",
+        "/api/v1/species-profiles/{profileId}/duplicate",
         "/api/v1/terrariums/{terrariumId}/readings/latest", "/api/v1/terrariums/{terrariumId}/readings",
         "/api/v1/terrariums/{terrariumId}/coverage",
+        "/api/v1/terrariums/{terrariumId}/thresholds", "/api/v1/terrariums/{terrariumId}/thresholds/{metric}",
         "/api/v1/terrariums/{terrariumId}/silences", "/api/v1/terrariums/{terrariumId}/silences/{silenceId}",
         "/api/v1/alerts", "/api/v1/alerts/{alertId}", "/api/v1/alerts/{alertId}/ack",
         "/api/v1/alerts/{alertId}/resolve", "/api/v1/alerts/{alertId}/timeline",
+        "/api/v1/audit",
     },
     docs = "docs/README.md",
 })).WithTags("ops");

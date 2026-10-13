@@ -25,8 +25,12 @@ public class TerrariumServiceTests
     private readonly TerrariumService _service;
     private readonly Guid _owner = Guid.NewGuid();
 
-    public TerrariumServiceTests() =>
+    public TerrariumServiceTests()
+    {
+        // Create keys its new row on the caller's own subject, so the caller has to be an account this store knows.
+        _store.AddUser(_owner);
         _service = new TerrariumService(_store, _clock, new TerrariumSettings("Asia/Ho_Chi_Minh", 3));
+    }
 
     // ---- live-update membership (FR-08, roadmap task 2.9) -------------------------------------------
 
@@ -155,6 +159,26 @@ public class TerrariumServiceTests
 
         outcome.Problem!.Code.Should().Be("validation_failed");
         outcome.Problem.Errors.Should().ContainSingle().Which.Code.Should().Be("species_profile_not_found");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Create_refuses_a_caller_that_is_not_an_account_of_this_database()
+    {
+        var profile = _store.AddProfile();
+        var request = new CreateTerrariumRequest("Alpha", profile.Id, null, null, null);
+
+        // What an access token minted against another database — or before this one was rebuilt — looks like from
+        // here: signature and lifetime are fine, the subject names nobody. The insert used to answer a foreign-key
+        // violation as `500 internal_error`; the caller is told to sign in again instead (BUG-11).
+        var unknownAccount = await _service.CreateAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        unknownAccount.Problem!.Code.Should().Be("unauthenticated");
+
+        // A token with no usable subject claim reaches the service as Guid.Empty, and takes the same path.
+        var noSubject = await _service.CreateAsync(request, Guid.Empty, CancellationToken.None);
+
+        noSubject.Problem!.Code.Should().Be("unauthenticated");
         _store.SaveCount.Should().Be(0);
     }
 
@@ -479,6 +503,344 @@ public class TerrariumServiceTests
         card.Status.Should().Be(ReadingStatus.OutOfRange);
     }
 
+    // ---- threshold write (FR-10, roadmap 3.1's write half) -------------------------------------------
+
+    [Fact]
+    public async Task UpsertThresholds_writes_the_override_and_a_snapshot_of_the_new_set()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+
+        // The write answers with the set now in force, so an editor does not have to re-read to re-render.
+        var temperature = outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC");
+        temperature.Source.Should().Be("override");
+        temperature.TargetMin.Should().Be(28m);
+        temperature.TargetMax.Should().Be(30m);
+
+        var stored = terrarium.ThresholdOverrides.Should().ContainSingle().Which;
+        stored.Metric.Should().Be(MetricCode.TempC);
+        stored.TargetMin.Should().Be(28m);
+        stored.CreatedByUserId.Should().Be(_owner);
+
+        // TC-U-26: the change records one snapshot of the set now in force, hashed so it can be linked to later.
+        var snapshot = _store.ThresholdSnapshots.Should().ContainSingle().Which;
+        snapshot.TerrariumId.Should().Be(terrarium.Id);
+        snapshot.CapturedAtUtc.Should().Be(Now);
+        snapshot.EffectiveThresholdsJson.Should().Contain("\"targetMin\":28");
+        snapshot.EffectiveThresholdsJson.Should().Contain("\"source\":\"override\"");
+        snapshot.ThresholdVersionHash.Should().MatchRegex("^[0-9a-f]{64}$");
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_records_the_snapshot_with_the_new_band_and_not_the_old_one()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 24m, 26m);
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        // The snapshot is resolved after the change, so it holds the band the next sample will be judged against.
+        _store.ThresholdSnapshots.Single().EffectiveThresholdsJson
+            .Should().Contain("\"targetMin\":28").And.NotContain("\"targetMin\":24");
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_of_the_same_band_again_is_a_no_op()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        // Re-saving an unchanged editor page is not history: nothing is written and no second snapshot is recorded.
+        outcome.Succeeded.Should().BeTrue();
+        _store.ThresholdSnapshots.Should().ContainSingle();
+        _store.SaveCount.Should().Be(1);
+        terrarium.ThresholdOverrides.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_keeps_a_metric_the_body_did_not_mention()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 24m, 26m);
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.HumidityPct, 50m, 70m)]),
+            _owner,
+            CancellationToken.None);
+
+        // The request is a patch over the override set, not a replacement.
+        terrarium.ThresholdOverrides.Should().HaveCount(2);
+        terrarium.ThresholdOverrides.Single(row => row.Metric == MetricCode.TempC).TargetMin.Should().Be(24m);
+        terrarium.ThresholdOverrides.Single(row => row.Metric == MetricCode.HumidityPct).TargetMin.Should().Be(50m);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_defaults_the_engine_parameters_it_was_not_given()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        var stored = terrarium.ThresholdOverrides.Single();
+        stored.DwellWarnMinutes.Should().Be(5);
+        stored.DwellCritMinutes.Should().Be(2);
+        stored.RecoveryMargin.Should().Be(0.5m);
+        stored.Enabled.Should().BeTrue();
+        stored.Phase.Should().Be(ThresholdPhase.Any);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_rejects_an_inverted_band_and_writes_nothing()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 40m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        // TC-U-21: refusal carries the stable code and the field, and nothing is persisted.
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Select(violation => violation.Code).Should().Contain("threshold_ordering_invalid");
+        terrarium.ThresholdOverrides.Should().BeEmpty();
+        _store.ThresholdSnapshots.Should().BeEmpty();
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_rejects_a_critical_band_that_does_not_enclose_the_target()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 26m, 32m, criticalMin: 28m, criticalMax: 34m)]),
+            _owner,
+            CancellationToken.None);
+
+        // TC-U-22.
+        outcome.Problem!.Errors!.Select(violation => violation.Code).Should().Contain("threshold_critical_invalid");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_rejects_a_dwell_and_a_recovery_margin_that_cannot_hold()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest(
+            [
+                Override(MetricCode.TempC, 26m, 32m, dwellWarn: 5, dwellCrit: 6) with { RecoveryMargin = 4m },
+            ]),
+            _owner,
+            CancellationToken.None);
+
+        // TC-U-23: both rules are reported field by field rather than as one opaque refusal.
+        outcome.Problem!.Errors!.Select(violation => violation.Code).Should().BeEquivalentTo(
+        [
+            "threshold_dwell_invalid",
+            "threshold_recovery_margin_invalid",
+        ]);
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_reports_every_bad_entry_it_was_given()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest(
+            [
+                Override(MetricCode.TempC, 26m, 32m) with { Metric = "luminosity", Phase = "dusk" },
+                Override(MetricCode.TempC, 26m, 32m) with { TargetMin = null, TargetMax = null },
+            ]),
+            _owner,
+            CancellationToken.None);
+
+        // One bad entry does not hide the next, and the fields are addressed by their position in the body.
+        outcome.Problem!.Errors!.Select(violation => (violation.Field, violation.Code)).Should().BeEquivalentTo(
+        [
+            ($"overrides[0].metric", "metric_invalid"),
+            ($"overrides[0].phase", "threshold_phase_invalid"),
+            ($"overrides[1].targetMin", "threshold_target_required"),
+            ($"overrides[1].targetMax", "threshold_target_required"),
+        ]);
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_refuses_two_bands_for_one_metric_and_phase()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest(
+            [
+                Override(MetricCode.TempC, 26m, 32m),
+                Override(MetricCode.TempC, 28m, 30m),
+            ]),
+            _owner,
+            CancellationToken.None);
+
+        // The table has one row per (terrarium, metric, phase); the second entry is the one refused.
+        var duplicate = outcome.Problem!.Errors!.Single();
+        duplicate.Code.Should().Be("threshold_duplicate");
+        duplicate.Field.Should().Be("overrides[1].metric");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_records_a_change_even_when_the_phase_in_force_does_not_use_it()
+    {
+        var (terrarium, _, _) = Arrange();
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 3, 23, 0, 0, TimeSpan.Zero);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m, phase: "day")]),
+            _owner,
+            CancellationToken.None);
+
+        // A Day band is silent at 23:00, so the band in force is still the profile's night band…
+        outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC").Source.Should().Be("profile");
+
+        // …but the edit is still a change to this terrarium's configuration, so it is recorded (UC-03 A4).
+        _store.ThresholdSnapshots.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_of_another_accounts_terrarium_is_not_found()
+    {
+        var profile = _store.AddProfile();
+        var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            foreign.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+        foreign.ThresholdOverrides.Should().BeEmpty();
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_reverts_the_metric_to_the_profile_and_snapshots()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 28m, 30m);
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(
+            terrarium.Id,
+            "tempC",
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.ThresholdOverrides.Should().BeEmpty();
+
+        // The band in force is the profile's day band again, and the revert is snapshotted like any other change.
+        var temperature = outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC");
+        temperature.Source.Should().Be("profile");
+        temperature.TargetMin.Should().Be(26m);
+        _store.ThresholdSnapshots.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_removes_every_phase_of_the_metric()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 28m, 30m);
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 21m, 23m, ThresholdPhase.Night);
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.HumidityPct, 50m, 70m);
+
+        await _service.DeleteThresholdOverrideAsync(terrarium.Id, "tempC", _owner, CancellationToken.None);
+
+        // "Revert this metric" is the whole metric, not the phase the caller happened to be looking at.
+        terrarium.ThresholdOverrides.Should().ContainSingle().Which.Metric.Should().Be(MetricCode.HumidityPct);
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_of_a_metric_without_an_override_is_a_no_op()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(
+            terrarium.Id,
+            "tempC",
+            _owner,
+            CancellationToken.None);
+
+        // Idempotent: a retry that failed would leave the caller believing the override was still in force.
+        outcome.Succeeded.Should().BeTrue();
+        _store.SaveCount.Should().Be(0);
+        _store.ThresholdSnapshots.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_refuses_an_unknown_metric_key()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(
+            terrarium.Id,
+            "luminosity",
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Single().Code.Should().Be("metric_invalid");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_of_another_accounts_terrarium_is_not_found()
+    {
+        var profile = _store.AddProfile();
+        var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+        FakeTerrariumStore.AddOverride(foreign, MetricCode.TempC, 28m, 30m);
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(foreign.Id, "tempC", _owner, CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+        foreign.ThresholdOverrides.Should().ContainSingle();
+    }
+
     // ---- readings (range) ---------------------------------------------------------------------------
 
     [Theory]
@@ -730,6 +1092,30 @@ public class TerrariumServiceTests
 
         return (terrarium, device, profile);
     }
+
+    /// <summary>One band for a write request, with the metric spelled the way a client sends it.</summary>
+    private static ThresholdOverrideInput Override(
+        MetricCode metric,
+        decimal targetMin,
+        decimal targetMax,
+        string phase = "any",
+        decimal? criticalMin = null,
+        decimal? criticalMax = null,
+        int? dwellWarn = null,
+        int? dwellCrit = null,
+        string? note = null) =>
+        new(
+            MetricDictionary.Get(metric).ApiKey,
+            phase,
+            targetMin,
+            targetMax,
+            criticalMin,
+            criticalMax,
+            dwellWarn,
+            dwellCrit,
+            null,
+            note,
+            null);
 
     // ---- update and delete (FR-03, roadmap 2.8's remaining half) -------------------------------------
 

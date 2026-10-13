@@ -221,6 +221,17 @@ LightDeficitHours, AlertCount, CriticalAlertCount, ComputedAt, IsLowConfidence)`
 effective thresholds for a terrarium change (UC-03 A4). Alerts and rollups reference the snapshot in
 force, so history is explainable: *"this alert used the summer bands"*.
 
+**Built 2026-10-13** (roadmap 3.1's write half, migration `20261013025001_AddThresholdSnapshots`). Two as-built
+notes, each with its reason:
+- `EffectiveThresholdsJson` holds the **resolved set**, in the same camelCase shape
+  `GET /terrariums/{id}/thresholds` returns — one entry per metric that resolved at `CapturedAtUtc`, ordered by
+  metric key — rather than the override rows. The question the table answers is "what was in force", and that answer
+  depends on the profile too, so a snapshot of the overrides alone could not answer it.
+- Deciding whether anything changed is **not** a hash comparison on this column. A band written byte-for-byte
+  identically to the stored one writes no row, while a *real* change is recorded even when the phase in force does
+  not use it — a Day band authored at midnight still moves the configuration. `ThresholdVersionHash` therefore
+  identifies a version for a future alert claim (`Alert.ThresholdSnapshotId`), it is not a uniqueness key.
+
 ### 3.14 `Alert`
 | Column | Type | Notes |
 |---|---|---|
@@ -274,7 +285,8 @@ Status tinyint (0 Available, 1 Expired, 2 Deleted))`.
 BeforeJson nvarchar(max) NULL, AfterJson nvarchar(max) NULL, IpAddress, UserAgent, CorrelationId,
 OccurredAt)`. Actions are a closed vocabulary: `user.login`, `user.login_failed`, `user.role_changed`,
 `device.claimed`, `device.bound`, `device.unbound`, `device.secret_rotated`, `device.revoked`,
-`device.calibrated`, `threshold.created`, `threshold.updated`, `threshold.deleted`, `alert.acknowledged`,
+`device.calibrated`, `threshold.created`, `threshold.updated`, `threshold.deleted`, `profile.created`,
+`profile.updated`, `profile.deleted`, `profile.duplicated`, `alert.acknowledged`,
 `alert.resolved`, `alert.silenced`, `data.purged`, `export.generated`.
 
 ### 3.19 `ExportJob`

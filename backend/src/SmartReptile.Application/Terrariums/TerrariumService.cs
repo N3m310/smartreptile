@@ -1,9 +1,13 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Application.Readings;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Terrariums;
 using SmartReptile.Domain.Thresholds;
 
@@ -45,6 +49,19 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     private const int NameMaxLength = 60;
     private const int LocationMaxLength = 120;
     private const int DescriptionMaxLength = 1000;
+    private const int NoteMaxLength = 300;
+    private const int DefaultDwellWarnMinutes = 5;
+    private const int DefaultDwellCritMinutes = 2;
+    private const decimal DefaultRecoveryMargin = 0.5m;
+
+    /// <summary>
+    /// Snapshot JSON is written in the wire's camelCase, so a stored snapshot reads like the response it was
+    /// captured from and the same shape can be handed to a client without a second projection.
+    /// </summary>
+    private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     private static readonly Dictionary<MetricCode, MetricDefinition> Definitions =
         MetricDictionary.All.ToDictionary(definition => definition.Code);
@@ -112,25 +129,134 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         }
 
         var capturedAt = clock.UtcNow;
-        var entries = new List<EffectiveThresholdView>();
 
-        foreach (var definition in MetricDictionary.All)
+        return TerrariumOutcome.Resolved(DescribeThresholds(terrarium, capturedAt));
+    }
+
+    /// <summary>
+    /// Upserts this terrarium's band overrides (UC-03, FR-10 — roadmap 3.1's write half). Every entry is validated
+    /// against the band rules of `03-implementation/06` §2 before anything is written, so a body carrying one
+    /// incoherent band changes nothing at all; a valid body writes the overrides and one
+    /// <see cref="ThresholdSnapshot"/> of the set now in force, in the same unit of work.
+    /// </summary>
+    /// <remarks>
+    /// Two semantics worth stating because they are choices rather than consequences. A band identical to the one
+    /// the terrarium already holds is <b>not</b> a change: it writes no snapshot and does not touch the row, so
+    /// re-saving an unchanged editor page is not recorded as history. And the request is a <b>patch over the override
+    /// set</b>, not a replacement — a metric the body does not mention keeps whatever override it had.
+    /// </remarks>
+    /// <param name="terrariumId">Terrarium the bands belong to.</param>
+    /// <param name="request">The bands to upsert.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<TerrariumOutcome> UpsertThresholdsAsync(
+        Guid terrariumId,
+        UpdateThresholdsRequest request,
+        Guid ownerUserId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
+        if (terrarium is null)
         {
-            if (ResolveEffective(terrarium, definition.Code, capturedAt) is { } effective)
-            {
-                entries.Add(DescribeThreshold(effective, definition));
-            }
+            return TerrariumOutcome.NotFound();
         }
 
-        // Ordered by metric key so the editor's rows keep their places between reloads, the same way the latest
-        // readings are ordered.
-        entries.Sort((left, right) => string.CompareOrdinal(left.Metric, right.Metric));
+        var inputs = request.Overrides ?? [];
+        var violations = new List<IdentityViolation>();
+        var candidates = new List<OverrideCandidate>();
+        var seen = new HashSet<(MetricCode Metric, ThresholdPhase Phase)>();
 
-        return TerrariumOutcome.Resolved(new TerrariumThresholds(
-            terrariumId,
-            capturedAt,
-            terrarium.TimeZoneId,
-            entries));
+        for (var index = 0; index < inputs.Count; index++)
+        {
+            if (ParseOverride(inputs[index], index, violations) is not { } candidate)
+            {
+                continue;
+            }
+
+            // Two rows for one (metric, phase) would violate the table's unique index; the second is refused here,
+            // where the caller can be told which entry is the duplicate.
+            if (!seen.Add((candidate.Metric, candidate.Phase)))
+            {
+                violations.Add(new IdentityViolation(
+                    $"overrides[{index}].metric",
+                    "threshold_duplicate",
+                    "A metric and phase may appear only once: a band is a single row per metric and phase."));
+            }
+
+            candidates.Add(candidate);
+        }
+
+        if (violations.Count > 0)
+        {
+            return TerrariumOutcome.Invalid(violations);
+        }
+
+        var capturedAt = clock.UtcNow;
+        var changed = false;
+
+        foreach (var candidate in candidates)
+        {
+            changed |= ApplyOverride(terrarium, candidate, ownerUserId, capturedAt);
+        }
+
+        if (changed)
+        {
+            await SaveWithSnapshotAsync(terrarium, capturedAt, cancellationToken);
+        }
+
+        return TerrariumOutcome.Resolved(DescribeThresholds(terrarium, capturedAt));
+    }
+
+    /// <summary>
+    /// Reverts one metric to its profile band (FR-10 — roadmap 3.1's write half) by removing every override row the
+    /// terrarium holds for it, whichever phase, and snapshotting the set that is left.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent: a metric that carries no override is not an error, because a delete that failed on a retry would
+    /// leave a client believing an override was still in force — the same reasoning the silence cancel follows. An
+    /// unknown metric key is refused, though, since that is a client mistake rather than a no-op.
+    /// </remarks>
+    /// <param name="terrariumId">Terrarium the override belongs to.</param>
+    /// <param name="metricKey">Metric key from the dictionary, e.g. <c>tempC</c>.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<TerrariumOutcome> DeleteThresholdOverrideAsync(
+        Guid terrariumId,
+        string metricKey,
+        Guid ownerUserId,
+        CancellationToken cancellationToken)
+    {
+        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
+        if (terrarium is null)
+        {
+            return TerrariumOutcome.NotFound();
+        }
+
+        if (!MetricDictionary.TryParseApiKey(metricKey, out var metric))
+        {
+            return TerrariumOutcome.Invalid(
+            [
+                new IdentityViolation("metric", "metric_invalid", $"'{metricKey}' is not a metric key: {MetricKeys}."),
+            ]);
+        }
+
+        var capturedAt = clock.UtcNow;
+        var removed = terrarium.ThresholdOverrides.Where(row => row.Metric == metric).ToList();
+
+        if (removed.Count > 0)
+        {
+            foreach (var row in removed)
+            {
+                terrarium.ThresholdOverrides.Remove(row);
+                store.RemoveThresholdOverride(row);
+            }
+
+            await SaveWithSnapshotAsync(terrarium, capturedAt, cancellationToken);
+        }
+
+        return TerrariumOutcome.Resolved(DescribeThresholds(terrarium, capturedAt));
     }
 
     /// <summary>
@@ -143,6 +269,17 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         Guid ownerUserId,
         CancellationToken cancellationToken)
     {
+        // The caller's own account is checked first, because it is the one thing the body cannot fix. A token this
+        // server signed can still name an account it does not have — one minted against another database, or before
+        // this database was rebuilt — and without this check the id goes straight into the insert and the foreign
+        // key answers `500 internal_error`, which reads as a server fault instead of "sign in again" (BUG-11).
+        if (!await store.UserExistsAsync(ownerUserId, cancellationToken))
+        {
+            return TerrariumOutcome.Failed(
+                "unauthenticated",
+                "The access token names an account this server does not have. Sign in again.");
+        }
+
         var violations = new List<IdentityViolation>();
 
         var name = request.Name?.Trim() ?? string.Empty;
@@ -667,6 +804,230 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         effective.Band.DwellWarnMinutes,
         effective.Band.DwellCritMinutes,
         effective.Band.RecoveryMargin);
+
+    /// <summary>The wire shape of the effective set, resolved at one instant.</summary>
+    private TerrariumThresholds DescribeThresholds(Terrarium terrarium, DateTimeOffset capturedAt) =>
+        new(terrarium.Id, capturedAt, terrarium.TimeZoneId, ResolveAll(terrarium, capturedAt));
+
+    /// <summary>
+    /// Every metric that resolves to a band right now, ordered by metric key so the editor's rows, the wire response
+    /// and the snapshot's JSON all keep one order.
+    /// </summary>
+    private List<EffectiveThresholdView> ResolveAll(Terrarium terrarium, DateTimeOffset capturedAt)
+    {
+        var entries = new List<EffectiveThresholdView>();
+
+        foreach (var definition in MetricDictionary.All)
+        {
+            if (ResolveEffective(terrarium, definition.Code, capturedAt) is { } effective)
+            {
+                entries.Add(DescribeThreshold(effective, definition));
+            }
+        }
+
+        entries.Sort((left, right) => string.CompareOrdinal(left.Metric, right.Metric));
+
+        return entries;
+    }
+
+    /// <summary>One validated band, ready to be applied to the aggregate.</summary>
+    private readonly record struct OverrideCandidate(
+        MetricCode Metric,
+        ThresholdPhase Phase,
+        ThresholdBand Band,
+        string? Note);
+
+    /// <summary>
+    /// Validates one entry of the write request. Returns the candidate band when the entry is usable, or null after
+    /// appending every field-level violation it found, so one bad entry does not hide the problems in the next.
+    /// </summary>
+    private static OverrideCandidate? ParseOverride(
+        ThresholdOverrideInput input,
+        int index,
+        List<IdentityViolation> violations)
+    {
+        var label = $"overrides[{index}]";
+        var usable = true;
+
+        if (!MetricDictionary.TryParseApiKey(input.Metric, out var metric))
+        {
+            violations.Add(new IdentityViolation(
+                $"{label}.metric",
+                "metric_invalid",
+                $"'{input.Metric}' is not a metric key: {MetricKeys}."));
+            usable = false;
+        }
+
+        if (!ThresholdNames.TryParsePhase(input.Phase, out var phase))
+        {
+            violations.Add(new IdentityViolation(
+                $"{label}.phase",
+                "threshold_phase_invalid",
+                $"'{input.Phase}' is not a phase: any, day or night."));
+            usable = false;
+        }
+
+        if (input.TargetMin is null)
+        {
+            violations.Add(new IdentityViolation(
+                $"{label}.targetMin",
+                "threshold_target_required",
+                "targetMin is required."));
+            usable = false;
+        }
+
+        if (input.TargetMax is null)
+        {
+            violations.Add(new IdentityViolation(
+                $"{label}.targetMax",
+                "threshold_target_required",
+                "targetMax is required."));
+            usable = false;
+        }
+
+        if (input.Note is { Length: > NoteMaxLength })
+        {
+            violations.Add(new IdentityViolation(
+                $"{label}.note",
+                "threshold_note_too_long",
+                $"A note may be at most {NoteMaxLength} characters."));
+            usable = false;
+        }
+
+        if (!usable)
+        {
+            return null;
+        }
+
+        var band = new ThresholdBand
+        {
+            Metric = metric,
+            Phase = phase,
+            TargetMin = input.TargetMin!.Value,
+            TargetMax = input.TargetMax!.Value,
+            CriticalMin = input.CriticalMin,
+            CriticalMax = input.CriticalMax,
+            DwellWarnMinutes = input.DwellWarnMinutes ?? DefaultDwellWarnMinutes,
+            DwellCritMinutes = input.DwellCritMinutes ?? DefaultDwellCritMinutes,
+            RecoveryMargin = input.RecoveryMargin ?? DefaultRecoveryMargin,
+            Enabled = input.Enabled ?? true,
+        };
+
+        // The same rules the database CHECK constraints enforce, reported field by field so an editor can mark the
+        // input that is wrong instead of showing one opaque refusal.
+        var problems = band.Validate();
+
+        foreach (var violation in problems)
+        {
+            violations.Add(new IdentityViolation($"{label}.{violation.Field}", violation.Code, violation.Message));
+        }
+
+        return problems.Count == 0 ? new OverrideCandidate(metric, phase, band, input.Note) : null;
+    }
+
+    /// <summary>
+    /// Applies one validated band to the aggregate, returning true when it changed anything. A row already holding
+    /// exactly these values is left untouched, so a redundant save is not recorded as a change.
+    /// </summary>
+    /// <remarks>
+    /// A new row goes through <see cref="ITerrariumStore.AddThresholdOverride"/> rather than onto the collection
+    /// directly, because the adapter has to mark it an insert — an entity discovered in a tracked navigation with a
+    /// client-assigned key is a candidate for an update, not an insert — and the adapter's own fix-up is what puts it
+    /// on the collection the snapshot is resolved from.
+    /// </remarks>
+    private bool ApplyOverride(
+        Terrarium terrarium,
+        OverrideCandidate candidate,
+        Guid ownerUserId,
+        DateTimeOffset now)
+    {
+        var band = candidate.Band;
+        var existing = terrarium.ThresholdOverrides.FirstOrDefault(
+            row => row.Metric == candidate.Metric && row.Phase == candidate.Phase);
+
+        if (existing is null)
+        {
+            store.AddThresholdOverride(new ThresholdOverride
+            {
+                TerrariumId = terrarium.Id,
+                Metric = candidate.Metric,
+                Phase = candidate.Phase,
+                TargetMin = band.TargetMin,
+                TargetMax = band.TargetMax,
+                CriticalMin = band.CriticalMin,
+                CriticalMax = band.CriticalMax,
+                DwellWarnMinutes = band.DwellWarnMinutes,
+                DwellCritMinutes = band.DwellCritMinutes,
+                RecoveryMargin = band.RecoveryMargin,
+                Enabled = band.Enabled,
+                Note = candidate.Note,
+                CreatedByUserId = ownerUserId,
+                CreatedAt = now,
+            });
+
+            return true;
+        }
+
+        if (existing.TargetMin == band.TargetMin
+            && existing.TargetMax == band.TargetMax
+            && existing.CriticalMin == band.CriticalMin
+            && existing.CriticalMax == band.CriticalMax
+            && existing.DwellWarnMinutes == band.DwellWarnMinutes
+            && existing.DwellCritMinutes == band.DwellCritMinutes
+            && existing.RecoveryMargin == band.RecoveryMargin
+            && existing.Enabled == band.Enabled
+            && existing.Note == candidate.Note)
+        {
+            return false;
+        }
+
+        existing.TargetMin = band.TargetMin;
+        existing.TargetMax = band.TargetMax;
+        existing.CriticalMin = band.CriticalMin;
+        existing.CriticalMax = band.CriticalMax;
+        existing.DwellWarnMinutes = band.DwellWarnMinutes;
+        existing.DwellCritMinutes = band.DwellCritMinutes;
+        existing.RecoveryMargin = band.RecoveryMargin;
+        existing.Enabled = band.Enabled;
+        existing.Note = candidate.Note;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the snapshot of the set now in force and commits, in one unit of work with the override change that
+    /// caused it (UC-03 A4). The set is resolved <i>after</i> the change is applied, so the row records the band the
+    /// next sample will be judged against rather than the band that just stopped being used — which is the whole
+    /// point of keeping the snapshot at all.
+    /// </summary>
+    private async Task SaveWithSnapshotAsync(
+        Terrarium terrarium,
+        DateTimeOffset capturedAt,
+        CancellationToken cancellationToken)
+    {
+        var json = SerializeEffectiveSet(ResolveAll(terrarium, capturedAt));
+
+        store.AddThresholdSnapshot(new ThresholdSnapshot
+        {
+            TerrariumId = terrarium.Id,
+            CapturedAtUtc = capturedAt,
+            EffectiveThresholdsJson = json,
+            ThresholdVersionHash = HashOf(json),
+        });
+
+        await store.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string SerializeEffectiveSet(IReadOnlyList<EffectiveThresholdView> entries) =>
+        JsonSerializer.Serialize(entries, SnapshotJsonOptions);
+
+    /// <summary>SHA-256 of the snapshot content as lower-case hex — the 64 characters the column holds.</summary>
+    private static string HashOf(string json) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+
+    /// <summary>The metric keys a client may send, for a message that tells it what to send instead.</summary>
+    private static string MetricKeys =>
+        string.Join(", ", MetricDictionary.All.Select(definition => definition.ApiKey));
 
     /// <summary>
     /// Classifies one reading. Instantaneous only: a value outside the band is reported as

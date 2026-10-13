@@ -100,8 +100,14 @@ public static class AuthEndpoints
                 : Problem(outcome.Problem!);
         })
         .RequireRateLimiting("auth")
+        // The session body is an anonymous object, so without this the document says only "200 OK" and the page
+        // that hands out the credential never names the field holding it (BUG-10).
+        .Produces<AuthSession>(StatusCodes.Status200OK)
         .WithSummary("Start a session")
-        .WithDescription("Returns a 15-minute access token and a single-use refresh token.");
+        .WithDescription("Returns a 15-minute access token and a single-use refresh token. The authenticated routes "
+                       + "below need the accessToken: copy that field — not refreshToken — into the Authorize dialog, "
+                       + "without a 'Bearer ' prefix. The refresh token is accepted only in the body of "
+                       + "POST /api/v1/auth/refresh and POST /api/v1/auth/logout.");
 
         group.MapPost("/refresh", async (RefreshRequest request, AuthService auth, CancellationToken ct) =>
         {
@@ -111,8 +117,11 @@ public static class AuthEndpoints
                 : Problem(outcome.Problem!);
         })
         .RequireRateLimiting("authSession")
+        .Produces<AuthSession>(StatusCodes.Status200OK)
         .WithSummary("Rotate the session")
-        .WithDescription("Consumes the refresh token. Reuse of a consumed token revokes the whole family.");
+        .WithDescription("Consumes the refresh token. Reuse of a consumed token revokes the whole family. Answers the "
+                       + "same body as login: the returned accessToken is what the Authorize dialog wants, and the "
+                       + "returned refreshToken replaces the one just consumed.");
 
         group.MapPost("/logout", async (RefreshRequest request, AuthService auth, CancellationToken ct) =>
         {
@@ -133,7 +142,10 @@ public static class AuthEndpoints
         })
         .RequireAuthorization()
         .RequireRateLimiting("authSession")
-        .WithSummary("The signed-in account");
+        .Produces<UserProfile>(StatusCodes.Status200OK)
+        .WithSummary("The signed-in account")
+        .WithDescription("The account the bearer token names, so this is the route to prove a pasted token works "
+                       + "before blaming it for a 401 elsewhere.");
 
         group.MapPost("/change-password", async (
             ChangePasswordRequest request,

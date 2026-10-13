@@ -140,7 +140,7 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-25 | Phase + local-day bucketing | photoperiod 12 h from 07:00 in `Asia/Ho_Chi_Minh` (UTC+7) | 07:00 local = Day, 19:30 local = Night; a day summary uses local midnight boundaries, not UTC midnight | 1 | FR-10, NFR-10 |
 | TC-U-26 | Snapshot on change; open alert keeps its band | change target while an alert is open | new `ThresholdSnapshot` row; alert `BandMin/Max` unchanged; next sample evaluated against the new band | 1 | FR-10, FR-12 |
 
-> **Partly built 2026-10-09 — `TC-U-21…25` are green, `TC-U-26` is not.** `TC-U-21…23` were already covered by
+> **Built 2026-10-09 (read half) and 2026-10-13 (write half) — `TC-U-21…26` are green.** `TC-U-21…23` were already covered by
 > `ThresholdBandTests`; `TC-U-24` now has an author. `ThresholdResolver` (Domain) is the resolution order as one
 > pure function, `ThresholdResolverTests` pins it against hand-built rows, and
 > `TerrariumService.EffectiveThresholdsAsync` + `GET /terrariums/{id}/thresholds` expose it with `source` per
@@ -152,7 +152,11 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 > `03-implementation/06` §1 (precedence applied per instant, and `Any` winning inside a layer).
 > **`TC-U-24`'s "→ default" half is not testable and is not claimed:** no `SystemDefault` values exist anywhere in
 > the doc set, so the resolver's third tier is unbuilt rather than invented, and an unresolvable metric is reported
-> as *absent* instead. `TC-U-26` needs the `ThresholdSnapshot` table and the write path (3.2/3.4); `TC-U-25`'s
+> as *absent* instead. `TC-U-26` now has both halves: the write path and the `ThresholdSnapshot` table landed
+> 2026-10-13 as 3.1's write half, `TerrariumServiceTests` pins the arrangement (a change snapshots the set now in
+> force and not the old one, an identical re-put records nothing, a revert deletes the row), and a live run measured
+> the rest over HTTP — an open alert carrying `BandMin/BandMax` `24/32` still read `24.000/32.000` after the band
+> moved to `29–31`, with the effective set then reporting `source: override` at `29–31`. `TC-U-25`'s
 > phase half is green (`ThresholdPhaseResolverTests`), its local-day-summary half is 3.6.
 
 ### B4. Derived signals and device health

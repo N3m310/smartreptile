@@ -334,3 +334,15 @@ closures and a new M3-scaffolding block), `04-quality/02` (`TC-I-03`'s evaluator
 repository `README`. No document was added or removed, so the doc set is still **36 files** (35 documents + this
 index).
 
+**Revised 2026-10-13 (thirteenth pass) — M3 task 3.1 is complete: the threshold write half and
+`ThresholdSnapshot`.** `PUT /api/v1/terrariums/{id}/thresholds` and
+`DELETE /api/v1/terrariums/{id}/thresholds/{metric}` (both `Owner`) upsert and revert the per-terrarium overrides,
+validating every band before anything is written — field by field, addressed by position — and answering with the
+resulting effective set in the same shape the read route returns; a band identical to the stored one is a no-op,
+while every real change records one `ThresholdSnapshot` of the set now in force, in the same unit of work, so an
+alert already open keeps the band it was judged against (`TC-U-26`) while the next sample is judged against the new
+one. Touched `02-design/02` §3.13 (as-built notes), `02-design/03` §5, `07-appendices/03` §4.2 (the write routes as
+built), `03-implementation/06` §1, `03-implementation/07` (the 3.1 row and a new write-half block), `04-quality/02`
+§B3, `05-release/03` §5 and the repository `README`. No document was added or removed, so the doc set is still
+**36 files** (35 documents + this index).
+

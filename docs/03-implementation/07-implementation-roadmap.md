@@ -530,7 +530,7 @@ covers, which is the same set the read surface resolves a card's band from — a
 
 | # | Task | Track | Acceptance |
 |---|---|---|---|
-| 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Read half done 2026-10-09** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `TC-U-21…25` are green; the override write path and `ThresholdSnapshot` (`TC-U-26`) are open. See the block below |
+| 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Complete — read half 2026-10-09, write half 2026-10-13** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `PUT`/`DELETE` overrides write a `ThresholdSnapshot` on every change; all of `TC-U-21…26` are green. See the two blocks below |
 | 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green. **Decision engine done 2026-10-09** — the pure function, the evaluator that writes open/escalate/touch/resolve, and a live excursion through a real broker (see the block after this table); the per-device reorder window of §7 is open |
 | 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) belong with 3.6. See the block below |
 | 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36`. **Built 2026-10-10** — the list, the detail, the timeline, ack and resolve, the three silence routes and the `alertChanged` push; `TC-U-36`'s role matrix holds because ack, resolve and both silence writes name the `Technician` policy, and `TC-I-07` is covered from the service side (the project has no HTTP host). See the block below |
@@ -538,6 +538,7 @@ covers, which is the same set the read surface resolves a card's band from — a
 | 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`) |
 | 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15` |
 | 3.8 | `07-appendices/05` literature pass 2 — every shipped row cited | doc/report | 100% citation gate met |
+| 3.9 | Species-profile catalogue: `GET`/`POST`/`POST {id}/duplicate`/`PATCH {id}`/`DELETE {id}` on `/api/v1/species-profiles`, built-ins immutable, `409 profile_in_use` on delete | backend | **Built 2026-10-13** — `Application/Species/SpeciesProfileService.cs`, `Abstractions/ISpeciesProfileStore.cs`, `Infrastructure/Species/EfSpeciesProfileStore.cs`, `Api/Endpoints/SpeciesProfileEndpoints.cs`. Bands are validated by the domain's own `ThresholdBand.Validate` (BR-10.2), every write is audited with its before/after state (BR-10.4), and the routes were exercised live against SQL Server: create, duplicate (citation carried over), a patch that replaces the band set, `403 builtin_immutable`, `404` for a foreign profile, `409 profile_in_use`, `409 profile_name_taken`, `204` once the terrarium moved, and `401` for an orphaned token. 19 unit cases. **This is the route 4.16's create form was blocked on** — `POST /terrariums` needs a `speciesProfileId` and nothing exposed one until now |
 
 **DoD:** inducing a real excursion (lamp on / ice pack) produces exactly one alert and one notification,
 and a 4-minute disturbance produces nothing. **This is the milestone to demo to the mentor.**
@@ -583,10 +584,10 @@ a layer** when a layer holds both an `Any` row and a phase-specific one, which i
 pseudocode says and the only reading under which the two sentences in that section agree. Both are now stated in
 the document itself rather than only in the code's remarks.
 
-**What this deliberately does not include.** No override write path — `PUT`/`DELETE /terrariums/{id}/thresholds` is
-the other half of 3.1, so the live check had to insert its override rows with `sqlcmd` and says so. No
-`ThresholdSnapshot` table, because its natural writer is the change path (3.2/3.4) and a table nothing writes is
-just a promise. And no `SystemDefault` tier: the specification names it as tier 3 of the resolution order and
+**What this did not include on 2026-10-09, and what closed it.** No override write path and no `ThresholdSnapshot`
+table: the live check inserted its override rows with `sqlcmd` and said so, and the snapshot waited for the change
+path that would write it. Both landed with the task's write half on 2026-10-13 — the block below — so the only
+thing still absent is the `SystemDefault` tier: the specification names it as tier 3 of the resolution order and
 then **never gives it a value anywhere in the doc set**, so it is unbuilt rather than invented — a metric no layer
 resolves for the current phase is *absent* from the response, and absent is what the editor needs to show
 "configured nowhere" honestly.
@@ -601,6 +602,74 @@ with the profile's own `60–80` band in both; an inserted day-only override cor
 profile band came back; an override for the night phase reported `source: "override"` with its own bounds while
 every other metric kept `source: "profile"` and the metric list was unchanged; a missing terrarium `404 not_found`;
 and `readings/latest` still `200` beside it. The check deletes what it created.
+
+---
+
+## M3 task 3.1, write half — the override write path and `ThresholdSnapshot` (built 2026-10-13)
+
+The read half could report *why* a limit was what it was, but nothing could change one: the editor that 4.20 needs
+could preview a band and not author it. This half adds the two routes `07-appendices/03` §4.2 names and the table
+`02-design/02` §3.13 promises, around one property — **a change is recorded, and an alert already open is not
+rewritten**.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `ThresholdSnapshot` — the effective set at an instant, its JSON and its SHA-256 stored as `char(64)` | `Domain/Thresholds/ThresholdSnapshot.cs`; table `ThresholdSnapshot` (migration `20261013025001_AddThresholdSnapshots`), cascade-deleted with its terrarium, indexed `(TerrariumId, CapturedAtUtc DESC)` | the two integration cases below |
+| `TerrariumService.UpsertThresholdsAsync` — validate every entry, then upsert `(metric, phase)` and snapshot once | `Application/Terrariums/TerrariumService.cs` | 17 new `TerrariumServiceTests` cases |
+| `TerrariumService.DeleteThresholdOverrideAsync` — revert one metric, idempotently | same | the same cases |
+| `PUT /terrariums/{id}/thresholds` and `DELETE /terrariums/{id}/thresholds/{metric}`, both role `Owner` | `Api/Endpoints/TerrariumEndpoints.cs` | the live run below |
+| `AddThresholdOverride` / `RemoveThresholdOverride` / `AddThresholdSnapshot` on the store port | `Application/Abstractions/ITerrariumStore.cs`, `Infrastructure/Persistence/EfTerrariumStore.cs` | the integration cases below |
+
+**Four decisions worth stating, because they are choices and not consequences.**
+
+1. **Validation is all-or-nothing and every failure is field-level.** Each entry is checked for a known metric, a
+   known phase, both target bounds, the note's length, and then the band rules of `03-implementation/06` §2 — the
+   same `ThresholdBand.Validate` the database's CHECK constraints mirror. The entry's position addresses the field
+   (`overrides[1].targetMin`), duplicates of one `(metric, phase)` are refused where the caller can see which entry,
+   and nothing is written when anything is refused. The two rules that an *inverted* band also trips — the recovery
+   margin cannot fit inside a band of negative width — are reported alongside the ordering failure rather than
+   instead of it, which is what the validator already did and what the live run shows.
+2. **A no-op is not a change.** A band byte-for-byte equal to the stored one writes no snapshot and does not touch
+   the row, so re-saving an unchanged editor page is not recorded as history. The request is a **patch over the
+   override set**: a metric the body does not mention keeps whatever override it had.
+3. **The snapshot is resolved *after* the change, not before.** It records the set the next sample will be judged
+   against, which is the one an alert opened later should point at. A change that does not alter the set in force —
+   a Day band authored at midnight — is still a change, and is still snapshotted, because the configuration moved
+   even though this instant's answer did not.
+4. **A new override is staged through the store, not by adding to the loaded collection.** An entity discovered in a
+   tracked navigation with a client-assigned key is a candidate for an `UPDATE` as far as EF is concerned, and the
+   first cut of this task wrote `UPDATE [ThresholdOverride] … WHERE [Id] = …` affecting zero rows and threw
+   `DbUpdateConcurrencyException` against a real database — the unit suite could not see it, and only the SQL Server
+   run did. `AddThresholdOverride` / `RemoveThresholdOverride` exist so the adapter decides the state, and the fake
+   mirrors the adapter's fix-up so the snapshot's input is the same in both.
+
+**What this deliberately does not include.** No `If-Match` on the write paths: §4.2 lists the precondition for
+`PATCH /terrariums/{id}` alone, and two keepers racing to write one band resolve last-writer-wins, which is a
+smaller problem than 4.20 having to carry a token the contract never gave it. No audit row: the snapshot *is* the
+history the requirement asks for — it answers "which bands was this judged against?" — and the closed vocabulary of
+`02-design/02` §3.18 has no threshold verb. And no `SystemDefault` tier, still for the reason the read half gives.
+
+**Verification.** 655 unit tests (17 new; the suite was 638), `dotnet format --verify-no-changes --severity error`
+clean on the solution and on the integration project, and two new integration cases against SQL Server Express:
+a change commits the override and its snapshot together and the evaluator's own band source
+(`EfEvaluationStore.FindContextAsync` through `ThresholdResolver`) resolves the **new** band afterwards, while the
+alert's denormalised `BandMin`/`BandMax` are untouched; a revert deletes the row — not disables it — and leaves two
+snapshots, one reporting an override and one not. The suite is 26 cases, 25 green: `AlertLifecycleTests.The_cursor_pages…`
+fails, and it fails identically with this task's edits reverted, so it is a pre-existing defect in that test rather
+than a consequence of this one and is left alone.
+
+A live run through the real API and SQL Server (registered Owner, log in, create a terrarium on a seeded profile)
+checked the HTTP half the service tests cannot see — 13 assertions, all as expected: anonymous `PUT` and `DELETE`
+both `401`; **`PUT` a `tempC` band `28–30`** → `200` with `source: override` and one snapshot row; **an inverted
+band** → `400 validation_failed` naming `overrides[0].targetMin` (`threshold_ordering_invalid`) and
+`overrides[0].recoveryMargin` (`threshold_recovery_margin_invalid`), with the stored override unchanged; **an open
+alert carrying `BandMin/BandMax` `24/32`** then a second `PUT` moving the band to `29–31` → `200`, two snapshot rows,
+and the alert still reading **`24.000/32.000`** — `TC-U-26` measured over HTTP rather than argued; `GET` then
+reporting `source: override` at `29–31`, so the next evaluation uses the new band; **`DELETE …/thresholds/tempC`** →
+`200` with the profile's band back (`source: profile`, `24–28`), a second `DELETE` → `200` (idempotent, no new row),
+and `DELETE …/thresholds/luminosity` → `400 metric_invalid` listing the keys a client may send. `swagger.json`
+reported **37 operations, both new paths under the bearer scheme** (35 before), and `GET /` now advertises the
+thresholds family — which it had never done, not even for the read route it gained on 2026-10-09.
 
 ---
 
@@ -803,7 +872,7 @@ the mock data does, not before.
 | 4.13 | Decide the prototype's fate in an ADR: wire TERRAGUARD to the real API and retire `web/legacy/`, or keep it as a mock-data reference and finish the static dashboard | web/doc | ADR appended; `02-design/04` §1.2, `05-release/01` §5 and this table agree with the decision |
 | 4.14 | Prototype honesty and single-source pass: mark the UI as mock data, reconcile `web/src/index.css`'s status→colour palette with `02-design/04` §3 (or state why it differs), and decide the Vietnamese-only copy | web | `TC-I-15` either covers the prototype or its exclusion is written into `04-quality/01`; no second palette is left undocumented |
 | 4.15 | **Promotion, stage 1 — API client, session and auth screens** (`ADR-019`): an `api` module owning the base URL, token storage, refresh-on-401 and typed errors; `Login.tsx` plus both recovery forms wired to `/auth/*`; a route guard on the shell | web | **Done 2026-10-07.** `web/src/api/{client,endpoints,types}.ts` (single-flight refresh-on-401, `ApiError` carrying `code`/`status`/`detail`/`errors[]`), `state/session.tsx` (profile re-read from `GET /auth/me`, not trusted from storage), the four auth modes in one `Login.tsx`, and `RequireSession` around the shell. Every refusal renders from a code via `lib/messages.ts`; a session the transport could not rotate reports `sessionExpired` instead of bouncing silently; the three invented statistics and the `alert()` "contact an administrator" placeholder are gone |
-| 4.16 | **Promotion, stage 2 — wire the read surface**: `Dashboard.tsx`, `History.tsx`, `Terrariums.tsx`, `TerrariumDetail.tsx` against `/terrariums`, `/terrariums/{id}`, `readings/latest`, `readings` and `coverage`, polling until 2.9; delete `mockData.ts`'s `Terrarium`/`Device`/`HistoryDataPoint` shapes | web | **Done 2026-10-07** for the four screens, verified live: 5 metric cards, coverage `0.42%` (6 of 1440 expected) and a gap-aware history chart, all from the API on a terrarium created and fed through `/ingest/http` for the check. `mockData.ts` keeps `Device`/`AlertItem` for the three 4.20 screens; its `Terrarium`/`ThresholdConfig`/`HistoryDataPoint` shapes are deleted. **Create is not wired**: `POST /terrariums` needs a `speciesProfileId` and the species-profile catalogue route does not exist, so the list says so rather than inventing one |
+| 4.16 | **Promotion, stage 2 — wire the read surface**: `Dashboard.tsx`, `History.tsx`, `Terrariums.tsx`, `TerrariumDetail.tsx` against `/terrariums`, `/terrariums/{id}`, `readings/latest`, `readings` and `coverage`, polling until 2.9; delete `mockData.ts`'s `Terrarium`/`Device`/`HistoryDataPoint` shapes | web | **Done 2026-10-07** for the four screens, verified live: 5 metric cards, coverage `0.42%` (6 of 1440 expected) and a gap-aware history chart, all from the API on a terrarium created and fed through `/ingest/http` for the check. `mockData.ts` keeps `Device`/`AlertItem` for the three 4.20 screens; its `Terrarium`/`ThresholdConfig`/`HistoryDataPoint` shapes are deleted. **Create was not wired until 2026-10-13** — `POST /terrariums` needs a `speciesProfileId` and no route listed one, so the list said so rather than inventing an id. With the catalogue built (3.9) the panel is wired: `Terrariums.tsx` opens an Owner-only form whose species picker is filled from `GET /species-profiles`, sends `name`/`speciesProfileId`/`location`, and reloads the list on success. Verified in a real browser against the running API and SQL Server: the panel listed the four seeded profiles by name and scientific name, the create answered `201`, the new card appeared with its species and location, and the row carried the chosen `SpeciesProfileId` and the deployment's default zone |
 | 4.17 | **Promotion, stage 3 — the verdict comes from the server, not the screen (ADR-005)**: card status and band from `readings/latest`; no threshold comparison anywhere in TSX | web | **Done 2026-10-07.** `components/MetricCard.tsx` renders `status`, `target` and `capturedAt` as sent; `lib/status.ts` maps the five API values to a label and a colour and holds the only vocabulary. `grep -rn "target\|status" web/src --include=*.tsx` finds no comparison of a value against a bound; the one comparison left is §6's staleness age against `3 × samplingIntervalSec`, which is a comparison of *ages* |
 | 4.18 | **Promotion, stage 4 — make it shippable**: vi+en key set shared with the app, `02-design/04` §3 tokens at ≥ 4.5:1, `tsc`/`vite build`/key-parity in CI, and `MockDataNotice` removed | web | **Done 2026-10-07, with one part deferred and said so.** Both clients now read `app/lib/l10n/app_{en,vi}.arb` (164 keys, vi+en identical, checked by `web/scripts/check-strings.mjs` in the new CI `web` job with `tsc` and `vite build`); the palette is §3's four roles with hues measured on this client's surfaces (`web/src/index.css` records both sets, including §3's failing 3.30/3.01/2.73); the notice is rendered only on the three screens still on mock data. "The notice is gone because no screen renders mock data" cannot be true while 4.20 is blocked by missing endpoints — it goes when the mock data does |
 | 4.19 | **Promotion, stage 5 — switch the surface and retire `web/legacy/`**: single nginx mount, wallboard rebuilt as a React route, BUG-03 regression pair replaced, `web/legacy/` and its compose mount deleted | web | **Done 2026-10-07.** `web/nginx.conf` serves one mount (`/srv/app`) with the SPA fallback; `docker-compose.yml` mounts only `web/dist`; `web/legacy/` (8 files) is deleted; `web/dist` is rebuilt and committed. Verified through the real nginx config: `/` 200 with the hashed bundle, `/wallboard` 200 and `/dashboard` 200 through the fallback, assets 200, and no runtime error on any page. **The wallboard page was new work** (W1 was not one of the prototype's eight screens) and the legacy `health.html` diagnosis became `/system`, because a retirement that loses a function is a regression |

@@ -14,9 +14,9 @@ namespace SmartReptile.Api.Endpoints;
 /// answers exactly like one that does not exist, so the endpoints cannot be used to enumerate ids (BR-02.2) — which
 /// is why there is no <c>forbidden</c> code here.
 /// <para>
-/// Role gating is deliberately light: reads need a valid token and ownership, and only <c>create</c> names a policy
-/// (Owner). The Technician/Viewer split lands with the membership model in M3, because there is nothing for a
-/// technician to be a member of yet.
+/// Role gating is deliberately light: reads need a valid token and ownership, and only <c>create</c>, <c>update</c>,
+/// <c>delete</c> and the two threshold writes name a policy (Owner). The Technician/Viewer split lands with the
+/// membership model in M3, because there is nothing for a technician to be a member of yet.
 /// </para>
 /// </remarks>
 public static class TerrariumEndpoints
@@ -160,28 +160,56 @@ public static class TerrariumEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken);
 
-            if (!outcome.Succeeded)
-            {
-                return Problem(outcome.Problem!);
-            }
-
-            var thresholds = outcome.Thresholds!;
-
-            // Named `effectiveThresholds` on the wire, which is the field name `07-appendices/03` §4.2 and
-            // BR-10.3 use; the container's member is spelled the same so the two cannot drift.
-            return Results.Ok(new
-            {
-                terrariumId = thresholds.TerrariumId,
-                capturedAtUtc = thresholds.CapturedAtUtc,
-                timeZoneId = thresholds.TimeZoneId,
-                effectiveThresholds = thresholds.EffectiveThresholds,
-            });
+            return outcome.Succeeded ? Results.Ok(ThresholdsPayload(outcome.Thresholds!)) : Problem(outcome.Problem!);
         })
         .WithSummary("The effective band per metric")
         .WithDescription("Resolves terrarium override → species profile (BR-10.3) at this instant and reports "
                        + "`source` per metric, so a limit can be explained rather than guessed at. A metric with "
-                       + "no band for the current phase is absent. Read-only: `PUT`/`DELETE` overrides are not "
-                       + "built yet.");
+                       + "no band for the current phase is absent.");
+
+        group.MapPut("/{terrariumId:guid}/thresholds", async (
+            Guid terrariumId,
+            UpdateThresholdsRequest request,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.UpsertThresholdsAsync(
+                terrariumId,
+                request,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken);
+
+            return outcome.Succeeded ? Results.Ok(ThresholdsPayload(outcome.Thresholds!)) : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .WithSummary("Write band overrides")
+        .WithDescription("Requires the Owner role. Upserts the band for each (metric, phase) the body names and "
+                       + "answers with the resulting effective set — the same shape `GET` returns. Every band is "
+                       + "validated before anything is written, so one incoherent band changes nothing. A change "
+                       + "records a `ThresholdSnapshot`, which is how an alert already open keeps the band it was "
+                       + "judged against. A band identical to the stored one is a no-op and writes no snapshot.");
+
+        group.MapDelete("/{terrariumId:guid}/thresholds/{metric}", async (
+            Guid terrariumId,
+            string metric,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.DeleteThresholdOverrideAsync(
+                terrariumId,
+                metric,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken);
+
+            return outcome.Succeeded ? Results.Ok(ThresholdsPayload(outcome.Thresholds!)) : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .WithSummary("Revert one metric to its profile band")
+        .WithDescription("Requires the Owner role. Removes every override the terrarium holds for the metric, "
+                       + "whichever phase, and answers with the resulting effective set. Idempotent: a metric that "
+                       + "carries no override is not an error.");
 
         group.MapGet("/{terrariumId:guid}/readings/latest", async (
             Guid terrariumId,
@@ -268,6 +296,19 @@ public static class TerrariumEndpoints
     }
 
     /// <summary>
+    /// Shapes the effective set for the wire. It is named <c>effectiveThresholds</c> because that is the field name
+    /// `07-appendices/03` §4.2 and BR-10.3 use, and the write routes answer with the same shape as the read so a
+    /// client re-renders its editor from one payload rather than two.
+    /// </summary>
+    private static object ThresholdsPayload(TerrariumThresholds thresholds) => new
+    {
+        terrariumId = thresholds.TerrariumId,
+        capturedAtUtc = thresholds.CapturedAtUtc,
+        timeZoneId = thresholds.TimeZoneId,
+        effectiveThresholds = thresholds.EffectiveThresholds,
+    };
+
+    /// <summary>
     /// Maps a read failure to RFC 7807. Only three shapes exist: the terrarium is not yours (or not there), no
     /// device is bound so coverage has no meaning, or the caller sent something the API could not use — which
     /// covers a bad metric and a bad range under one status, the way the contract documents them.
@@ -276,6 +317,7 @@ public static class TerrariumEndpoints
     {
         var status = problem.Code switch
         {
+            "unauthenticated" => StatusCodes.Status401Unauthorized,
             "not_found" => StatusCodes.Status404NotFound,
             "device_not_bound" => StatusCodes.Status409Conflict,
             "conflict_device_bound" => StatusCodes.Status409Conflict,
