@@ -62,6 +62,7 @@ const FIELD_KEY: Record<string, string> = {
   username_taken: 'usernameTaken',
   email_taken: 'emailTaken',
   username_too_short: 'usernameTooShort',
+  username_too_long: 'usernameTooLong',
   username_invalid: 'usernameInvalid',
   email_invalid: 'emailInvalid',
 };

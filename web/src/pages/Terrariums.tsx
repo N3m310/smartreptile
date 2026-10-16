@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, ExternalLink, History as HistoryIcon, Plus, X, Loader2 } from 'lucide-react';
+import { Box, Plus, X, Loader2 } from 'lucide-react';
 import * as api from '../api/endpoints';
 import type { SpeciesProfileItem, TerrariumList } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
@@ -113,71 +113,57 @@ export const Terrariums: React.FC = () => {
       {items.length > 0 ? (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-col justify-between rounded-2xl border border-hairline bg-surface p-5 shadow-sm transition-all hover:border-brand/40"
-            >
-              <div>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-heading text-lg font-semibold text-ink">{item.name}</h2>
-                    <p className="mt-0.5 text-xs text-muted">
-                      {item.speciesName}
-                      {item.location ? ` · ${item.location}` : ''}
-                    </p>
+            <li key={item.id}>
+              <Link
+                to={`/terrariums/${item.id}`}
+                className="flex h-full flex-col justify-between rounded-2xl border border-hairline bg-surface p-5 shadow-sm transition-all hover:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-heading text-lg font-semibold text-ink">{item.name}</h2>
+                      <p className="mt-0.5 text-xs text-muted">
+                        {item.speciesName}
+                        {item.location ? ` · ${item.location}` : ''}
+                      </p>
+                    </div>
+                    <Box className="h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
                   </div>
-                  <Box className="h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
+
+                  <dl className="mt-4 space-y-1.5 text-xs">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted">{t('device')}</dt>
+                      <dd className="truncate text-ink">
+                        {item.device ? item.device.deviceName : t('deviceUnbound')}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted">{t('navLive')}</dt>
+                      <dd className="text-ink">{deviceStatusLabel(t, item.device?.status ?? null)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted">{t('lastSampleAt')}</dt>
+                      <dd className="text-right text-ink">
+                        {item.latestSampleAt ? (
+                          <>
+                            <span>{formatDateTime(item.latestSampleAt, lang)}</span>
+                            <span className="block text-[11px] text-muted">
+                              {formatRelative(t, item.latestSampleAt)}
+                            </span>
+                          </>
+                        ) : (
+                          t('never')
+                        )}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted">{t('openAlerts')}</dt>
+                      <dd className="text-ink">{item.openAlertCount}</dd>
+                    </div>
+                  </dl>
                 </div>
 
-                <dl className="mt-4 space-y-1.5 text-xs">
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted">{t('device')}</dt>
-                    <dd className="truncate text-ink">
-                      {item.device ? item.device.deviceName : t('deviceUnbound')}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted">{t('navLive')}</dt>
-                    <dd className="text-ink">{deviceStatusLabel(t, item.device?.status ?? null)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted">{t('lastSampleAt')}</dt>
-                    <dd className="text-right text-ink">
-                      {item.latestSampleAt ? (
-                        <>
-                          <span>{formatDateTime(item.latestSampleAt, lang)}</span>
-                          <span className="block text-[11px] text-muted">
-                            {formatRelative(t, item.latestSampleAt)}
-                          </span>
-                        </>
-                      ) : (
-                        t('never')
-                      )}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted">{t('openAlerts')}</dt>
-                    <dd className="text-ink">{item.openAlertCount}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              <div className="mt-5 flex items-center gap-4 text-xs">
-                <Link
-                  to={`/terrariums/${item.id}`}
-                  className="inline-flex items-center gap-1 text-accent hover:underline"
-                >
-                  {t('terrariumDetail')}
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                </Link>
-                <Link
-                  to={`/history?terrarium=${item.id}`}
-                  className="inline-flex items-center gap-1 text-accent hover:underline"
-                >
-                  <HistoryIcon className="h-3 w-3" aria-hidden="true" />
-                  {t('navHistory')}
-                </Link>
-              </div>
+              </Link>
             </li>
           ))}
         </ul>

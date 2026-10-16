@@ -35,6 +35,11 @@ import { describeError, fieldHasError, fieldMessage, fieldMessages } from '../li
  */
 
 type Mode = 'signIn' | 'register' | 'recover' | 'reset';
+type IdentifierValidationKey =
+  | 'usernameTooShort'
+  | 'usernameTooLong'
+  | 'usernameInvalid'
+  | 'emailInvalid';
 
 export const Login: React.FC = () => {
   const { t, lang, setLang } = useI18n();
@@ -51,6 +56,8 @@ export const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [identifierValidationKey, setIdentifierValidationKey] =
+    useState<IdentifierValidationKey | null>(null);
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -63,6 +70,7 @@ export const Login: React.FC = () => {
 
   const clearFeedback = () => {
     setError(null);
+    setIdentifierValidationKey(null);
     setNotice(null);
     setIssuedCode(null);
   };
@@ -76,10 +84,18 @@ export const Login: React.FC = () => {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setBusy(true);
     clearFeedback();
     clearLostReason();
 
+    if (mode === 'recover' || mode === 'reset') {
+      const validationKey = validateUsernameOrEmail(identifier);
+      if (validationKey) {
+        setIdentifierValidationKey(validationKey);
+        return;
+      }
+    }
+
+    setBusy(true);
     try {
       if (mode === 'signIn') {
         signIn(await auth.login({ usernameOrEmail: identifier.trim(), password }));
@@ -129,8 +145,14 @@ export const Login: React.FC = () => {
 
   /** Asks for a server-issued code and switches the form into the mode that spends it. */
   const requestResetCode = async () => {
-    setBusy(true);
     clearFeedback();
+    const validationKey = validateUsernameOrEmail(identifier);
+    if (validationKey) {
+      setIdentifierValidationKey(validationKey);
+      return;
+    }
+
+    setBusy(true);
     try {
       await auth.forgotPassword({ usernameOrEmail: identifier.trim() });
       setNotice(`${t('resetCodeRequested')} ${t('resetCodeLogHint')}`);
@@ -141,11 +163,6 @@ export const Login: React.FC = () => {
       setBusy(false);
     }
   };
-
-  const inputClass = (field: string) =>
-    `w-full rounded-xl border bg-field py-3 pl-11 pr-4 text-sm text-ink outline-none transition-all placeholder:text-muted/60 focus:ring-1 focus:ring-brand ${
-      fieldHasError(error, field) ? 'border-critical' : 'border-hairline focus:border-brand'
-    }`;
 
   const heading =
     mode === 'signIn'
@@ -158,6 +175,29 @@ export const Login: React.FC = () => {
 
   // Every field-level sentence in the refusal, de-duplicated: the policy reports one code per rule.
   const fieldSentences = mode === 'register' ? [...new Set(fieldMessages(t, error?.errors))] : [];
+  const passwordFieldMessage =
+    mode === 'register' || mode === 'recover' || mode === 'reset'
+      ? fieldMessages(
+          t,
+          error?.errors.filter((violation) => violation.field === 'password')
+        )[0] ?? null
+      : null;
+  const codeErrorKey =
+    mode === 'recover' && error?.code === 'invalid_recovery_code'
+      ? 'recoveryCodeInvalid'
+      : mode === 'reset' && error?.code === 'invalid_reset_code'
+        ? 'resetCodeInvalid'
+        : null;
+  const hasInlineValidationError =
+    fieldSentences.length > 0 || passwordFieldMessage !== null || codeErrorKey !== null;
+  const inputClass = (field: string) =>
+    `w-full rounded-xl border bg-field py-3 pl-11 pr-4 text-sm text-ink outline-none transition-all placeholder:text-muted/60 focus:ring-1 focus:ring-brand ${
+      fieldHasError(error, field) ||
+      (field === 'identifier' && identifierValidationKey) ||
+      (field === 'code' && codeErrorKey)
+        ? 'border-critical'
+        : 'border-hairline focus:border-brand'
+    }`;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-4 sm:p-6 lg:p-8">
@@ -214,17 +254,12 @@ export const Login: React.FC = () => {
                 </p>
               ) : null}
 
-              {error ? (
+              {error && !hasInlineValidationError ? (
                 <div
                   role="alert"
                   className="mt-4 rounded-xl border border-critical/40 bg-critical/10 px-4 py-2.5 text-[13px] text-ink"
                 >
                   <p>{describeError(t, error)}</p>
-                  {fieldSentences.map((sentence) => (
-                    <p key={sentence} className="mt-1 text-xs">
-                      {sentence}
-                    </p>
-                  ))}
                 </div>
               ) : null}
 
@@ -272,15 +307,28 @@ export const Login: React.FC = () => {
                     <FieldLabelError message={fieldMessage(t, error, 'email')} />
                   </>
                 ) : (
-                  <Field label={t('usernameOrEmail')} icon={<User className="h-5 w-5" />}>
-                    <input
-                      value={identifier}
-                      onChange={(event) => setIdentifier(event.target.value)}
-                      required
-                      autoComplete="username"
-                      className={inputClass('identifier')}
+                  <>
+                    <Field label={t('usernameOrEmail')} icon={<User className="h-5 w-5" />}>
+                      <input
+                        value={identifier}
+                        onChange={(event) => {
+                          setIdentifier(event.target.value);
+                          setIdentifierValidationKey(null);
+                        }}
+                        required
+                        autoComplete="username"
+                        aria-invalid={Boolean(identifierValidationKey)}
+                        className={inputClass('identifier')}
+                      />
+                    </Field>
+                    <FieldLabelError
+                      message={
+                        identifierValidationKey
+                          ? t(identifierValidationKey)
+                          : fieldMessage(t, error, 'usernameOrEmail')
+                      }
                     />
-                  </Field>
+                  </>
                 )}
 
                 {mode === 'signIn' || mode === 'register' ? (
@@ -301,7 +349,12 @@ export const Login: React.FC = () => {
                       />
                     </Field>
                     {mode === 'register' ? (
-                      <p className="text-xs text-muted">{t('passwordHint')}</p>
+                      <p
+                        className={`min-h-4 text-xs ${passwordFieldMessage ? 'text-critical' : 'text-muted'}`}
+                        aria-live="polite"
+                      >
+                        {passwordFieldMessage ?? t('passwordHint')}
+                      </p>
                     ) : null}
                   </>
                 ) : (
@@ -312,15 +365,26 @@ export const Login: React.FC = () => {
                     >
                       <input
                         value={code}
-                        onChange={(event) => setCode(event.target.value)}
+                        onChange={(event) => {
+                          setCode(event.target.value);
+                          if (codeErrorKey) setError(null);
+                        }}
                         required
                         spellCheck={false}
                         autoComplete="one-time-code"
+                        aria-invalid={Boolean(codeErrorKey)}
                         className={`${inputClass('code')} font-mono`}
                       />
                     </Field>
-                    <p className="text-xs text-muted">
-                      {mode === 'recover' ? t('recoverHintBackup') : t('recoverHintIssued')}
+                    <p
+                      className={`min-h-4 text-xs ${codeErrorKey ? 'text-critical' : 'text-muted'}`}
+                      aria-live="polite"
+                    >
+                      {codeErrorKey
+                        ? t(codeErrorKey)
+                        : mode === 'recover'
+                          ? t('recoverHintBackup')
+                          : t('recoverHintIssued')}
                     </p>
                     <div>
                       <Field label={t('newPassword')} icon={<Lock className="h-5 w-5" />}>
@@ -339,7 +403,12 @@ export const Login: React.FC = () => {
                         />
                       </Field>
                       {/* The rule in the same words the server enforces (BR-01.2). */}
-                      <p className="mt-2 text-xs text-muted">{t('passwordHint')}</p>
+                      <p
+                        className={`mt-2 min-h-4 text-xs ${passwordFieldMessage ? 'text-critical' : 'text-muted'}`}
+                        aria-live="polite"
+                      >
+                        {passwordFieldMessage ?? t('passwordHint')}
+                      </p>
                     </div>
                   </>
                 )}
@@ -449,7 +518,9 @@ const Field: React.FC<{ label: string; icon: React.ReactNode; children: React.Re
 
 /** The per-field sentence under an input, when the refusal named that field. */
 const FieldLabelError: React.FC<{ message: string | null }> = ({ message }) =>
-  message ? <p className="-mt-3 text-xs text-critical">{message}</p> : null;
+  <p className="-mt-3 min-h-4 text-xs text-critical" aria-live="polite">
+    {message ?? ''}
+  </p>;
 
 function actionLabel(t: (key: string) => string, mode: Mode): string {
   switch (mode) {
@@ -473,4 +544,32 @@ function busyLabel(t: (key: string) => string, mode: Mode): string {
     default:
       return t('signingIn');
   }
+}
+
+function validateUsernameOrEmail(value: string): IdentifierValidationKey | null {
+  const identifier = value.trim();
+  if (!identifier) {
+    return null;
+  }
+
+  if (identifier.includes('@')) {
+    const at = identifier.indexOf('@');
+    const validEmail =
+      at > 0 &&
+      at === identifier.lastIndexOf('@') &&
+      at < identifier.length - 1 &&
+      identifier.indexOf('.', at) > at + 1 &&
+      !identifier.includes(' ') &&
+      identifier[at + 1] !== '.' &&
+      !identifier.endsWith('.');
+    return validEmail ? null : 'emailInvalid';
+  }
+
+  if (identifier.length < 3) {
+    return 'usernameTooShort';
+  }
+  if (identifier.length > 32) {
+    return 'usernameTooLong';
+  }
+  return /^[a-z][a-z0-9._-]*$/i.test(identifier) ? null : 'usernameInvalid';
 }

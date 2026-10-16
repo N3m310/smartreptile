@@ -12,6 +12,7 @@ import {
   X,
   Loader2,
   Sliders,
+  History as HistoryIcon,
 } from 'lucide-react';
 import * as api from '../api/endpoints';
 import type {
@@ -171,6 +172,13 @@ export const TerrariumDetail: React.FC = () => {
         </Link>
 
         <div className="flex items-center gap-2">
+          <Link
+            to={`/history?terrarium=${item.id}`}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition hover:bg-hairline/20"
+          >
+            <HistoryIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{t('navHistory')}</span>
+          </Link>
           <button
             type="button"
             onClick={() => void handleOpenEdit()}
