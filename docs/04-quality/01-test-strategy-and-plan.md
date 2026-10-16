@@ -114,6 +114,12 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 > container that runs 8 tests — migrations applied, reference data seeded idempotently, the SQL-level invariants —
 > and then boots the API and requires `/health/ready` to report Healthy.
 >
+> **Corrected 2026-10-17.** That count is a dated snapshot, not the current pipeline: there are **six** jobs now —
+> `web` (typecheck, locale-key parity, production build) was added with the web client in `5dd9c6a` — and the five
+> measured figures have since moved to **947 backend unit tests**, `flutter analyze` + **182 app tests**, 22 firmware
+> host tests, the full-history secret scan, and an integration job running **55 tests**. All six are green on run
+> `38949606361`.
+>
 > Still missing from that row: the E2E script set, the overnight soak and the chaos drills, which belong to M3/M5 as
 > planned. One caveat worth stating rather than letting a green check imply otherwise: the integration tests run
 > against a single SQL Server instance that is already up, so they say nothing about behaviour when the database is

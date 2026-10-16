@@ -158,7 +158,7 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **182 tests passed** (19 at M1; the suite grew with the client's own screens, and the 2026-10-17 re-framing added the permission-gating widget cases — the administration tab is absent without the administrative codes, present with them, and each of the two groups appears only with its own permission) |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
 | No committed secrets or build output | `git ls-files` audit | ✅ at M1: 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores. **Re-audited 2026-10-03:** 247 files and still no secrets — the increase is the TERRAGUARD prototype, including the three `web/dist/` build artefacts that `ADR-017` accepts deliberately |
-| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
+| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI. **The pipeline has since grown to six jobs** — `web` (typecheck, key parity, build) was added with the web client in `5dd9c6a` — and all six are green on run `38949606361` (2026-10-17, `main`) |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
