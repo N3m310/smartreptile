@@ -121,12 +121,20 @@ prefixed `sr_` because the ESP32 framework ships its own `config.h`, which would
 cd app
 flutter pub get
 flutter gen-l10n
-flutter run -d android               # or: flutter run -d emulator-5554
+flutter run -d android --dart-define=API_BASE=http://10.0.2.2:8080   # emulator → the host's API
 flutter build apk --release --split-per-abi
 ```
 
-`app/lib/core/env.dart` holds the API base URL per build flavour (`dev` → `http://10.0.2.2:8080` for the
-Android emulator, `demo` → `https://<host>`); no secrets are compiled into the app.
+`app/lib/core/env.dart` holds the API base URL and the version string, both injected at build time with
+`--dart-define` (`API_BASE`, `APP_VERSION`); the default is `http://localhost:8080`, which is right for desktop and
+wrong for an emulator — `10.0.2.2` is the host from inside the emulator — and a phone on the LAN needs the host's
+address. No secrets are compiled into the app.
+
+Two UI modes are compiled from one entry point and only one is shown (`Env.prototypeMode`): the **app** by default —
+`lib/app.dart` and `lib/screens/`, the VIVARIUMGUARD shell a keeper sees — and the **clickable prototype** behind
+`--dart-define=PROTOTYPE=true` (fake data, real rule kernel, `app/PROTOTYPE.md`). The default was the prototype
+until 2026-10-14; the release build passes no `PROTOTYPE` define, so no artifact can carry the working aid by
+accident.
 
 ### 4.4 Web (`web/`) — one surface
 

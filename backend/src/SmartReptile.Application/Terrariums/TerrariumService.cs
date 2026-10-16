@@ -2,7 +2,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Readings;
+using SmartReptile.Application.Reference;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Metrics;
@@ -23,8 +26,11 @@ namespace SmartReptile.Application.Terrariums;
 /// Three decisions worth defending:
 /// <list type="number">
 /// <item>
-/// <b>Ownership is a query parameter.</b> A foreign terrarium is <see cref="TerrariumOutcome.NotFound"/>, never
-/// <c>forbidden</c>, so ids cannot be probed (BR-02.2).
+/// <b>Ownership is a query parameter, and the refusal says which kind it is.</b> A missing terrarium is
+/// <c>404</c>, a deleted one is <c>410</c> and another account's is <c>403</c> — for callers other than the
+/// administrator, who reaches any account's enclosure. This narrows BR-02.2's uniform <c>404</c> to this one
+/// resource, so a keeper can tell a mistyped id from someone else's enclosure; the other resources keep the
+/// uniform answer, and the decision log records why (TASKS 2026-10-14, items 3 and 5).
 /// </item>
 /// <item>
 /// <b>Status is instantaneous, alerts are not.</b> The value of a reading is judged against the effective band
@@ -37,7 +43,12 @@ namespace SmartReptile.Application.Terrariums;
 /// </item>
 /// </list>
 /// </remarks>
-public sealed class TerrariumService(ITerrariumStore store, IClock clock, TerrariumSettings settings)
+public sealed class TerrariumService(
+    ITerrariumStore store,
+    ITimeZoneStore timeZones,
+    DeviceProvisioningService provisioning,
+    IClock clock,
+    TerrariumSettings settings)
 {
     /// <summary>
     /// How far back the latest-readings query walks for a metric the newest sample did not carry. Fifty samples is
@@ -67,29 +78,53 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         MetricDictionary.All.ToDictionary(definition => definition.Code);
 
     /// <summary>The caller's terrariums, each with its device state and activity summary.</summary>
-    public async Task<TerrariumOutcome> ListAsync(Guid ownerUserId, CancellationToken cancellationToken)
+    /// <param name="ownerUserId">Account whose terrariums are wanted.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account read permission, which sees every account's enclosures rather than only their own
+    /// (TASKS 2026-10-14, item 5). Each item then carries <see cref="TerrariumSummary.OwnerUserId"/>, because a
+    /// list of rows belonging to unknown accounts is not usable.
+    /// </param>
+    public async Task<TerrariumOutcome> ListAsync(
+        Guid ownerUserId,
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var terrariums = await store.ListOwnedAsync(ownerUserId, cancellationToken);
+        var terrariums = mayReachAnyAccount
+            ? await store.ListAllAsync(cancellationToken)
+            : await store.ListOwnedAsync(ownerUserId, cancellationToken);
+
         var activity = await store.SummariseActivityAsync([.. terrariums.Select(t => t.Id)], cancellationToken);
 
-        return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(terrarium, activity))]);
+        return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(terrarium, activity, mayReachAnyAccount))]);
     }
 
-    /// <summary>One terrarium, or <c>not_found</c> when it is missing, deleted or someone else's.</summary>
+    /// <summary>
+    /// One terrarium. Missing, deleted and another account's are three different answers: <c>not_found</c>,
+    /// <c>terrarium_deleted</c> and <c>forbidden_terrarium</c> respectively — except for the administrator, who may
+    /// read any account's.
+    /// </summary>
+    /// <param name="terrariumId">Terrarium to read.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation.</param>
     public async Task<TerrariumOutcome> GetAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
 
+        var terrarium = located.Terrarium!;
         var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
 
-        return TerrariumOutcome.Found(Summarise(terrarium, activity), terrarium.RowVersion);
+        return TerrariumOutcome.Found(Summarise(terrarium, activity, mayReachAnyAccount), terrarium.RowVersion);
     }
 
     /// <summary>
@@ -101,11 +136,17 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// <param name="terrariumId">Terrarium the caller wants updates for.</param>
     /// <param name="userId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account read permission, which may follow any account's terrarium for the same reason
+    /// they may read it (TASKS 2026-10-14, item 5). The hub's answer still says <c>false</c> for a deleted
+    /// terrarium, so a removed enclosure does not start streaming.
+    /// </param>
     public async Task<bool> IsMemberAsync(
         Guid terrariumId,
         Guid userId,
-        CancellationToken cancellationToken = default) =>
-        await store.FindOwnedAsync(terrariumId, userId, cancellationToken) is not null;
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false) =>
+        (await LocateAsync(terrariumId, userId, mayReachAnyAccount, cancellationToken)).Refusal is null;
 
     /// <summary>
     /// The band in force for every metric this terrarium has one for, with the layer it came from (FR-10, BR-10.3 —
@@ -117,20 +158,26 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// editor. Only the metrics that resolve <i>right now</i> appear — a metric configured for Day alone is absent
     /// at night, because that is the truth the evaluator will act on.
     /// </remarks>
+    /// <param name="terrariumId">Terrarium the bands belong to.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation (TASKS 2026-10-14, item 5), which since 2026-10-17 is a permission rather than a role.</param>
     public async Task<TerrariumOutcome> EffectiveThresholdsAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
 
         var capturedAt = clock.UtcNow;
 
-        return TerrariumOutcome.Resolved(DescribeThresholds(terrarium, capturedAt));
+        return TerrariumOutcome.Resolved(DescribeThresholds(located.Terrarium!, capturedAt));
     }
 
     /// <summary>
@@ -147,21 +194,26 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// </remarks>
     /// <param name="terrariumId">Terrarium the bands belong to.</param>
     /// <param name="request">The bands to upsert.</param>
-    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation (TASKS 2026-10-14, item 5), which since 2026-10-17 is a permission rather than a role.</param>
     public async Task<TerrariumOutcome> UpsertThresholdsAsync(
         Guid terrariumId,
         UpdateThresholdsRequest request,
         Guid ownerUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
+
+        var terrarium = located.Terrarium!;
 
         var inputs = request.Overrides ?? [];
         var violations = new List<IdentityViolation>();
@@ -220,19 +272,24 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// </remarks>
     /// <param name="terrariumId">Terrarium the override belongs to.</param>
     /// <param name="metricKey">Metric key from the dictionary, e.g. <c>tempC</c>.</param>
-    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation (TASKS 2026-10-14, item 5), which since 2026-10-17 is a permission rather than a role.</param>
     public async Task<TerrariumOutcome> DeleteThresholdOverrideAsync(
         Guid terrariumId,
         string metricKey,
         Guid ownerUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
+
+        var terrarium = located.Terrarium!;
 
         if (!MetricDictionary.TryParseApiKey(metricKey, out var metric))
         {
@@ -260,14 +317,18 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     }
 
     /// <summary>
-    /// Creates a terrarium. Exists in this milestone because every other route needs one to point at: a device
-    /// cannot be claimed without a terrarium to bind it to, and a read surface with no way to create its subject
-    /// would only ever answer with an empty list.
+    /// Creates a terrarium, optionally binding a board to it in the same unit of work (FR-03, FR-04 —
+    /// TASKS 2026-10-14, item 2).
     /// </summary>
+    /// <param name="request">The enclosure's fields, plus an optional board to bind.</param>
+    /// <param name="ownerUserId">Authenticated caller, who becomes the enclosure's owner.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the binding's audit row, when one is written.</param>
     public async Task<TerrariumOutcome> CreateAsync(
         CreateTerrariumRequest request,
         Guid ownerUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        AuditActor? actor = null)
     {
         // The caller's own account is checked first, because it is the one thing the body cannot fix. A token this
         // server signed can still name an account it does not have — one minted against another database, or before
@@ -314,12 +375,22 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         }
 
         var timeZoneId = Trimmed(request.TimeZoneId) ?? settings.DefaultTimeZoneId;
-        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out _))
+
+        // The catalogue is the authority, not a bare provider lookup (TASKS 2026-10-14, item 11): the id has to be
+        // one the picker could have offered, so a caller cannot store a zone the clients cannot render — or one the
+        // platform cannot resolve, which the phase resolver would silently degrade to UTC. The stored value is the
+        // catalogue's spelling, so a body that said `asia/ho_chi_minh` lands as `Asia/Ho_Chi_Minh`.
+        if (await Reference.ReferenceService.FindAsync(timeZones, timeZoneId, cancellationToken) is not { } zone)
         {
             violations.Add(new IdentityViolation(
                 "timeZoneId",
                 "terrarium_timezone_invalid",
-                $"'{timeZoneId}' is not a known time zone."));
+                $"'{timeZoneId}' is not one of the catalogue's time zones; read the list from "
+                + "GET /api/v1/time-zones."));
+        }
+        else
+        {
+            timeZoneId = zone.IanaId;
         }
 
         if (violations.Count > 0)
@@ -333,6 +404,19 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             // wrong rather than a resource someone else owns.
             return TerrariumOutcome.Invalid(
                 [new IdentityViolation("speciesProfileId", "species_profile_not_found", "No such species profile.")]);
+        }
+
+        // Resolved before anything is written, so a request naming a board that cannot be used creates nothing at
+        // all — the same all-or-nothing rule the species-profile check above follows, and the reason a keeper never
+        // ends up with an empty enclosure they did not want plus a board that is still unbound.
+        var (device, deviceViolations) = await provisioning.ResolveClaimableDeviceAsync(
+            request.DeviceId,
+            request.MacAddress,
+            cancellationToken);
+
+        if (deviceViolations.Count > 0)
+        {
+            return TerrariumOutcome.Invalid(deviceViolations);
         }
 
         var now = clock.UtcNow;
@@ -349,13 +433,31 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         };
 
         store.AddTerrarium(terrarium);
+
+        // The board is bound before the single commit, not after it: the enclosure and its binding are one act, so
+        // a failure here would leave either a terrarium whose board nobody can use or a board pointing at an
+        // enclosure that was never written. Staging it also means the credential, the device row and the audit entry
+        // are committed by the same SaveChanges as the terrarium (TASKS 2026-10-14, item 2).
+        var deviceSecret = device is null
+            ? null
+            : provisioning.StageBinding(
+                device,
+                terrarium.Id,
+                ownerUserId,
+                now,
+                method: request.DeviceId is { Length: > 0 } ? "device_id" : "mac_address",
+                actor);
+
         await store.SaveChangesAsync(cancellationToken);
 
         // Re-read so the response carries the profile name; a client that just created a terrarium should not need
         // a second call to render it.
         var created = await store.FindOwnedAsync(terrarium.Id, ownerUserId, cancellationToken) ?? terrarium;
 
-        return TerrariumOutcome.Found(Summarise(created, new Dictionary<Guid, TerrariumActivity>()), created.RowVersion);
+        return TerrariumOutcome.Found(
+            Summarise(created, new Dictionary<Guid, TerrariumActivity>()),
+            created.RowVersion,
+            deviceSecret);
     }
 
     /// <summary>
@@ -365,27 +467,37 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// </summary>
     /// <param name="terrariumId">Terrarium to update.</param>
     /// <param name="request">The fields to change; omitted members are left alone.</param>
-    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
     /// <param name="expectedRowVersion">
     /// The concurrency token the caller holds. An empty array means <c>If-Match: *</c> — existence is enough and
     /// the token is not compared.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account write permission, which may edit another account's enclosure
+    /// (TASKS 2026-10-14, item 5). Such an edit is recorded in the audit trail; an owner's own edit is not.
+    /// </param>
+    /// <param name="actor">Request provenance for the audit row, when one is written.</param>
     public async Task<TerrariumOutcome> UpdateAsync(
         Guid terrariumId,
         UpdateTerrariumRequest request,
         Guid ownerUserId,
         byte[] expectedRowVersion,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false,
+        AuditActor? actor = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(expectedRowVersion);
 
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
+
+        var terrarium = located.Terrarium!;
 
         // Checked before validating the body: a stale client is told to reload, not handed a validation report
         // about a version of the terrarium it is not looking at.
@@ -395,6 +507,9 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         {
             return TerrariumOutcome.PreconditionFailed();
         }
+
+        var crossAccount = mayReachAnyAccount && terrarium.UserId != ownerUserId;
+        var beforeJson = crossAccount ? DescribeTerrarium(terrarium) : null;
 
         var violations = new List<IdentityViolation>();
 
@@ -431,13 +546,22 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
         }
 
         var timeZoneId = Trimmed(request.TimeZoneId);
-        if (request.TimeZoneId is not null
-            && (timeZoneId is null || !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out _)))
+
+        if (request.TimeZoneId is not null)
         {
-            violations.Add(new IdentityViolation(
-                "timeZoneId",
-                "terrarium_timezone_invalid",
-                $"'{request.TimeZoneId}' is not a known time zone."));
+            // Same catalogue as the create path, and for the same reason (TASKS 2026-10-14, item 11).
+            if (await Reference.ReferenceService.FindAsync(timeZones, timeZoneId, cancellationToken) is not { } zone)
+            {
+                violations.Add(new IdentityViolation(
+                    "timeZoneId",
+                    "terrarium_timezone_invalid",
+                    $"'{request.TimeZoneId}' is not one of the catalogue's time zones; read the list from "
+                    + "GET /api/v1/time-zones."));
+            }
+            else
+            {
+                timeZoneId = zone.IanaId;
+            }
         }
 
         if (request.SpeciesProfileId is { } profileId
@@ -483,14 +607,29 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
 
         terrarium.UpdatedAt = clock.UtcNow;
 
+        // Stages the trail entry for a cross-account edit. It goes in before the commit for the same reason every
+        // audited change does: a change that commits without its entry reads as "nothing happened" (BR-18.4).
+        if (crossAccount)
+        {
+            store.AddAuditEntry(AuditLog.ForTerrarium(
+                AuditAction.TerrariumUpdated,
+                terrarium.Id,
+                ownerUserId,
+                actor ?? AuditActor.Unknown,
+                clock.UtcNow,
+                beforeJson: beforeJson,
+                afterJson: DescribeTerrarium(terrarium)));
+        }
+
         if (!await store.TrySaveChangesAsync(cancellationToken))
         {
             return TerrariumOutcome.PreconditionFailed();
         }
 
         // Re-read for the profile name, and to pick up the rowversion the update generated so the response's ETag
-        // is the one the next request must send.
-        var updated = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken) ?? terrarium;
+        // is the one the next request must send. Read without the owner scope, because an administrator's edit of
+        // someone else's enclosure has to come back with its new token too.
+        var updated = await store.FindAnyAsync(terrariumId, cancellationToken) ?? terrarium;
         var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
 
         return TerrariumOutcome.Found(Summarise(updated, activity), updated.RowVersion);
@@ -501,24 +640,39 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// disappears from reads, because a query filter on the entity keeps it out of every query.
     /// </summary>
     /// <param name="terrariumId">Terrarium to remove.</param>
-    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
     /// <param name="allowUnboundDevice">
     /// Required when a live device is bound. The name counts the device, not the terrarium: it is the caller's
     /// explicit permission to detach a board that is still reporting, which would otherwise keep publishing into
     /// an enclosure nobody can see.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account write permission, which may delete another account's enclosure
+    /// (TASKS 2026-10-14, item 5). Such a delete is recorded in the audit trail; an owner's own delete is not.
+    /// </param>
+    /// <param name="actor">Request provenance for the audit row, when one is written.</param>
     public async Task<TerrariumOutcome> DeleteAsync(
         Guid terrariumId,
         Guid ownerUserId,
         bool allowUnboundDevice,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false,
+        AuditActor? actor = null)
     {
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
+
+        var terrarium = located.Terrarium!;
+
+        // The row's state as it was, captured now because the very next lines overwrite it, and only when the
+        // delete is a cross-account one: that is the change this route gained the ability to make.
+        var crossAccount = mayReachAnyAccount && terrarium.UserId != ownerUserId;
+        var beforeJson = crossAccount ? DescribeTerrarium(terrarium) : null;
 
         // A revoked device has already released the slot (the DI-04 filtered index excludes it), so it does not
         // make the caller ask twice to remove an enclosure it no longer reports into.
@@ -541,7 +695,25 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             bound.ClaimCodeExpiresAt = null;
         }
 
+        // The state column is what marks the delete; the timestamp beside it only records when. See
+        // Terrarium.Status for why the two are not redundant.
+        terrarium.Status = TerrariumStatus.Deleted;
         terrarium.DeletedAt = clock.UtcNow;
+
+        // Recorded only for the administrator acting on an account's enclosure: that is the change this route
+        // gained the ability to make, and the one the trail has to be able to answer for (TASKS 2026-10-14,
+        // item 5). A keeper deleting their own terrarium is the ordinary use, unchanged.
+        if (crossAccount)
+        {
+            store.AddAuditEntry(AuditLog.ForTerrarium(
+                AuditAction.TerrariumDeleted,
+                terrarium.Id,
+                ownerUserId,
+                actor ?? AuditActor.Unknown,
+                clock.UtcNow,
+                beforeJson: beforeJson,
+                afterJson: DescribeTerrarium(terrarium)));
+        }
 
         await store.SaveChangesAsync(cancellationToken);
 
@@ -551,16 +723,24 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     /// <summary>
     /// The newest reading per metric, with the band each is judged against and the device state behind them.
     /// </summary>
+    /// <param name="terrariumId">Terrarium to read.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation (TASKS 2026-10-14, item 5), which since 2026-10-17 is a permission rather than a role.</param>
     public async Task<TerrariumOutcome> LatestReadingsAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
+
+        var terrarium = located.Terrarium!;
 
         var samples = await store.RecentSamplesAsync(terrariumId, LatestSampleLookback, cancellationToken);
         var lastSampleAt = samples.Count > 0 ? samples[0].RecordedAt : (DateTimeOffset?)null;
@@ -594,13 +774,21 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     }
 
     /// <summary>A bucketed history series for one metric. Gaps are null points, never interpolated (BR-09.5).</summary>
+    /// <param name="terrariumId">Terrarium to read.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
+    /// <param name="metric">Metric whose series is wanted.</param>
+    /// <param name="fromUtc">Start of the window.</param>
+    /// <param name="toUtc">End of the window.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation (TASKS 2026-10-14, item 5), which since 2026-10-17 is a permission rather than a role.</param>
     public async Task<TerrariumOutcome> ReadingsAsync(
         Guid terrariumId,
         Guid ownerUserId,
         MetricCode metric,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
         if (!RangeQueryRules.TryValidateWindow(
                 fromUtc,
@@ -613,10 +801,11 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             return TerrariumOutcome.Failed(code!, message!);
         }
 
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
 
         var samples = await store.SamplesInRangeAsync(terrariumId, metric, fromUtc, toUtc, cancellationToken);
@@ -650,12 +839,19 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
     }
 
     /// <summary>Expected versus received samples for a window, so a chart can be labelled with its own coverage.</summary>
+    /// <param name="terrariumId">Terrarium to measure.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the terrarium unless they are an administrator.</param>
+    /// <param name="fromUtc">Start of the window.</param>
+    /// <param name="toUtc">End of the window.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation (TASKS 2026-10-14, item 5), which since 2026-10-17 is a permission rather than a role.</param>
     public async Task<TerrariumOutcome> CoverageAsync(
         Guid terrariumId,
         Guid ownerUserId,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
         if (!RangeQueryRules.TryValidateWindow(
                 fromUtc,
@@ -668,11 +864,14 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             return TerrariumOutcome.Failed(code!, message!);
         }
 
-        var terrarium = await store.FindOwnedAsync(terrariumId, ownerUserId, cancellationToken);
-        if (terrarium is null)
+        var located = await LocateAsync(terrariumId, ownerUserId, mayReachAnyAccount, cancellationToken);
+
+        if (located.Refusal is { } refusal)
         {
-            return TerrariumOutcome.NotFound();
+            return refusal;
         }
+
+        var terrarium = located.Terrarium!;
 
         if (terrarium.Device is null)
         {
@@ -1130,9 +1329,15 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             : DeviceStatusNames.Of(DeviceStatus.Online);
     }
 
+    /// <summary>
+    /// Shapes one terrarium for the wire. <paramref name="includeOwnerUserId"/> is set for the administrator, whose
+    /// list can hold rows belonging to accounts the caller did not name — a list of those without the owner beside
+    /// them is not usable (TASKS 2026-10-14, item 5).
+    /// </summary>
     private TerrariumSummary Summarise(
         Terrarium terrarium,
-        IReadOnlyDictionary<Guid, TerrariumActivity> activity)
+        IReadOnlyDictionary<Guid, TerrariumActivity> activity,
+        bool includeOwnerUserId = false)
     {
         var stats = activity.TryGetValue(terrarium.Id, out var found) ? found : TerrariumActivity.None;
 
@@ -1148,9 +1353,77 @@ public sealed class TerrariumService(ITerrariumStore store, IClock clock, Terrar
             terrarium.UpdatedAt,
             terrarium.Device is null ? null : DescribeDevice(terrarium.Device),
             stats.LatestSampleAt,
-            stats.OpenAlertCount);
+            stats.OpenAlertCount)
+        {
+            OwnerUserId = includeOwnerUserId ? terrarium.UserId : null,
+        };
     }
 
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// Finds the terrarium a request is about, and says what to answer when the caller may not have it.
+    /// </summary>
+    /// <remarks>
+    /// One scoped query answers the ordinary cases, and a second, unscoped one is consulted only when the first
+    /// finds nothing — so the happy path costs exactly what it did before. The second query is what lets the three
+    /// refusals be told apart (TASKS 2026-10-14, item 3): absent is <c>404</c>, deleted is <c>410</c>, and another
+    /// account's is <c>403</c> for anyone but the administrator (item 5). BR-02.2 chose to answer foreign and
+    /// missing identically to stop ids being probed; this reverses that for terrariums, and the decision log records
+    /// the reason and the fact that the other resources still answer <c>404</c>.
+    /// </remarks>
+    /// <param name="terrariumId">Terrarium the request names.</param>
+    /// <param name="callerUserId">Authenticated caller.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation, so may reach any account's row.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The terrarium to serve, or the refusal to answer with — never both, never neither.</returns>
+    private async Task<(Terrarium? Terrarium, TerrariumOutcome? Refusal)> LocateAsync(
+        Guid terrariumId,
+        Guid callerUserId,
+        bool mayReachAnyAccount,
+        CancellationToken cancellationToken)
+    {
+        var owned = await store.FindOwnedAsync(terrariumId, callerUserId, cancellationToken);
+
+        if (owned is not null)
+        {
+            return (owned, null);
+        }
+
+        var any = await store.FindAnyAsync(terrariumId, cancellationToken);
+
+        if (any is null)
+        {
+            return (null, TerrariumOutcome.NotFound());
+        }
+
+        if (any.Status == TerrariumStatus.Deleted)
+        {
+            // A deleted enclosure is not "not yours" and not "never existed": its history is still there, and the
+            // caller is told which of the three happened. 410 rather than 404 so a client can tell a typo'd id
+            // from an enclosure that was removed.
+            return (null, TerrariumOutcome.Gone());
+        }
+
+        return mayReachAnyAccount ? (any, null) : (null, TerrariumOutcome.Forbidden());
+    }
+
+    /// <summary>
+    /// The terrarium state an audit row keeps: the fields a change can move, in the wire's camelCase, so a before
+    /// and after pair reads like the responses they were captured beside. Never the whole entity, and never a
+    /// child collection — the row records a change, it is not a second copy of the data (§02-design/02 §3.18).
+    /// </summary>
+    private static string DescribeTerrarium(Terrarium terrarium) => JsonSerializer.Serialize(
+        new
+        {
+            userId = terrarium.UserId,
+            name = terrarium.Name,
+            speciesProfileId = terrarium.SpeciesProfileId,
+            location = terrarium.Location,
+            description = terrarium.Description,
+            timeZoneId = terrarium.TimeZoneId,
+            status = terrarium.Status.ToString(),
+        },
+        SnapshotJsonOptions);
 }

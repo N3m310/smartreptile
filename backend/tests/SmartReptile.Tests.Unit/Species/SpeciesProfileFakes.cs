@@ -126,3 +126,51 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// In-memory <see cref="IFileStore"/>, so the picture paths run without a filesystem and a test can read the bytes
+/// back out. Keys are minted the way the real store mints them — a fresh GUID and the extension it was handed — so
+/// a test can assert what the extension was without reaching into an implementation.
+/// </summary>
+internal sealed class FakeFileStore : IFileStore
+{
+    private readonly Dictionary<string, byte[]> _files = [];
+
+    /// <summary>Keys written, in order, so a test can prove a replacement replaced rather than accumulated.</summary>
+    public IReadOnlyList<string> Written => _written;
+
+    /// <summary>Keys deleted, in order — the other half of "the replaced file was discarded".</summary>
+    public IReadOnlyList<string> Deleted => _deleted;
+
+    private readonly List<string> _written = [];
+    private readonly List<string> _deleted = [];
+
+    public async Task<string> SaveAsync(Stream content, string extension, CancellationToken cancellationToken)
+    {
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, cancellationToken);
+
+        var key = $"{Guid.NewGuid():N}{extension}";
+        _files[key] = buffer.ToArray();
+        _written.Add(key);
+
+        return key;
+    }
+
+    public Task<Stream?> OpenAsync(string key, CancellationToken cancellationToken) =>
+        Task.FromResult<Stream?>(_files.TryGetValue(key, out var bytes) ? new MemoryStream(bytes) : null);
+
+    public Task DeleteAsync(string key, CancellationToken cancellationToken)
+    {
+        _deleted.Add(key);
+        _files.Remove(key);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The bytes stored under a key, or null — what a test reads to check nothing was mangled.</summary>
+    public byte[]? Read(string key) => _files.TryGetValue(key, out var bytes) ? bytes : null;
+
+    /// <summary>Drops a file behind the store's back, to stand in for one that went missing from disk.</summary>
+    public void Lose(string key) => _files.Remove(key);
+}

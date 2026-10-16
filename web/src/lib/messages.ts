@@ -44,6 +44,41 @@ const CODE_KEY: Record<string, string> = {
   builtin_immutable: 'builtinImmutable',
   profile_in_use: 'profileInUse',
   profile_name_taken: 'profileNameTaken',
+  // The picture refusals arrive both ways — as a top-level code and as `errors[].field = "file"` — so they are in
+  // this table and in the field table below. A form that answered "the request was refused" for a 3 MB photograph
+  // would tell the keeper nothing about what to do differently.
+  image_required: 'imageRequired',
+  image_too_large: 'imageTooLarge',
+  image_type_unsupported: 'imageTypeUnsupported',
+  image_invalid: 'imageInvalid',
+  image_not_set: 'imageNotSet',
+  // The administrator's refusals (FR-18). Unlike the authentication group these are meant to be read by the
+  // person who caused them: "that is the last administrator" and "you cannot do that to your own account" are
+  // rules an administrator has to know, so each gets its own sentence rather than one opaque failure.
+  user_not_found: 'adminAccountNotFound',
+  self_change_refused: 'adminErrorSelfChange',
+  last_administrator_refused: 'adminErrorLastAdministrator',
+  account_in_use: 'adminErrorAccountInUse',
+  account_invalid: 'adminErrorAccountInvalid',
+  // The reset route validates the new password with the same policy registration uses, so its refusal is the
+  // policy's own sentence rather than a second one that could disagree with it.
+  password_invalid: 'passwordPolicyViolation',
+  quiet_hours_incomplete: 'adminFormQuietHoursHint',
+  quiet_hours_invalid: 'adminFormQuietHoursFormat',
+  severity_invalid: 'adminFormSeverityValues',
+  role_invalid: 'adminErrorRoleInvalid',
+  role_not_found: 'adminErrorRoleNotFound',
+  role_in_use: 'adminErrorRoleInUse',
+  role_code_taken: 'adminRoleCodeTaken',
+  role_code_invalid: 'adminErrorRoleInvalid',
+  role_name_invalid: 'adminErrorRoleInvalid',
+  role_description_invalid: 'adminErrorRoleInvalid',
+  system_role_immutable: 'adminErrorSystemRole',
+  permission_unknown: 'adminErrorPermissionUnknown',
+  // The two list filters cannot be triggered by this client — its options are the two families and the three
+  // states — so a refusal is a validation sentence rather than a vocabulary of its own.
+  family_invalid: 'errorValidationFailed',
+  state_invalid: 'errorValidationFailed',
   maintenance: 'maintenanceNotice',
   timeout: 'errorServiceUnavailable',
   network_unreachable: 'errorBackendUnreachable',
@@ -89,6 +124,11 @@ const FIELD_KEY: Record<string, string> = {
   profile_name_required: 'profileNameRequired',
   profile_name_too_long: 'profileNameTooLong',
   profile_name_taken: 'profileNameTaken',
+  // The picture rules, all addressed to the `file` part of the multipart body.
+  image_required: 'imageRequired',
+  image_too_large: 'imageTooLarge',
+  image_type_unsupported: 'imageTypeUnsupported',
+  image_invalid: 'imageInvalid',
   climate_zone_invalid: 'climateZoneInvalid',
   scientific_name_too_long: 'scientificNameTooLong',
   profile_notes_too_long: 'profileNotesTooLong',
@@ -99,6 +139,18 @@ const FIELD_KEY: Record<string, string> = {
   profile_bands_required: 'profileBandsRequired',
   threshold_phase_invalid: 'thresholdPhaseInvalid',
   source_ref_too_long: 'sourceRefTooLong',
+  // The account and role fields (`UserAdminService`, `RoleAdminService`), addressed by field name so the editor
+  // marks the input that is wrong. The three role-shape codes share one sentence, and the violation's own field
+  // name is what puts it under the right input.
+  quiet_hours_incomplete: 'adminFormQuietHoursHint',
+  quiet_hours_invalid: 'adminFormQuietHoursFormat',
+  severity_invalid: 'adminFormSeverityValues',
+  role_invalid: 'adminErrorRoleInvalid',
+  role_code_taken: 'adminRoleCodeTaken',
+  role_code_invalid: 'adminErrorRoleInvalid',
+  role_name_invalid: 'adminErrorRoleInvalid',
+  role_description_invalid: 'adminErrorRoleInvalid',
+  permission_unknown: 'adminErrorPermissionUnknown',
 };
 
 /** The sentence for a failed call. `apiBaseUrl` and the code are shown when the table has no entry. */

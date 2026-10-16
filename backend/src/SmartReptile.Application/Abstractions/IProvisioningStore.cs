@@ -17,6 +17,18 @@ public interface IProvisioningStore
     /// </summary>
     Task<Device?> FindDeviceByPublicIdAsync(string publicId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Looks a device up by its MAC address, in the canonical form <see cref="MacAddress.TryNormalise"/> produces
+    /// (TASKS 2026-10-14, item 8). Case-insensitive, because a board that self-registered with lower-case hex is the
+    /// same board as one named in upper case.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately unscoped by owner: an unclaimed device has no owner yet — that is what claiming sets — so there
+    /// is no account this query could be restricted to. The endpoint that uses it is Owner-gated and the answer for
+    /// a MAC that is not claimable is a single <c>device_not_found</c>, so the query cannot be used to enumerate.
+    /// </remarks>
+    Task<Device?> FindDeviceByMacAddressAsync(string macAddress, CancellationToken cancellationToken);
+
     /// <summary>Looks a board up by its chip id, which is what makes re-registration idempotent.</summary>
     Task<Device?> FindDeviceByChipIdAsync(string chipId, CancellationToken cancellationToken);
 
@@ -47,6 +59,16 @@ public interface IProvisioningStore
 
     /// <summary>True when an active device is already bound to the terrarium (DI-04, enforced by a filtered index).</summary>
     Task<bool> TerrariumHasDeviceAsync(Guid terrariumId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The caller's boards, ordered by display name, with the bound terrarium loaded so the list can name it
+    /// (TASKS 2026-10-14, item 9b).
+    /// </summary>
+    /// <remarks>
+    /// Scoped by <c>UserId</c>, which is set at claim time. A board that registered but was never claimed has no
+    /// owner and therefore belongs to nobody's fleet yet — it appears in the list only once it is bound.
+    /// </remarks>
+    Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken);
 
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);

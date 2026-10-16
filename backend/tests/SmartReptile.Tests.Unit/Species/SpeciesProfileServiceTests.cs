@@ -17,6 +17,7 @@ public class SpeciesProfileServiceTests
     private static readonly DateTimeOffset Now = new(2026, 10, 13, 9, 30, 0, TimeSpan.Zero);
 
     private readonly FakeSpeciesProfileStore _store = new();
+    private readonly FakeFileStore _files = new();
     private readonly TestClock _clock = new() { UtcNow = Now };
     private readonly SpeciesProfileService _service;
     private readonly Guid _owner = Guid.NewGuid();
@@ -25,7 +26,7 @@ public class SpeciesProfileServiceTests
     {
         // The write paths key their rows on the caller's own subject, so the caller has to be an account here.
         _store.AddUser(_owner);
-        _service = new SpeciesProfileService(_store, _clock);
+        _service = new SpeciesProfileService(_store, _files, _clock);
     }
 
     private static SpeciesProfileBandInput Band(

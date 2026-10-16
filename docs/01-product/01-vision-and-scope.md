@@ -72,7 +72,7 @@ science, and impossible to ignore. The value is not the sensor reading — it is
 
 | Area | Included |
 |---|---|
-| Accounts | Register / login / logout, JWT access + refresh token, profile update, roles: `Owner`, `Technician`, `Viewer` |
+| Accounts | Register / login / logout, JWT access + refresh token, profile update, roles as data — `Admin`, `Owner`, `Technician`, `Viewer` plus custom roles over a sixteen-code permission catalogue (`02-design/06` §3) — and administrator-run account management |
 | Terrarium | Create / edit / delete a terrarium record, assign a species profile, set location + notes |
 | Species profiles | 3 built-in seeded profiles (tropical / semi-desert / desert) + user-created custom profiles with per-metric bands |
 | Device onboarding | Claim-code provisioning, bind device → terrarium, list fleet, rotate secret, revoke device |
@@ -80,11 +80,11 @@ science, and impossible to ignore. The value is not the sensor reading — it is
 | Pipeline | Ingest validation, quality flags, dedupe + idempotency, server-authoritative receive time, hourly rollups |
 | Dashboard | Live values (≤ 5 s freshness), online/offline + last-seen, in-range status per metric, 1 h / 24 h / 7 d / 30 d charts, min/max/avg |
 | Thresholds | Per-metric target band + critical band, optional day/night phases, dwell time, hysteresis |
-| Alerts | Automatic evaluation, open / acknowledge / resolve lifecycle, auto-resolve on recovery, alert history, silence a metric temporarily |
+| Alerts | Automatic evaluation in the two families — the enclosure (its own humidity, light and board health) and the species (the animal's temperature, UV and basking surface, judged against its profile) — open / acknowledge / resolve lifecycle, auto-resolve on recovery, alert history, silence a metric temporarily |
 | Notifications | In-app inbox, FCM push (Flutter app), optional SMTP email; quiet hours; per-severity subscription; rate limiting |
 | Reporting | Daily environmental summary (min/max/avg per metric, light-hours, out-of-range minutes, exposure index), weekly view, CSV/JSON export |
 | Retention | Raw readings 90 days, hourly rollups 24 months, daily summaries indefinite; manual purge per terrarium |
-| Ops | `/health`, `/ready`, `/metrics`, structured logs, audit log of device + threshold changes |
+| Ops | `/health`, `/ready`, `/metrics`, structured logs, audit log of device, threshold, account and role changes |
 | Camera (optional) | Manual on-demand still snapshot from an ESP32-CAM node; no automatic analysis *(FR-17, MAY)* |
 
 ### Out of scope — v1.0 (candidates for v1.1 / v2)
@@ -98,7 +98,7 @@ science, and impossible to ignore. The value is not the sensor reading — it is
 | Multiple simultaneous terrariums per device | One device ↔ one terrarium in v1 keeps the data model honest. |
 | Mobile app offline editing of thresholds | Threshold changes require connectivity; read-only offline cache only. |
 | OTA firmware updates | Fleet metadata is captured (`firmwareVersion`), but flashing is manual in v1. |
-| Multi-tenancy / organisation accounts | Single-owner model; sharing is by role invitation on one terrarium. |
+| Multi-tenancy / organisation accounts | Single-owner model: ownership is a column (`Terrarium.UserId`), so there is no membership table to share one enclosure through. |
 | Cloud hosting with a managed broker | Deployed as Docker Compose on one host for the demo. |
 
 ## 6. `[TBC]` decisions inherited from the brief

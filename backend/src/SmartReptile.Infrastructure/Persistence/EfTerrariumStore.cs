@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Domain.Species;
@@ -17,7 +18,8 @@ namespace SmartReptile.Infrastructure.Persistence;
 /// <remarks>
 /// Every method that takes an owner filters by it in SQL rather than in memory, so a foreign terrarium is never
 /// even loaded (BR-02.2). The soft-delete filter on <c>Terrarium</c> is a query filter on the model, so it applies
-/// to all of these without being repeated.
+/// to all of these without being repeated — except <see cref="FindAnyAsync"/>, which drops it on purpose because
+/// telling a deleted row from a missing one is the question it answers.
 /// </remarks>
 public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
 {
@@ -33,12 +35,33 @@ public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
             .ToListAsync(cancellationToken);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Terrarium>> ListAllAsync(CancellationToken cancellationToken) =>
+        await db.Terrariums
+            .Include(terrarium => terrarium.Device)
+            .Include(terrarium => terrarium.SpeciesProfile)
+            .OrderBy(terrarium => terrarium.Name)
+            .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
     public Task<Terrarium?> FindOwnedAsync(
         Guid terrariumId,
         Guid ownerUserId,
         CancellationToken cancellationToken) =>
         db.Terrariums
             .Where(terrarium => terrarium.Id == terrariumId && terrarium.UserId == ownerUserId)
+            .Include(terrarium => terrarium.Device)
+            .Include(terrarium => terrarium.SpeciesProfile!)
+                .ThenInclude(profile => profile.Thresholds)
+            .Include(terrarium => terrarium.ThresholdOverrides)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Terrarium?> FindAnyAsync(Guid terrariumId, CancellationToken cancellationToken) =>
+        // The soft-delete filter is dropped on purpose: telling "deleted" apart from "never existed" is the whole
+        // reason this query exists, and the filter would collapse the two back into one answer.
+        db.Terrariums
+            .IgnoreQueryFilters()
+            .Where(terrarium => terrarium.Id == terrariumId)
             .Include(terrarium => terrarium.Device)
             .Include(terrarium => terrarium.SpeciesProfile!)
                 .ThenInclude(profile => profile.Thresholds)
@@ -64,6 +87,9 @@ public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
 
     /// <inheritdoc />
     public void AddThresholdSnapshot(ThresholdSnapshot snapshot) => db.ThresholdSnapshots.Add(snapshot);
+
+    /// <inheritdoc />
+    public void AddAuditEntry(AuditLog entry) => db.AuditLogs.Add(entry);
 
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<Guid, TerrariumActivity>> SummariseActivityAsync(

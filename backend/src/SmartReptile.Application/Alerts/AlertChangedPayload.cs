@@ -20,6 +20,12 @@ public static class AlertEvent
 
     /// <summary>An episode closed, by recovery or by hand.</summary>
     public const string Resolved = "resolved";
+
+    /// <summary>
+    /// A delivery attempt the notification layer recorded (roadmap 3.5). Not a hub event — nothing emits it through
+    /// SignalR — but it is a step of the response timeline, and the timeline's vocabulary is one list.
+    /// </summary>
+    public const string Notified = "notified";
 }
 
 /// <summary>
@@ -39,6 +45,10 @@ public static class AlertEvent
 /// <param name="State">Lifecycle state after the move.</param>
 /// <param name="Severity">Severity after the move.</param>
 /// <param name="Metric">Metric the alert is about as the REST key, or null for a device-level alert.</param>
+/// <param name="Family">
+/// Family the alert belongs to, as the REST key (<c>enclosure</c> or <c>species</c>), so a banner can be placed on the
+/// right screen and a badge counted on the right total without a second request.
+/// </param>
 /// <param name="TriggeredAt">Start of the episode, so a client can date what it just received.</param>
 /// <param name="ResolvedAt">When it closed, on a <c>resolved</c> event.</param>
 public sealed record AlertChangedPayload(
@@ -48,6 +58,7 @@ public sealed record AlertChangedPayload(
     string State,
     string Severity,
     string? Metric,
+    string Family,
     DateTimeOffset TriggeredAt,
     DateTimeOffset? ResolvedAt)
 {
@@ -74,6 +85,7 @@ public sealed record AlertChangedPayload(
             alert.State.ToString(),
             alert.Severity.ToString(),
             alert.Metric is { } metric ? MetricDictionary.Get(metric).ApiKey : null,
+            AlertFamilies.ApiKey(alert.Family),
             alert.TriggeredAt,
             alert.ResolvedAt);
     }

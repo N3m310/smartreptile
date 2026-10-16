@@ -5,6 +5,7 @@ using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Evaluation;
 using SmartReptile.Domain.Metrics;
+using SmartReptile.Domain.Notifications;
 using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Tests.Unit.Application.Alerts;
@@ -21,6 +22,23 @@ internal sealed class AlertTestClock(DateTimeOffset now) : IClock
     /// <inheritdoc />
     public DateTimeOffset NowIn(string timeZoneId) => UtcNow;
 }
+
+/// <summary>One delivery row the timeline can be given, without a database.</summary>
+/// <param name="AlertId">Alert the row belongs to.</param>
+/// <param name="At">Instant of the attempt.</param>
+/// <param name="Channel">Channel the row records.</param>
+/// <param name="Step">Escalation step.</param>
+/// <param name="Status">What happened.</param>
+/// <param name="Reason">Suppression reason or bypass marker.</param>
+/// <param name="Title">Rendered title.</param>
+internal sealed record FakeDelivery(
+    long AlertId,
+    DateTimeOffset At,
+    NotificationChannel Channel = NotificationChannel.InApp,
+    byte Step = 0,
+    NotificationStatus Status = NotificationStatus.Sent,
+    string? Reason = null,
+    string Title = "Terrarium · Temperature high");
 
 /// <summary>
 /// In-memory <see cref="IAlertStore"/>. It answers with what it was given rather than filtering: ordering, cursor
@@ -44,6 +62,9 @@ internal sealed class FakeAlertStore : IAlertStore
 
     /// <summary>Readings the detail's series excerpt is served from.</summary>
     public List<AlertSeriesPoint> Series { get; } = [];
+
+    /// <summary>Delivery rows task 3.5's dispatcher would have written, keyed by alert.</summary>
+    public List<FakeDelivery> Deliveries { get; } = [];
 
     /// <summary>Commits the service asked for.</summary>
     public int SaveCount { get; private set; }
@@ -96,6 +117,21 @@ internal sealed class FakeAlertStore : IAlertStore
         return Task.FromResult<IReadOnlyList<AuditLog>>(
             [.. AuditEntries.Where(entry => entry.EntityId == entityId)]);
     }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<NotificationAttemptRecord>> ReadDeliveriesAsync(
+        long alertId,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<NotificationAttemptRecord>>(
+            [.. Deliveries.Where(delivery => delivery.AlertId == alertId)
+                .OrderBy(delivery => delivery.At)
+                .Select(delivery => new NotificationAttemptRecord(
+                    delivery.At,
+                    delivery.Channel,
+                    delivery.Step,
+                    delivery.Status,
+                    delivery.Reason,
+                    delivery.Title))]);
 
     /// <inheritdoc />
     public Task<EvaluationState?> FindExcursionStateAsync(

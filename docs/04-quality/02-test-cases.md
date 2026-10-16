@@ -46,7 +46,7 @@ void test_median_rejects_single_glitch(void) {
 
 ---
 
-## B. Backend unit tests (TC-U-01…58)
+## B. Backend unit tests (TC-U-01…68)
 
 ### B1. Ingest: validation, plausibility, calibration
 
@@ -196,10 +196,10 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | Id | Case | Input | Expected | P | FR |
 |---|---|---|---|---|---|
 | TC-U-32 | Password hashing parameters and rehash-on-login | register, then log in with `PasswordIterations` lower than the current target | hash verifies; after login the hash is upgraded and the plaintext is never stored | 1 | FR-01 |
-| TC-U-33 | Access token claims and lifetime | issue, then decode | `sub`, `role`, `exp = iat + 15 min`; a token beyond `exp` is rejected | 1 | FR-01 |
+| TC-U-33 | Access token claims and lifetime | issue, then decode | `sub`, one `perm` claim per permission code of the account's role, `role` (a display code — nothing authorises on it), `ver = 2`, `exp = iat + 15 min`; a token beyond `exp` is rejected | 1 | FR-01 |
 | TC-U-34 | Refresh rotation is single-use and families are revoked on reuse | refresh twice with the same token | first succeeds and invalidates; second → `401 token_reused`, whole family revoked, audit entry | 1 | FR-01 |
 | TC-U-35 | Login throttling is per-username and generic | 11 failures within 15 min | lock at the 11th, identical error body in every failure, audit entries written | 1 | FR-01 |
-| TC-U-36 | RBAC matrix | Owner/Technician/Viewer × 10 actions | exactly the permission matrix in `02-design/06` §3; foreign terrarium → `404`, insufficient role → `403`. **Built 2026-10-10 (3.4)** for the four actions that exist over alerts and silences: ack, resolve, silence a create/read and silence cancel all name the `Technician` policy, so a Viewer is refused by the authorisation layer before any handler runs — measured live (`403 insufficient_role` on all four, the blockquote at the end of §B5). The remaining matrix rows need the features that own them (threshold write, device claim, roles, purge) | 1 | FR-02 |
+| TC-U-36 | Permission matrix | `Admin`/`Owner`/`Technician`/`Viewer` × the sixteen catalogue codes, plus a custom role an administrator created | exactly the matrix in `02-design/06` §3, one policy per code: a code the role does not hold → `403 insufficient_role`, a foreign terrarium → `404`. **Built 2026-10-10 (3.4)** for the four actions that exist over alerts and silences: ack, resolve, silence create and silence cancel name `alert.write`/`silence.write`, so a Viewer is refused by the authorisation layer before any handler runs — measured live (`403 insufficient_role` on all four, the blockquote at the end of §B5). The rows that were waiting on a feature now have one (the matrix itself at `/api/v1/admin/roles`, account management under `/users/*`, claiming a board under `device.provision`); a case over them is still owed | 1 | FR-02 |
 | TC-U-51 | Backup recovery code shape and storage | register | 20 characters from the 31-symbol claim-code alphabet (no `0`/`O`/`1`/`I`/`L`), stored as `SHA-256(code ‖ 16-byte salt)`, plaintext absent from the row | 1 | FR-01 |
 | TC-U-52 | Recovery with the backup code rotates everything | register, sign in, then recover with the code and a new password | code consumed and replaced, every refresh token revoked, the old password and the spent code both refused | 1 | FR-01 |
 | TC-U-53 | Server-issued reset code is single-use and time-boxed | `forgot-password`, then `reset-password` | the row holds only the SHA-256 and expires `PasswordReset:CodeMinutes` ahead; the code works once (case and separators ignored) and a replayed or expired one → `401 invalid_reset_code` | 1 | FR-01 |
@@ -264,7 +264,26 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-44 | Invalid FCM token disables the channel | send returns `UNREGISTERED` | `ChannelsFcm` set false, notification logged, user informed on next app open | 3 | FR-13 |
 | TC-U-45 | Digest aggregation correctness | 7 warnings + 1 critical, peak 34.2 | digest states 8 alerts, worst metric and peak value | 3 | FR-13 |
 
+> **As built (2026-10-16, roadmap 3.5).** `TC-U-37…45` are covered as 24 `NotificationPolicyTests` cases (the matrix,
+> quiet hours across midnight, the retry instants, the ladder, the digest) and 12 `NotificationDispatcherTests` cases
+> that drive the real dispatcher through fake channels: the localisation half of `TC-U-42` is asserted against the
+> Vietnamese satellite deck, `TC-U-41` walks `t`, `t+5`, `t+35` and stops at `t+155`, `TC-U-43` stops the ladder at
+> an acknowledgement, `TC-U-44` switches the push channel off on `UNREGISTERED`, and `TC-U-40`/`TC-U-45` prove the
+> cap coalesces the push while the inbox entry and one digest still appear. `TC-I-12`'s "fake FCM client + a local
+> SMTP sink" is satisfied in halves: the fake client is the channel seam the dispatcher tests use, and the sink is
+> the Mailpit service the development stack now runs (see `02-design/05` §3).
+> **One line of the acceptance is not measured:** a real FCM push, which needs a Google service-account file and a
+> device registration token. The live run of 2026-10-16 recorded the inbox half end to end instead — one Vietnamese
+> entry, one `notified` timeline entry, `notifications_sent_total = 1` — and `TC-E2E-03` stays open with it.
+
 ### B7. Summaries, exposure index, coverage
+
+> **As built (2026-10-16).** The maths of this block has been in `Domain/Summaries/` since 3.6's first half
+> (`ExposureCalculator`, `CoverageMath`, `MinuteGrid`) and `TC-U-46…50` have been green since then — 18
+> `ExposureCalculatorTests` and 10 `MinuteGridTests` cases. What roadmap 3.6 still owes is not these numbers but
+> their **persistence and schedule**: the `TelemetryHourlyRollup` and `DailyEnvironmentalSummary` tables, the two
+> workers that write them, and `TC-I-06`'s recomputation after a back-fill. `GET /terrariums/{id}/summaries` is
+> therefore still unbuilt and says so in `07-appendices/03` §4.2.
 
 Reference dataset: target 26–32 °C, 40 min at 34.0 °C then 20 min at 33.0 °C, otherwise in range, no gaps.
 
@@ -288,6 +307,26 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
     ExposureCalculator.Hot(series, targetMax: 32m).Should().BeApproximately(expected, 0.02m);
 }
 ```
+
+### B8. Species-profile pictures (`BR-10.6`, added 2026-10-14)
+
+| Id | Case | Input | Expected | P | FR |
+|---|---|---|---|---|---|
+| TC-U-61 | An accepted picture is stored as what the bytes are | a PNG with a correct extension, declared `image/png` | the row records `image/png` and a key ending `.png`, the bytes are unchanged in the store, and the item carries `imageUrl` | 1 | FR-10 |
+| TC-U-62 | The declaration is checked but never trusted | a text file labelled `image/png`; a PNG labelled `text/html` | `image_invalid`, then `image_type_unsupported`; **no file, no row change, no audit entry** | 1 | FR-10 |
+| TC-U-63 | `application/octet-stream` counts as no claim | a real PNG declared `application/octet-stream` | accepted, stored as `image/png` | 2 | FR-10 |
+| TC-U-64 | The limit is enforced by a bounded read | 2 MB + 1 byte | `image_too_large`, nothing written | 1 | FR-10 |
+| TC-U-65 | Replacing discards the file it replaced | set PNG, then set JPEG | the key changes, the first key is deleted, one file remains | 1 | FR-10 |
+| TC-U-66 | Removal is idempotent and silent when there is nothing to do | remove twice, the second on a pictureless profile | both answer the profile; the second commits nothing and writes no audit row | 1 | FR-10 |
+| TC-U-67 | A built-in and a foreign profile are refused differently | set on a built-in; set/read on another account's profile | `builtin_immutable` for the first (the answer that offers *duplicate*), `not_found` for the second | 1 | FR-10, FR-02 |
+| TC-U-68 | A row whose file went missing answers "no picture" | delete the key behind the store's back, then read | `image_not_set`, and the row keeps its key so the inconsistency stays visible | 2 | FR-10 |
+
+> **Built 2026-10-14 — 17 cases in `SpeciesProfileImageTests`, all green.** The file store is faked in memory, so a
+> case can assert what was written *and* what was deleted; the row-level contract (`imageUrl` present exactly when a
+> picture is, `imageUpdatedAt` moving on every change) is asserted against the view, and
+> `TerrariumSummarySerialisationTests` in the same project covers the sibling rule for the terrarium's `rowVersion`.
+> The HTTP-level half — 27 assertions over `curl` against a live API and SQL Server, and the same flows driven in a
+> real browser — is recorded in `03-implementation/07`; the walkthrough a person can follow is `04-quality/03` 3.19.
 
 ---
 
@@ -385,7 +424,7 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-W-09 | History range selection requests the right bucket | tap 30 d | API called with `from/to` for 30 days; bucket label "hourly" shown | 2 | FR-09 |
 | TC-W-10 | Chart keeps gaps and caps points | series with a 4 h gap and 900 points | nulls preserved (no interpolation), ≤ 720 points rendered | 1 | FR-09 |
 | TC-W-11 | Alerts inbox filters and shows the badge | 3 alerts, mixed severity/state | filter chips work; badge = open count | 1 | FR-12 |
-| TC-W-12 | Role gating on alert actions | `Viewer` session | Acknowledge/Resolve absent; for `Technician` present and wired | 1 | FR-02, FR-12 |
+| TC-W-12 | Permission gating on alert actions | a session whose role lacks `alert.write` | Acknowledge/Resolve absent; present and wired once the session's `perm` claims carry `alert.write` | 1 | FR-02, FR-12 |
 | TC-W-13 | Threshold editor validation | `min 40 / max 30` | field error shown, Save disabled, no API call | 1 | FR-10 |
 | TC-W-14 | Claim flow: invalid then valid code | fake API `404` then success | error state with guidance, then success state showing the bound terrarium | 1 | FR-04 |
 | TC-W-15 | Summary screen always shows coverage | summary with 69% coverage | low-confidence badge visible next to compliance; export button enabled and job status rendered | 2 | FR-14, FR-15 |
@@ -433,8 +472,8 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | Suite | Cases | Target |
 |---|---|---|
 | Firmware native (TC-U-FW-*) | 12 | all green before flashing a release build |
-| Backend unit (TC-U-*) | 56 | ≥ 70% line coverage on Domain + Application |
+| Backend unit (TC-U-*) | 64 | ≥ 70% line coverage on Domain + Application |
 | Backend integration | 19 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
 | E2E | 6 | executed per milestone, results recorded |
-| **Total** | **107** | |
+| **Total** | **115** | |

@@ -5,6 +5,7 @@ using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Metrics;
+using SmartReptile.Domain.Notifications;
 
 namespace SmartReptile.Application.Alerts;
 
@@ -125,6 +126,13 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
     /// full response timeline of one incident" is assembled from the delivery records that task 3.5 writes. The
     /// alert row keeps no escalation instant because escalation edits the row in place — one row per episode is what
     /// DI-01's unique index is for.
+    /// <remarks>
+    /// Escalation entries come from the delivery records task 3.5 writes, which is the design's own arrangement:
+    /// §02-design/05 §6 records escalations as <c>NotificationLog</c> rows carrying the alert id, and the alert row
+    /// keeps no escalation instant because escalation edits the row in place — one row per episode is what DI-01's
+    /// unique index is for. Only rows that reached a decision are listed (<c>Sent</c> and <c>Suppressed</c>): a
+    /// failed attempt is recorded in the delivery history and would read as noise on a timeline whose subject is
+    /// what happened to the incident, not to the push.
     /// </remarks>
     /// <param name="alertId">Alert identity.</param>
     /// <param name="userId">Signed-in account.</param>
@@ -140,12 +148,22 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
 
         var alert = record.Alert;
         var audit = await store.ReadAuditAsync(alertId, cancellationToken).ConfigureAwait(false);
+        var deliveries = await store.ReadDeliveriesAsync(alertId, cancellationToken).ConfigureAwait(false);
         var entries = new List<AlertTimelineEntry>
         {
             // The vocabulary is the hub event's, so a client that handles alertChanged and a client that renders a
             // timeline are reading the same names for the same moves.
             new(AlertEvent.Opened, alert.TriggeredAt),
         };
+
+        entries.AddRange(deliveries
+            .Where(delivery => delivery.Status is NotificationStatus.Sent or NotificationStatus.Suppressed)
+            .Select(delivery => new AlertTimelineEntry(
+                AlertEvent.Notified,
+                delivery.At,
+                null,
+                Describe(delivery),
+                delivery.Title)));
 
         if (alert.AcknowledgedAt is { } acknowledgedAt)
         {
@@ -334,6 +352,7 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
             alert.TerrariumId,
             record.DevicePublicId,
             alert.Metric is { } metric ? MetricDictionary.Get(metric).ApiKey : null,
+            AlertFamilies.ApiKey(alert.Family),
             alert.Severity.ToString(),
             alert.State.ToString(),
             alert.Source.ToString(),
@@ -349,6 +368,17 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
             alert.ResolvedReason?.ToString(),
             alert.Duration is { } duration ? (long)Math.Round(duration.TotalSeconds) : null);
     }
+
+    /// <summary>
+    /// Names a delivery step the way a reader needs it: the channel it went out on, and — when policy withheld it —
+    /// the reason, so the timeline and the report's suppression table agree.
+    /// </summary>
+    private static string Describe(NotificationAttemptRecord delivery) =>
+        delivery.Status == NotificationStatus.Suppressed
+            ? $"{delivery.Channel}: {delivery.Reason ?? NotificationReason.NoChannel}"
+            : delivery.Step > 0
+                ? $"{delivery.Channel}: escalation step {delivery.Step}"
+                : $"{delivery.Channel}: {delivery.Reason ?? "sent"}";
 
     /// <summary>Reads the keeper's note back out of the audit row the resolution wrote.</summary>
     private static string? NoteFrom(string? afterJson)

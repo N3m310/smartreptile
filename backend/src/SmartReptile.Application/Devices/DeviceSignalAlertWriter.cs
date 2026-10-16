@@ -39,6 +39,7 @@ public static class DeviceSignalAlertWriter
             TerrariumId = terrariumId,
             DeviceId = device.Id,
             Metric = metric,
+            Family = Alert.FamilyFor(metric),
             Phase = ThresholdPhase.Any,
             Severity = SensorFaultPolicy.Severity,
             DedupeKey = Alert.DedupeKeyFor(terrariumId, metric, SensorFaultPolicy.Severity, ThresholdPhase.Any),
@@ -88,6 +89,10 @@ public static class DeviceSignalAlertWriter
             TerrariumId = terrariumId,
             DeviceId = device.Id,
             Metric = null,
+
+            // No metric: the board's own clock is the subject, so this is the enclosure's alert rather than the
+            // animal's. Stated explicitly rather than left to the property's default, because it is a decision.
+            Family = AlertFamily.Enclosure,
             Phase = ThresholdPhase.Any,
             Severity = AlertSeverity.Info,
             DedupeKey = Alert.DedupeKeyFor(terrariumId, null, AlertSeverity.Info, ThresholdPhase.Any),

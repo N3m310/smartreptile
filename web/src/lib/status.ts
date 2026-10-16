@@ -118,6 +118,194 @@ export function climateZoneLabel(t: TFunc, zone: string): string {
 }
 
 /**
+ * The two alert families, whose separation is a product decision rather than a label (`AlertFamilies.ApiKey`).
+ * `enclosure` holds humidity, light and the board's own silences and faults; `species` holds temperature and UV,
+ * judged against the species profile.
+ */
+const ALERT_FAMILY_KEY: Record<string, string> = {
+  enclosure: 'adminFamilyEnclosure',
+  species: 'adminFamilySpecies',
+};
+
+export function alertFamilyLabel(t: TFunc, family: string): string {
+  const key = ALERT_FAMILY_KEY[family];
+  return key ? t(key) : family;
+}
+
+/** `AlertState` as the admin list spells it: `Open`, `Acknowledged`, `Resolved`. */
+const ALERT_STATE_KEY: Record<string, string> = {
+  Open: 'alertStateOpen',
+  Acknowledged: 'alertStateAcknowledged',
+  Resolved: 'alertStateResolved',
+};
+
+export function alertStateLabel(t: TFunc, state: string): string {
+  const key = ALERT_STATE_KEY[state];
+  return key ? t(key) : state;
+}
+
+/** An open alert is the one that needs somebody; a resolved one is history. Colour is never the only signal. */
+const ALERT_STATE_TEXT_CLASS: Record<string, string> = {
+  Open: 'text-warning',
+  Acknowledged: 'text-accent',
+  Resolved: 'text-inrange',
+};
+
+export function alertStateTextClass(state: string): string {
+  return ALERT_STATE_TEXT_CLASS[state] ?? 'text-unknown';
+}
+
+/** `AlertSeverity`, the three tiers the API stores. */
+const SEVERITY_KEY: Record<string, string> = {
+  Info: 'severityInfo',
+  Warning: 'severityWarning',
+  Critical: 'severityCritical',
+};
+
+export function severityLabel(t: TFunc, severity: string): string {
+  const key = SEVERITY_KEY[severity];
+  return key ? t(key) : severity;
+}
+
+const SEVERITY_TEXT_CLASS: Record<string, string> = {
+  Info: 'text-muted',
+  Warning: 'text-warning',
+  Critical: 'text-critical',
+};
+
+export function severityTextClass(severity: string): string {
+  return SEVERITY_TEXT_CLASS[severity] ?? 'text-unknown';
+}
+
+/** `AlertSource` — what produced an episode, as `Alert.cs` names the members. */
+const ALERT_SOURCE_KEY: Record<string, string> = {
+  Threshold: 'alertSourceThreshold',
+  DeviceSilent: 'alertSourceDeviceSilent',
+  SensorFault: 'alertSourceSensorFault',
+  DeviceClockSkew: 'alertSourceDeviceClockSkew',
+  Gradient: 'alertSourceGradient',
+  LightDeficit: 'alertSourceLightDeficit',
+};
+
+export function alertSourceLabel(t: TFunc, source: string): string {
+  const key = ALERT_SOURCE_KEY[source];
+  return key ? t(key) : source;
+}
+
+/**
+ * The stored lifecycle of a board (`DeviceStatus`), which the administrative lists render in place of the keeper's
+ * derived online/offline badge: `Enum.ToString()` sends `Online`, `Offline`, `Provisioning`, `Revoked` or
+ * `Maintenance`, so the lookup folds case rather than guessing which route spelled it which way.
+ */
+const DEVICE_LIFECYCLE_KEY: Record<string, string> = {
+  provisioning: 'adminDeviceProvisioning',
+  online: 'adminDeviceOnline',
+  offline: 'adminDeviceOffline',
+  revoked: 'adminDeviceRevoked',
+  maintenance: 'adminDeviceMaintenance',
+};
+
+const DEVICE_LIFECYCLE_TEXT_CLASS: Record<string, string> = {
+  provisioning: 'text-muted',
+  online: 'text-inrange',
+  offline: 'text-critical',
+  revoked: 'text-critical',
+  maintenance: 'text-warning',
+};
+
+export function deviceLifecycleLabel(t: TFunc, status: string | null): string {
+  if (!status) {
+    return t('deviceUnbound');
+  }
+  const key = DEVICE_LIFECYCLE_KEY[status.toLowerCase()];
+  return key ? t(key) : status;
+}
+
+export function deviceLifecycleTextClass(status: string | null): string {
+  return status ? DEVICE_LIFECYCLE_TEXT_CLASS[status.toLowerCase()] ?? 'text-unknown' : 'text-muted';
+}
+
+/** `TerrariumStatus`: `Active` while it is readable and judged, `Deleted` once its owner removed it. */
+const TERRARIUM_STATUS_KEY: Record<string, string> = {
+  Active: 'terrariumStatusActive',
+  Deleted: 'terrariumStatusDeleted',
+};
+
+export function terrariumStatusLabel(t: TFunc, status: string): string {
+  const key = TERRARIUM_STATUS_KEY[status];
+  return key ? t(key) : status;
+}
+
+/**
+ * The permission catalogue's labels, keyed by the codes of `Domain/Identity/Permissions.cs`. The server publishes
+ * a name and a description too, but they are English copy written beside the code; a screen that has a label for
+ * the code uses it and falls back to whatever the server sent, so a permission this build does not know is
+ * visible as the server's own wording rather than as the wrong grant.
+ */
+const PERMISSION_LABEL_KEY: Record<string, string> = {
+  'terrarium.read': 'permissionTerrariumReadName',
+  'terrarium.write': 'permissionTerrariumWriteName',
+  'device.read': 'permissionDeviceReadName',
+  'device.write': 'permissionDeviceWriteName',
+  'device.provision': 'permissionDeviceProvisionName',
+  'alert.read': 'permissionAlertReadName',
+  'alert.write': 'permissionAlertWriteName',
+  'silence.write': 'permissionSilenceWriteName',
+  'notification.read': 'permissionNotificationReadName',
+  'audit.read': 'permissionAuditReadName',
+  'species.read': 'permissionSpeciesReadName',
+  'species.write': 'permissionSpeciesWriteName',
+  'user.read': 'permissionUserReadName',
+  'user.manage': 'permissionUserManageName',
+  'data.read.any': 'permissionDataReadAnyName',
+  'data.write.any': 'permissionDataWriteAnyName',
+};
+
+const PERMISSION_DESCRIPTION_KEY: Record<string, string> = {
+  'terrarium.read': 'permissionTerrariumReadDesc',
+  'terrarium.write': 'permissionTerrariumWriteDesc',
+  'device.read': 'permissionDeviceReadDesc',
+  'device.write': 'permissionDeviceWriteDesc',
+  'device.provision': 'permissionDeviceProvisionDesc',
+  'alert.read': 'permissionAlertReadDesc',
+  'alert.write': 'permissionAlertWriteDesc',
+  'silence.write': 'permissionSilenceWriteDesc',
+  'notification.read': 'permissionNotificationReadDesc',
+  'audit.read': 'permissionAuditReadDesc',
+  'species.read': 'permissionSpeciesReadDesc',
+  'species.write': 'permissionSpeciesWriteDesc',
+  'user.read': 'permissionUserReadDesc',
+  'user.manage': 'permissionUserManageDesc',
+  'data.read.any': 'permissionDataReadAnyDesc',
+  'data.write.any': 'permissionDataWriteAnyDesc',
+};
+
+export function permissionLabel(t: TFunc, code: string, serverName?: string): string {
+  const key = PERMISSION_LABEL_KEY[code];
+  return key ? t(key) : serverName ?? code;
+}
+
+export function permissionDescription(t: TFunc, code: string, serverDescription?: string): string {
+  const key = PERMISSION_DESCRIPTION_KEY[code];
+  return key ? t(key) : serverDescription ?? code;
+}
+
+/** The catalogue's display groups, which is what keeps a matrix of sixteen rows readable. */
+const PERMISSION_GROUP_KEY: Record<string, string> = {
+  Enclosure: 'adminGroupEnclosure',
+  Alerts: 'adminGroupAlerts',
+  Account: 'adminGroupAccount',
+  Catalogue: 'adminGroupCatalogue',
+  Accounts: 'adminGroupAccounts',
+  'Whole system': 'adminGroupWholeSystem',
+};
+
+export function permissionGroupLabel(t: TFunc, group: string): string {
+  const key = PERMISSION_GROUP_KEY[group];
+  return key ? t(key) : group;
+}
+
+/**
  * §6's freshness rule: a card older than three sampling intervals is stale, and stale values are dimmed and
  * labelled instead of being shown as if they were current. This compares *age*, not a value against a band, so
  * it does not cross the ADR-005 line — and the interval is the server's.

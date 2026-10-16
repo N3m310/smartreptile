@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Activity, BatteryMedium, Cpu, Loader2, Pencil, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
+import { PERMISSION_CODES } from '../api/types';
 import type { Coverage, EffectiveThreshold, LatestReadings, TerrariumItem, TerrariumThresholds, ThresholdOverrideInput } from '../api/types';
 import { MetricCard } from '../components/MetricCard';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
@@ -28,8 +29,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const TerrariumDetail: React.FC = () => {
   const { id = '' } = useParams();
   const { t, lang } = useI18n();
-  const { user } = useSession();
-  const canEditThresholds = user?.role === 'Owner';
+  const { hasPermission } = useSession();
+  // The threshold write names `terrarium.write`: the override belongs to the enclosure, so whoever may edit the
+  // enclosure may tune its bands (FR-18).
+  const canEditThresholds = hasPermission(PERMISSION_CODES.terrariumWrite);
 
   const terrarium = usePolled<TerrariumItem>(() => api.getTerrarium(id), POLL_MS, [id]);
   const latest = usePolled<LatestReadings>(() => api.latestReadings(id), POLL_MS, [id]);

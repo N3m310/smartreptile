@@ -24,12 +24,13 @@ public static class AlertEndpoints
     {
         var alerts = app.MapGroup("/api/v1/alerts")
             .WithTags("alerts")
-            .RequireAuthorization();
+            .RequireAuthorization(Permissions.AlertRead);
 
         alerts.MapGet(string.Empty, async (
             string? state,
             string? severity,
             string? metric,
+            string? family,
             DateTimeOffset? from,
             DateTimeOffset? to,
             string? cursor,
@@ -64,12 +65,30 @@ public static class AlertEndpoints
                 metricFilter = parsedMetric;
             }
 
+            // The family is the coarse filter the alerts screen's two tabs are built on. Absent means both; an
+            // unknown key is refused rather than silently treated as "both", because a client that misspells it would
+            // otherwise show one family's rows under the other family's heading.
+            AlertFamily? familyFilter = null;
+
+            if (!string.IsNullOrWhiteSpace(family))
+            {
+                if (!AlertFamilies.TryParseApiKey(family, out var parsedFamily))
+                {
+                    return Problem(new AlertProblem(
+                        "family_invalid",
+                        $"family must be one of: {FamilyKeys}."));
+                }
+
+                familyFilter = parsedFamily;
+            }
+
             var outcome = await service.ListAsync(
                 principal.GetUserId() ?? Guid.Empty,
                 new AlertQuery(
                     stateFilter,
                     severityFilter,
                     metricFilter,
+                    familyFilter,
                     from,
                     to,
                     cursor,
@@ -81,8 +100,9 @@ public static class AlertEndpoints
         .WithSummary("List alerts across the signed-in account's terrariums")
         .WithDescription("Newest first, and **paged**: `?cursor=&pageSize=` (default 50, max 200) with the next "
                        + "position returned as `nextCursor` and absent on the last page. Filter by `state` "
-                       + "(Open, Acknowledged, Resolved), `severity` (Info, Warning, Critical), `metric` and a "
-                       + "trigger window `from`/`to`.");
+                       + "(Open, Acknowledged, Resolved), `severity` (Info, Warning, Critical), `metric`, `family` "
+                       + "(enclosure for the enclosure's humidity, light and board; species for the animal's "
+                       + "temperature and UV) and a trigger window `from`/`to`.");
 
         alerts.MapGet("/{alertId:long}", async (
             long alertId,
@@ -135,9 +155,9 @@ public static class AlertEndpoints
 
             return outcome.Succeeded ? Results.Ok(outcome.Changed) : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Technician)
+        .RequireAuthorization(Permissions.AlertWrite)
         .WithSummary("Acknowledge an alert")
-        .WithDescription("Requires the Technician role or above. Acknowledging takes ownership without closing the "
+        .WithDescription("Requires `alert.write`. Acknowledging takes ownership without closing the "
                        + "alert; an alert that is already acknowledged or resolved answers `409 alert_not_open`.");
 
         alerts.MapPost("/{alertId:long}/resolve", async (
@@ -157,18 +177,21 @@ public static class AlertEndpoints
 
             return outcome.Succeeded ? Results.Ok(outcome.Changed) : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Technician)
+        .RequireAuthorization(Permissions.AlertWrite)
         .WithSummary("Resolve an alert")
-        .WithDescription("Requires the Technician role or above. `reason` is one of `Recovered`, `FalsePositive`, "
+        .WithDescription("Requires `alert.write`. `reason` is one of `Recovered`, `FalsePositive`, "
                        + "`SensorFault` or `Accepted`; an optional `note` is kept on the alert's audit entry. A "
                        + "resolved alert answers `409 alert_not_open`, and a threshold alert cannot re-open until "
                        + "its band is left for the dwell again.");
 
         // The silences belong to a terrarium (the contract files them under §4.2), so they are mapped into that
-        // prefix while living with the alerts they suppress.
+        // prefix while living with the alerts they suppress. The group reads with `alert.read`; the two writes name
+        // `silence.write` rather than `alert.write`, because going quiet is a decision about being told rather than
+        // about an alert's lifecycle — a deployment that wants a technician who may acknowledge but not silence can
+        // say so with that one grant.
         var silences = app.MapGroup("/api/v1/terrariums/{terrariumId:guid}/silences")
             .WithTags("terrariums")
-            .RequireAuthorization();
+            .RequireAuthorization(Permissions.AlertRead);
 
         silences.MapGet(string.Empty, async (
             Guid terrariumId,
@@ -219,9 +242,9 @@ public static class AlertEndpoints
 
             return outcome.Succeeded ? Results.Ok(outcome.Silence) : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Technician)
+        .RequireAuthorization(Permissions.SilenceWrite)
         .WithSummary("Silence a metric, or a whole terrarium")
-        .WithDescription("Requires the Technician role or above. `{metric?, untilUtc, reason}`: at most 24 hours, "
+        .WithDescription("Requires `silence.write`. `{metric?, untilUtc, reason}`: at most 24 hours, "
                        + "reason required, and omitting `metric` silences every metric. A silence suppresses "
                        + "notifications, not detection — alerts are still raised, counted and shown. Answered with "
                        + "the created window rather than a `Location`, because no read-by-id route exists.");
@@ -243,9 +266,9 @@ public static class AlertEndpoints
 
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Technician)
+        .RequireAuthorization(Permissions.SilenceWrite)
         .WithSummary("Cancel a silence early")
-        .WithDescription("Requires the Technician role or above. Idempotent: cancelling a window that is already "
+        .WithDescription("Requires `silence.write`. Idempotent: cancelling a window that is already "
                        + "cancelled changes nothing and still answers `204`.");
 
         return app;
@@ -253,6 +276,9 @@ public static class AlertEndpoints
 
     /// <summary>Metric keys a `metric` filter accepts, for the message of a refusal.</summary>
     private static string MetricKeys => string.Join(", ", MetricDictionary.All.Select(definition => definition.ApiKey));
+
+    /// <summary>Family keys a `family` filter accepts, for the message of a refusal.</summary>
+    private static string FamilyKeys => string.Join(", ", AlertFamilies.All.Select(AlertFamilies.ApiKey));
 
     private static bool TryParseState(string? state, out AlertState? parsed, out AlertProblem? problem)
     {

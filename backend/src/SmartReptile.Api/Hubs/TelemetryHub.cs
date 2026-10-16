@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Terrariums;
+using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Api.Hubs;
 
@@ -20,14 +21,18 @@ namespace SmartReptile.Api.Hubs;
 public sealed class TelemetryHub(TerrariumService terrariums, ILogger<TelemetryHub> logger) : Hub
 {
     /// <summary>
-    /// One message for "not yours" and for "does not exist". A caller that can tell those apart can confirm that a
-    /// terrarium exists and belongs to somebody else, which is what BR-02.2 exists to prevent.
+    /// One message for "not yours" and for "does not exist". The hub deliberately keeps BR-02.2's single answer even
+    /// though the REST surface now tells the three cases apart: a refusal message is the only thing a client can
+    /// learn here, and a socket that names ids could then be used to probe for them (TASKS 2026-10-14, item 3).
     /// </summary>
     private const string RefusalMessage = "Terrarium not found.";
 
     /// <summary>Starts pushing updates for one terrarium.</summary>
     /// <param name="terrariumId">Terrarium the caller wants updates for.</param>
-    /// <exception cref="HubException">The caller does not own the terrarium, or it does not exist.</exception>
+    /// <exception cref="HubException">
+    /// The caller does not own the terrarium — unless they are the administrator, who may follow any account's
+    /// enclosure — or it does not exist.
+    /// </exception>
     public async Task JoinTerrarium(Guid terrariumId)
     {
         var userId = Context.User?.GetUserId();
@@ -35,7 +40,11 @@ public sealed class TelemetryHub(TerrariumService terrariums, ILogger<TelemetryH
         // A connection without a subject should not exist, because [Authorize] runs before this method — but
         // treating it as a refusal costs nothing and is the safe direction to be wrong in.
         if (userId is null ||
-            !await terrariums.IsMemberAsync(terrariumId, userId.Value, Context.ConnectionAborted))
+            !await terrariums.IsMemberAsync(
+                terrariumId,
+                userId.Value,
+                Context.ConnectionAborted,
+                Context.User?.HasPermission(Permissions.DataReadAny) ?? false))
         {
             logger.LogWarning(
                 "JoinTerrarium({TerrariumId}) refused for connection {ConnectionId}",

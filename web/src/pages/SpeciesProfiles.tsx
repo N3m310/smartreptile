@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Copy, Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Copy, ImagePlus, Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
+import { PERMISSION_CODES } from '../api/types';
 import type {
   CreateSpeciesProfileBody,
   SpeciesProfileBand,
@@ -24,7 +25,9 @@ import { useSession } from '../state/session';
  * Until now the catalogue could only be *read*, and only as the picker inside the terrarium create form: a keeper
  * could choose a profile and had no way to author one, so every band that did not match a built-in had to become a
  * per-terrarium override. This screen is the other half — list, create, edit, duplicate, delete — and the writes
- * are Owner-only because the routes are (all four name the Owner policy).
+ * are Admin-only because the routes are (all four name the Admin policy). The Admin role is the system
+ * administrator the API seeds from configuration, not the keeper's own `Owner` role, so a signed-in keeper sees
+ * the catalogue and the picker and nothing they could be refused for: the four write affordances are simply absent.
  *
  * Two things this screen deliberately does not do. It does not offer Edit or Delete on a built-in: FR-10 A2 says a
  * built-in is read-only and the API answers `403 builtin_immutable`, so the honest rendering is the hint that says
@@ -35,6 +38,16 @@ import { useSession } from '../state/session';
  * The catalogue is loaded once and reloaded after a write rather than polled, the reading the terrarium picker
  * took: it changes only when someone authors a profile here, and a list that reshuffles under a half-filled form
  * is worse than a minute-old one.
+ *
+ * A profile's **picture** is the one field that is not JSON: it travels on routes of its own, so the form's Save
+ * sends two calls — the fields first, then the file if one was chosen — and the picture section reports its own
+ * refusal at the picker. A keeper may keep the paperwork and lose the photograph; the other order would refuse the
+ * whole form over a file. The bytes are fetched rather than linked, because the image route needs the token, and a
+ * profile without a picture shows the words for it rather than an empty frame.
+ *
+ * *Remove picture* is its own call, because it is its own state — and it drops a file chosen but not yet saved,
+ * since "this profile has no picture now" is what the keeper asked for and a save that re-uploaded one would be the
+ * opposite of it.
  */
 
 /** The three phase spellings the write contract accepts. */
@@ -43,14 +56,73 @@ const PHASES = ['any', 'day', 'night'];
 /** The climate zones of §4.3. The values are the enum's own names; only the labels are translated. */
 const CLIMATE_ZONES = ['Tropical', 'SemiArid', 'Arid', 'Temperate'];
 
+/**
+ * The picture types the route accepts, as the picker's own filter. The server checks the bytes rather than this
+ * list, so a keeper who picks something else anyway gets `image_invalid` rather than a silently stored file.
+ */
+const PICTURE_TYPES = 'image/png,image/jpeg,image/webp';
+
+/**
+ * A stored picture.
+ *
+ * The route behind `imageUrl` needs the caller's token, so an `img src` pointed at it would be refused `401` and
+ * show a broken frame. The bytes are fetched instead and handed to the browser as an object URL — which is also
+ * why the URL is revoked on unmount, since the blob it names outlives the element that used it otherwise.
+ *
+ * Nothing is rendered when there is no picture or the fetch failed: the card and the form both say "no picture
+ * yet" in words, and an empty frame beside that sentence would be a second, worse answer (FR-17.4's rule for the
+ * camera panel, applied here).
+ */
+const ProfilePicture: React.FC<{
+  imageUrl: string;
+  imageUpdatedAt: string | null;
+  alt: string;
+  className: string;
+}> = ({ imageUrl, imageUpdatedAt, alt, className }) => {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let created: string | null = null;
+    let cancelled = false;
+    const controller = new AbortController();
+
+    api
+      .speciesProfilePicture(imageUrl, imageUpdatedAt, controller.signal)
+      .then((blob) => {
+        if (cancelled) {
+          return;
+        }
+        created = URL.createObjectURL(blob);
+        setObjectUrl(created);
+      })
+      .catch(() => {
+        // A picture that cannot be fetched is not a reason to fail the screen: the rest of the profile is real and
+        // the picture simply does not show.
+        setObjectUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (created) {
+        URL.revokeObjectURL(created);
+      }
+    };
+  }, [imageUrl, imageUpdatedAt]);
+
+  return objectUrl ? <img src={objectUrl} alt={alt} className={className} /> : null;
+};
+
 export const SpeciesProfiles: React.FC = () => {
   const { t } = useI18n();
-  const { user } = useSession();
+  const { hasPermission } = useSession();
   const profiles = usePolled<SpeciesProfileList>(() => api.listSpeciesProfiles(), null);
   const items = profiles.data?.items ?? [];
   const [createOpen, setCreateOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const canWrite = user?.role === 'Owner';
+  // The four write routes name `species.write`, which the shipped roles grant to Admin alone — but the gate is on
+  // the permission, because a deployment may grant it to a role of its own (FR-18).
+  const canWrite = hasPermission(PERMISSION_CODES.speciesWrite);
 
   return (
     <div className="space-y-6">
@@ -122,6 +194,33 @@ export const SpeciesProfiles: React.FC = () => {
   );
 };
 
+/**
+ * One refusal, rendered from its stable code: the top-level sentence, then the field rules behind it.
+ *
+ * The field sentences are filtered against the top-level one. A refusal whose problem code and whose field code
+ * are the same string — `image_too_large`, `profile_name_taken` — otherwise says the same sentence twice, and the
+ * second copy reads as a second, different problem.
+ */
+const RefusalBanner: React.FC<{ error: ApiError; className?: string }> = ({ error, className }) => {
+  const { t } = useI18n();
+  const summary = describeError(t, error);
+
+  return (
+    <div
+      className={`rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink ${
+        className ?? ''
+      }`}
+    >
+      <p>{summary}</p>
+      {fieldMessages(t, error.errors)
+        .filter((message) => message !== summary)
+        .map((message) => (
+          <p key={message}>{message}</p>
+        ))}
+    </div>
+  );
+};
+
 /** The create panel. A panel rather than a page because the list it lands in is right below it. */
 const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = ({
   onCreated,
@@ -131,12 +230,20 @@ const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = (
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const submit = async (draft: ProfileDraft) => {
+  const submit = async (draft: ProfileDraft, picture: File | null) => {
     setBusy(true);
     setError(null);
 
     try {
-      await api.createSpeciesProfile(toCreateBody(draft));
+      const created = await api.createSpeciesProfile(toCreateBody(draft));
+
+      // The picture is a route of its own, so it is a call of its own, and it is sent *after* the profile exists.
+      // The other order has no id to upload to, and a profile without its picture is a state a keeper can fix by
+      // editing, while a picture with no profile is a file nothing refers to.
+      if (picture) {
+        await api.setSpeciesProfileImage(created.id, picture);
+      }
+
       onCreated();
       onCancel();
     } catch (cause) {
@@ -157,7 +264,7 @@ const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = (
           busyLabel={t('creating')}
           busy={busy}
           error={error}
-          onSubmit={(draft) => void submit(draft)}
+          onSubmit={(draft, picture) => void submit(draft, picture)}
           onCancel={onCancel}
         />
       </div>
@@ -165,7 +272,7 @@ const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = (
   );
 };
 
-/** One profile: what it holds, its bands, and — for an Owner — the four ways of changing it. */
+/** One profile: what it holds, its bands, and — for an Admin — the four ways of changing it. */
 const ProfileCard: React.FC<{
   profile: SpeciesProfileItem;
   canWrite: boolean;
@@ -194,11 +301,25 @@ const ProfileCard: React.FC<{
     }
   };
 
-  const save = (draft: ProfileDraft) =>
+  const save = (draft: ProfileDraft, picture: File | null) =>
     run(async () => {
       await api.updateSpeciesProfile(profile.id, toUpdateBody(draft));
+
+      // The fields and the picture travel on two routes, so saving a form that changed both is two calls. The
+      // fields go first: a picture the server refuses leaves the keeper's edits saved and the refusal naming the
+      // file, which is a state they can act on — the reverse would refuse the whole form over a photograph.
+      if (picture) {
+        await api.setSpeciesProfileImage(profile.id, picture);
+      }
+
       setEditing(false);
       onChanged('speciesProfileUpdated');
+    });
+
+  const removePicture = () =>
+    run(async () => {
+      await api.deleteSpeciesProfileImage(profile.id);
+      onChanged('speciesProfilePictureRemoved');
     });
 
   const duplicate = () =>
@@ -219,12 +340,22 @@ const ProfileCard: React.FC<{
   return (
     <article className="rounded-2xl border border-hairline bg-surface p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-heading text-lg font-semibold text-ink">{profile.name}</h2>
-          <p className="mt-0.5 text-xs text-muted">
-            {profile.scientificName ? `${profile.scientificName} · ` : ''}
-            {climateZoneLabel(t, profile.climateZone)}
-          </p>
+        <div className="flex min-w-0 items-start gap-3">
+          {profile.imageUrl ? (
+            <ProfilePicture
+              imageUrl={profile.imageUrl}
+              imageUpdatedAt={profile.imageUpdatedAt}
+              alt={profile.name}
+              className="h-16 w-16 shrink-0 rounded-xl border border-hairline object-cover"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <h2 className="font-heading text-lg font-semibold text-ink">{profile.name}</h2>
+            <p className="mt-0.5 text-xs text-muted">
+              {profile.scientificName ? `${profile.scientificName} · ` : ''}
+              {climateZoneLabel(t, profile.climateZone)}
+            </p>
+          </div>
         </div>
         {profile.isBuiltIn ? (
           <span className="rounded-full border border-hairline px-2.5 py-1 text-[11px] text-muted">
@@ -326,14 +457,7 @@ const ProfileCard: React.FC<{
         <p className="mt-3 text-[11px] text-muted">{t('speciesProfileReadOnlyHint')}</p>
       ) : null}
 
-      {error ? (
-        <div className="mt-3 rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
-          <p>{describeError(t, error)}</p>
-          {fieldMessages(t, error.errors).map((message) => (
-            <p key={message}>{message}</p>
-          ))}
-        </div>
-      ) : null}
+      {error ? <RefusalBanner error={error} className="mt-3" /> : null}
 
       {canWrite ? (
         <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px]">
@@ -447,7 +571,10 @@ const ProfileCard: React.FC<{
             busyLabel={t('saving')}
             busy={busy}
             error={error}
-            onSubmit={(draft) => void save(draft)}
+            pictureUrl={profile.imageUrl}
+            pictureUpdatedAt={profile.imageUpdatedAt}
+            onRemovePicture={() => void removePicture()}
+            onSubmit={(draft, picture) => void save(draft, picture)}
             onCancel={() => setEditing(false)}
           />
         </div>
@@ -468,11 +595,43 @@ const ProfileForm: React.FC<{
   busyLabel: string;
   busy: boolean;
   error: ApiError | null;
-  onSubmit: (draft: ProfileDraft) => void;
+  /** The picture already stored, shown in the section so an edit knows what it is replacing. */
+  pictureUrl?: string | null;
+  pictureUpdatedAt?: string | null;
+  /** Absent for the create form, where there is no stored picture to remove yet. */
+  onRemovePicture?: () => void;
+  onSubmit: (draft: ProfileDraft, picture: File | null) => void;
   onCancel: () => void;
-}> = ({ idPrefix, initial, submitLabel, busyLabel, busy, error, onSubmit, onCancel }) => {
+}> = ({
+  idPrefix,
+  initial,
+  submitLabel,
+  busyLabel,
+  busy,
+  error,
+  pictureUrl,
+  pictureUpdatedAt,
+  onRemovePicture,
+  onSubmit,
+  onCancel,
+}) => {
   const { t } = useI18n();
   const [draft, setDraft] = useState<ProfileDraft>(initial);
+  const [picture, setPicture] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!picture) {
+      setPreview(null);
+
+      return;
+    }
+
+    const url = URL.createObjectURL(picture);
+    setPreview(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [picture]);
 
   const inputClass = (field: string) =>
     `mt-1 w-full rounded-lg border bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand ${
@@ -530,7 +689,7 @@ const ProfileForm: React.FC<{
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        onSubmit(draft);
+        onSubmit(draft, picture);
       }}
       className="space-y-3"
     >
@@ -587,6 +746,75 @@ const ProfileForm: React.FC<{
         {textField('lightThresholdLux', 'profileLightThreshold', { type: 'number', step: 'any' })}
         {textField('minLightHoursPerDay', 'profileMinLightHours', { type: 'number', step: 'any' })}
         {textField('notes', 'profileNotes', { maxLength: 1000 })}
+      </div>
+
+      <div className="border-t border-hairline pt-3">
+        <div className="flex items-start gap-3">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-hairline bg-raised">
+            {preview ? (
+              <img src={preview} alt="" className="h-full w-full object-cover" />
+            ) : pictureUrl ? (
+              <ProfilePicture
+                imageUrl={pictureUrl}
+                imageUpdatedAt={pictureUpdatedAt ?? null}
+                alt={t('profilePicture')}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <ImagePlus className="h-5 w-5 text-muted" aria-hidden="true" />
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <span className="text-[11px] text-muted">{t('profilePicture')}</span>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {/* The picker itself is the hidden input: a native file control cannot carry this app's styling, and
+                  a label bound to it is what a keyboard and a screen reader both reach. */}
+              <label
+                htmlFor={`${idPrefix}-picture`}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-raised"
+              >
+                <ImagePlus className="h-4 w-4" aria-hidden="true" />
+                <span>{picture || pictureUrl ? t('profilePictureReplace') : t('profilePictureChoose')}</span>
+              </label>
+              <input
+                id={`${idPrefix}-picture`}
+                type="file"
+                accept={PICTURE_TYPES}
+                onChange={(event) => setPicture(event.target.files?.[0] ?? null)}
+                aria-invalid={fieldHasError(error, 'file') ? true : undefined}
+                aria-describedby={`${idPrefix}-picture-hint`}
+                className="sr-only"
+              />
+              {onRemovePicture && pictureUrl ? (
+                <button
+                  type="button"
+                  // Removing means "this profile ends up with no picture", so a file chosen but not yet saved is
+                  // dropped as well — otherwise the keeper would have to save a picture they had just deleted.
+                  onClick={() => {
+                    setPicture(null);
+                    onRemovePicture();
+                  }}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-lg border border-hairline px-3 py-1.5 text-xs font-medium text-critical transition-colors hover:bg-raised disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  <span>{t('profilePictureRemove')}</span>
+                </button>
+              ) : null}
+            </div>
+            <p id={`${idPrefix}-picture-hint`} className="mt-1 text-[11px] text-muted">
+              {picture
+                ? `${picture.name} · ${t('profilePictureHint')}`
+                : pictureUrl
+                  ? t('profilePictureHint')
+                  : `${t('profilePictureNone')} · ${t('profilePictureHint')}`}
+            </p>
+            {fieldMessage(t, error, 'file') ? (
+              <p className="mt-1 text-[11px] text-critical">{fieldMessage(t, error, 'file')}</p>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       <div className="space-y-2 border-t border-hairline pt-3">
@@ -766,14 +994,7 @@ const ProfileForm: React.FC<{
         })}
       </div>
 
-      {error ? (
-        <div className="rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
-          <p>{describeError(t, error)}</p>
-          {fieldMessages(t, error.errors).map((message) => (
-            <p key={message}>{message}</p>
-          ))}
-        </div>
-      ) : null}
+      {error ? <RefusalBanner error={error} /> : null}
 
       <div className="flex items-center gap-2">
         <button

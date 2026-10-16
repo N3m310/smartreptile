@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_reptile/core/clock.dart';
+import 'package:smart_reptile/core/permissions.dart';
 import 'package:smart_reptile/core/status.dart';
 import 'package:smart_reptile/prototype/fake_world.dart';
 import 'package:smart_reptile/prototype/prototype_state.dart';
@@ -49,7 +50,17 @@ void main() {
         isEmpty,
       );
       expect(state.isSignedIn, isTrue);
-      expect(state.user?.role, UserRole.owner);
+      expect(state.user?.role, SystemRoleCodes.owner);
+      expect(
+        state.user?.hasPermission(Permissions.terrariumWrite),
+        isTrue,
+        reason: 'the demo owner keeps the enclosure writes, as the seeded Owner role does',
+      );
+      expect(
+        state.user?.hasPermission(Permissions.dataReadAny),
+        isFalse,
+        reason: 'an owner sees their own account only; the cross-account codes belong to Admin',
+      );
     });
 
     test('an unknown account and a wrong password give the same message', () {

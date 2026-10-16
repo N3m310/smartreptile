@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Thresholds;
@@ -188,12 +189,22 @@ public sealed record UpdateThresholdsRequest(IReadOnlyList<ThresholdOverrideInpu
 /// <param name="Location">Free-text location label; users are advised not to enter an address.</param>
 /// <param name="Description">Keeper notes.</param>
 /// <param name="TimeZoneId">IANA/Windows zone id; defaults to the configured system default (ADR-015).</param>
+/// <param name="DeviceId">
+/// Optional public id of a board to bind in the same request (<c>sr-3f9a2c</c>, TASKS 2026-10-14, item 2). Omitted
+/// or null is exactly the behaviour that existed before: create the enclosure, claim a board afterwards.
+/// </param>
+/// <param name="MacAddress">
+/// Optional MAC address of a board to bind, for the caller who has the board in hand but no public id to hand
+/// (item 8's lower-trust path). Supplying both this and <paramref name="DeviceId"/> is refused rather than guessed.
+/// </param>
 public sealed record CreateTerrariumRequest(
     string? Name,
     Guid SpeciesProfileId,
     string? Location,
     string? Description,
-    string? TimeZoneId);
+    string? TimeZoneId,
+    string? DeviceId = null,
+    string? MacAddress = null);
 
 /// <summary>
 /// Update input (FR-03's update half). Every member is optional and an **omitted** member is left unchanged — the
@@ -295,7 +306,48 @@ public sealed record TerrariumSummary(
     DateTimeOffset UpdatedAt,
     DeviceSummary? Device,
     DateTimeOffset? LatestSampleAt,
-    int OpenAlertCount);
+    int OpenAlertCount)
+{
+    /// <summary>
+    /// The concurrency token, base64, repeated from the <c>ETag</c> response header so an update can be authored
+    /// by a client that cannot read response headers — Swagger UI is the one that matters, because it renders no
+    /// <c>If-Match</c> box of its own and the route was therefore impossible to call from it (FR-03).
+    /// </summary>
+    /// <remarks>
+    /// Set on the single-terrarium answers (<c>GET {id}</c>, <c>POST</c>, <c>PATCH</c>) and absent from list items,
+    /// which are read-only and carry no token to send back. The header stays the authoritative HTTP form; this is
+    /// the same value, so a client may use either and must not treat the two as different versions.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RowVersion { get; init; }
+
+    /// <summary>
+    /// The account that owns the terrarium, present only on the answers an administrator receives
+    /// (TASKS 2026-10-14, item 5).
+    /// </summary>
+    /// <remarks>
+    /// Absent for every other caller, including a keeper's own list: ownership is not a field a client acts on,
+    /// and sending it everywhere would invite one to try. It is set when the caller is an administrator, whose
+    /// list and detail answers can name an account they did not ask for — and who needs to know whose enclosure
+    /// they are looking at before editing it.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? OwnerUserId { get; init; }
+
+    /// <summary>
+    /// The secret of a board bound by the same <c>POST /terrariums</c> that created this enclosure, present only on
+    /// that one response (TASKS 2026-10-14, item 2).
+    /// </summary>
+    /// <remarks>
+    /// Binding a board at creation is the same act as claiming it — the board needs its credential to publish, and
+    /// the alternative would be a board that can neither report nor be claimed again — so this is
+    /// <c>POST /devices/claim</c>'s one-time secret, delivered on the route that performed the claim. It is never
+    /// retrievable afterwards: only its hash is stored, and a rotation is the only way to get a new one. Absent from
+    /// every other answer, including a create that named no device.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceSecret { get; init; }
+}
 
 /// <summary>One bucket of a chart series. Null bounds with <see cref="Count"/> 0 are a gap (BR-09.5).</summary>
 /// <param name="T">Bucket start, UTC.</param>
@@ -388,9 +440,9 @@ public sealed record TerrariumOutcome
     public TerrariumProblem? Problem { get; init; }
 
     /// <summary>
-    /// Concurrency token of the terrarium the outcome describes, when it has one. The endpoint turns it into the
-    /// <c>ETag</c> header a client returns as <c>If-Match</c> on the next update (FR-03); it is not part of the
-    /// JSON item shape.
+    /// Concurrency token of the terrarium the outcome describes, when it has one. The endpoint publishes it as the
+    /// <c>ETag</c> response header a client returns as <c>If-Match</c> on the next update (FR-03), and repeats it
+    /// as the item's <see cref="TerrariumSummary.RowVersion"/> so the value is reachable from the body too.
     /// </summary>
     public byte[]? RowVersion { get; init; }
 
@@ -400,9 +452,23 @@ public sealed record TerrariumOutcome
     /// <summary>A list result.</summary>
     public static TerrariumOutcome Listed(IReadOnlyList<TerrariumSummary> items) => new() { Terrariums = items };
 
-    /// <summary>A single terrarium (get, create or update), with the concurrency token when there is one.</summary>
-    public static TerrariumOutcome Found(TerrariumSummary summary, byte[]? rowVersion = null) =>
-        new() { Terrarium = summary, RowVersion = rowVersion };
+    /// <summary>
+    /// A single terrarium (get, create or update), with the concurrency token when there is one.
+    /// </summary>
+    /// <param name="summary">The terrarium as the wire shape describes it.</param>
+    /// <param name="rowVersion">Concurrency token, for the answers that publish one.</param>
+    /// <param name="deviceSecret">
+    /// The one-time secret of a board bound by the same create request, or null when no board was named.
+    /// </param>
+    public static TerrariumOutcome Found(
+        TerrariumSummary summary,
+        byte[]? rowVersion = null,
+        string? deviceSecret = null) =>
+        new()
+        {
+            Terrarium = deviceSecret is null ? summary : summary with { DeviceSecret = deviceSecret },
+            RowVersion = rowVersion,
+        };
 
     /// <summary>A latest-readings snapshot.</summary>
     public static TerrariumOutcome Snapshot(LatestReadings readings) => new() { Readings = readings };
@@ -427,12 +493,20 @@ public sealed record TerrariumOutcome
     /// The row moved on since the caller read it, so its <c>If-Match</c> is stale (FR-03). Refused rather than
     /// merged: silently overwriting the other edit is the failure the concurrency token exists to prevent.
     /// </summary>
+    /// <remarks>
+    /// The message names where the replacement comes from, because a client that sent a token has already done the
+    /// read and the only useful next step is another one: "reload it" alone leaves a caller who read the
+    /// <c>ETag</c> header from a proxy that strips it, or from Swagger UI which shows no header at all, with no
+    /// second way to obtain the value.
+    /// </remarks>
     public static TerrariumOutcome PreconditionFailed() =>
         new()
         {
             Problem = new TerrariumProblem(
                 "precondition_failed",
-                "This terrarium changed since it was read. Reload it and send the current ETag again."),
+                "This terrarium changed since it was read, so the ETag that was sent is stale. Read it again — "
+                + "GET /api/v1/terrariums/{id} returns the current value as its ETag header and as the rowVersion "
+                + "field of the body — and resend the update with that value in If-Match."),
         };
 
     /// <summary>A device is still bound and the caller did not ask for it to be unbound (FR-03, DI-04).</summary>
@@ -445,8 +519,37 @@ public sealed record TerrariumOutcome
                 + "allowUnboundDevice=true to unbind and delete it."),
         };
 
-    /// <summary>A soft delete that succeeded; the response carries no body.</summary>
+    /// <summary>
+    /// A soft delete that succeeded; the response carries no body.
+    /// </summary>
     public static TerrariumOutcome Deleted() => new();
+
+    /// <summary>
+    /// The terrarium exists but belongs to another account (FR-03). Distinct from <c>not_found</c> so a keeper can
+    /// tell a mistyped id from an enclosure that is not theirs — the narrowing of BR-02.2 recorded in the decision
+    /// log and in `02-design/06` §3 (TASKS 2026-10-14, item 3).
+    /// </summary>
+    public static TerrariumOutcome Forbidden() =>
+        new()
+        {
+            Problem = new TerrariumProblem(
+                "forbidden_terrarium",
+                "This terrarium belongs to another account."),
+        };
+
+    /// <summary>
+    /// The terrarium was soft-deleted (FR-03, BR-03.3). Its readings, alerts and summaries are still stored, so
+    /// answering <c>not_found</c> would say the opposite of the truth; <c>410 Gone</c> says the resource existed and
+    /// was removed (TASKS 2026-10-14, item 6).
+    /// </summary>
+    public static TerrariumOutcome Gone() =>
+        new()
+        {
+            Problem = new TerrariumProblem(
+                "terrarium_deleted",
+                "This terrarium was deleted. Its readings and alert history are kept, but the enclosure itself is "
+                + "gone."),
+        };
 
     /// <summary>A failure with a stable code and a non-disclosing message.</summary>
     public static TerrariumOutcome Failed(string code, string message) =>

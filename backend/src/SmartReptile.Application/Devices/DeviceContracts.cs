@@ -26,6 +26,16 @@ public sealed record SelfRegisterResult(
 public sealed record ClaimRequest(string? ClaimCode, Guid TerrariumId);
 
 /// <summary>
+/// Claim input for the MAC variant: the address printed on the board instead of a code (TASKS 2026-10-14, item 8).
+/// </summary>
+/// <param name="MacAddress">
+/// The board's MAC, typed in any of the usual spellings (<c>AA:BB:CC:DD:EE:FF</c>, <c>aa-bb-…</c>, bare hex) — it is
+/// normalised before it is looked up.
+/// </param>
+/// <param name="TerrariumId">Terrarium to bind to.</param>
+public sealed record ClaimByMacRequest(string? MacAddress, Guid TerrariumId);
+
+/// <summary>
 /// The one and only time the device secret is handed out (§02-design/06 §5).
 /// </summary>
 /// <param name="DeviceId">Public id of the claimed device.</param>
@@ -39,6 +49,69 @@ public sealed record ClaimResult(string DeviceId, string Secret, Guid TerrariumI
 /// <param name="Secret">The replacement secret, returned once.</param>
 /// <param name="PreviousUsableUntilUtc">End of the rotation grace window (BR-05.5).</param>
 public sealed record RotatedSecret(string DeviceId, string Secret, DateTimeOffset PreviousUsableUntilUtc);
+
+/// <summary>
+/// Edit input for a board's own settings (TASKS 2026-10-14, item 9b). Every member is optional and an
+/// <b>omitted</b> member is left unchanged — the request is a patch, not a replacement.
+/// </summary>
+/// <param name="DeviceName">New display name, at most 60 characters; an empty string restores "New node".</param>
+/// <param name="SamplingIntervalSec">Sampling interval pushed downlink, 10–300 seconds.</param>
+/// <param name="PublishIntervalSec">Publish interval pushed downlink, 10–300 seconds.</param>
+public sealed record UpdateDeviceRequest(
+    string? DeviceName,
+    int? SamplingIntervalSec,
+    int? PublishIntervalSec);
+
+/// <summary>
+/// One board as the fleet screen reads it (FR-16; TASKS 2026-10-14, item 9b). Richer than the terrarium's
+/// <c>DeviceSummary</c> because this is the screen a keeper manages boards from rather than a header on an
+/// enclosure: it carries the identity, the settings, and both the stored lifecycle state and the derived badge.
+/// </summary>
+/// <param name="DeviceId">Public id (<c>sr-3f9a2c</c>), never the surrogate key.</param>
+/// <param name="DeviceName">Owner-chosen display name.</param>
+/// <param name="ChipId">Chip id reported at registration.</param>
+/// <param name="MacAddress">MAC address reported at registration, in the stored colon form.</param>
+/// <param name="FirmwareVersion">Last reported firmware, null when the board has never reported.</param>
+/// <param name="Status">Stored lifecycle state, as the wire spells it (<c>provisioning</c>, <c>online</c>, …).</param>
+/// <param name="Runtime">Derived online/offline badge: the stored state for the states a board cannot leave on its
+/// own, silence otherwise (BR-07.2). Both are sent because they answer different questions — "is it misconfigured?"
+/// versus "is it reporting?".</param>
+/// <param name="Protocol">Transport in use: <c>mqtt</c> or <c>http_fallback</c>.</param>
+/// <param name="TerrariumId">Bound enclosure, null while unclaimed.</param>
+/// <param name="TerrariumName">Name of the bound enclosure, resolved for display so the list needs no second call.</param>
+/// <param name="LastSeenAt">When the server last heard from the board.</param>
+/// <param name="SamplingIntervalSec">Sampling interval pushed downlink.</param>
+/// <param name="PublishIntervalSec">Publish interval pushed downlink.</param>
+/// <param name="ProvisionedAt">When the board was claimed, null while unclaimed.</param>
+/// <param name="RevokedAt">When the board's credentials were revoked, null while they are live.</param>
+/// <param name="CreatedAt">When the board first registered.</param>
+/// <param name="SignalStrengthDbm">Last reported Wi-Fi signal strength.</param>
+/// <param name="BatteryPct">Last reported battery percentage, if the node is battery powered.</param>
+/// <param name="UptimeSeconds">Last reported uptime.</param>
+/// <param name="FreeHeapKb">Last reported free heap, the early warning for a leak (M5 soak).</param>
+/// <param name="CalibrationJson">Per-device calibration offsets applied at ingest (BR-06.7/BR-07.4), as stored.</param>
+public sealed record DeviceDetail(
+    string DeviceId,
+    string DeviceName,
+    string ChipId,
+    string MacAddress,
+    string? FirmwareVersion,
+    string Status,
+    string Runtime,
+    string Protocol,
+    Guid? TerrariumId,
+    string? TerrariumName,
+    DateTimeOffset? LastSeenAt,
+    int SamplingIntervalSec,
+    int PublishIntervalSec,
+    DateTimeOffset? ProvisionedAt,
+    DateTimeOffset? RevokedAt,
+    DateTimeOffset CreatedAt,
+    int? SignalStrengthDbm,
+    decimal? BatteryPct,
+    long? UptimeSeconds,
+    int? FreeHeapKb,
+    string? CalibrationJson);
 
 /// <summary>
 /// An expected onboarding failure. Field-level violations reuse <see cref="IdentityViolation"/>: it already means
@@ -69,6 +142,12 @@ public sealed record DeviceOutcome
     /// <summary>Set by rotate-secret.</summary>
     public RotatedSecret? Rotation { get; init; }
 
+    /// <summary>Set by the device list (TASKS 2026-10-14, item 9b).</summary>
+    public IReadOnlyList<DeviceDetail>? Devices { get; init; }
+
+    /// <summary>Set by the device detail, edit and delete answers.</summary>
+    public DeviceDetail? Device { get; init; }
+
     /// <summary>Set when the use case failed.</summary>
     public DeviceProblem? Problem { get; init; }
 
@@ -83,6 +162,12 @@ public sealed record DeviceOutcome
 
     /// <summary>A successful rotation.</summary>
     public static DeviceOutcome Rotated(RotatedSecret result) => new() { Rotation = result };
+
+    /// <summary>The caller's boards (TASKS 2026-10-14, item 9b).</summary>
+    public static DeviceOutcome Listed(IReadOnlyList<DeviceDetail> devices) => new() { Devices = devices };
+
+    /// <summary>One board, as the detail, edit and delete answers describe it.</summary>
+    public static DeviceOutcome Described(DeviceDetail device) => new() { Device = device };
 
     /// <summary>A command that succeeded and has nothing to return.</summary>
     public static DeviceOutcome Done() => new();

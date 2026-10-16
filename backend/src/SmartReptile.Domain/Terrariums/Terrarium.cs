@@ -1,5 +1,22 @@
 namespace SmartReptile.Domain.Terrariums;
 
+/// <summary>The enclosure's lifecycle state (§02-design/02 DI-10).</summary>
+/// <remarks>
+/// Values are persisted as integers, so a member is only ever appended — renumbering one silently rewrites the
+/// state of every existing row.
+/// </remarks>
+public enum TerrariumStatus
+{
+    /// <summary>Readable, editable and judged by the evaluator.</summary>
+    Active = 0,
+
+    /// <summary>
+    /// Removed by its owner. The row and its history stay in the database for audit; reads hide it, and a request
+    /// that names it is told it was deleted rather than that it never existed.
+    /// </summary>
+    Deleted = 1,
+}
+
 /// <summary>
 /// The monitored enclosure. Soft-deleted so alert and summary history stays auditable (§02-design/02 DI-10).
 /// </summary>
@@ -43,11 +60,22 @@ public class Terrarium
     /// </summary>
     public byte[]? RowVersion { get; set; }
 
-    /// <summary>Soft-delete marker; non-null means the terrarium was removed by its owner.</summary>
+    /// <summary>
+    /// Lifecycle state, and the source of truth for "has this been deleted" (DI-10). A state column rather than a
+    /// nullable timestamp because every read asks the question, and a null timestamp answers it only by convention —
+    /// while also having to mean "never deleted" and "deleted at an unknown moment" at the same time.
+    /// </summary>
+    public TerrariumStatus Status { get; set; } = TerrariumStatus.Active;
+
+    /// <summary>
+    /// When the soft delete happened. A detail of <see cref="Status"/>, never a second source of truth: the state
+    /// decides visibility, so a row whose timestamp is set while its state is <see cref="TerrariumStatus.Active"/>
+    /// is still active. Null while the terrarium has never been deleted.
+    /// </summary>
     public DateTimeOffset? DeletedAt { get; set; }
 
     /// <summary>True while the terrarium is active.</summary>
-    public bool IsActive => DeletedAt is null;
+    public bool IsActive => Status == TerrariumStatus.Active;
 
     /// <summary>Bound device (at most one, enforced by a filtered unique index — DI-04).</summary>
     public Devices.Device? Device { get; set; }

@@ -140,6 +140,11 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
     public Task<Device?> FindDeviceByChipIdAsync(string chipId, CancellationToken cancellationToken) =>
         Task.FromResult(_devices.FirstOrDefault(device => device.ChipId == chipId));
 
+    /// <summary>Mirrors the adapter's case-insensitive lookup (SQL Server's default collation).</summary>
+    public Task<Device?> FindDeviceByMacAddressAsync(string macAddress, CancellationToken cancellationToken) =>
+        Task.FromResult(_devices.FirstOrDefault(
+            device => string.Equals(device.MacAddress, macAddress, StringComparison.OrdinalIgnoreCase)));
+
     public Task<Device?> FindDeviceByClaimCodeAsync(string claimCode, CancellationToken cancellationToken) =>
         Task.FromResult(_devices.FirstOrDefault(device => device.ClaimCode == claimCode));
 
@@ -169,11 +174,21 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
         Guid ownerUserId,
         CancellationToken cancellationToken) =>
         Task.FromResult(_terrariums.FirstOrDefault(
-            terrarium => terrarium.Id == terrariumId && terrarium.UserId == ownerUserId && terrarium.DeletedAt == null));
+            terrarium => terrarium.Id == terrariumId
+                         && terrarium.UserId == ownerUserId
+                         && terrarium.Status == TerrariumStatus.Active));
 
     public Task<bool> TerrariumHasDeviceAsync(Guid terrariumId, CancellationToken cancellationToken) =>
         Task.FromResult(_devices.Any(
             device => device.TerrariumId == terrariumId && device.Status != DeviceStatus.Revoked));
+
+    /// <summary>The caller's boards, ordered by display name — the same shape the adapter returns.</summary>
+    public Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Device>>(
+            [.. _devices
+                .Where(device => device.UserId == ownerUserId)
+                .OrderBy(device => device.DeviceName)
+                .ThenBy(device => device.PublicId)]);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {

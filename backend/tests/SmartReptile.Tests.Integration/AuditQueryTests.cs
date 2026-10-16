@@ -75,10 +75,7 @@ public sealed class AuditQueryTests(DatabaseFixture fixture)
 
         await AddAsync(db, technician, deviceId, AuditEntity.Alert, "812", AuditAction.AlertAcknowledged);
 
-        var terrarium = await db.Terrariums.SingleAsync(row => row.Id == terrariumId);
-        terrarium.DeletedAt = DateTimeOffset.UtcNow;
-
-        await db.SaveChangesAsync();
+        await Seed.SoftDeleteAsync(db, terrariumId);
 
         var page = await new EfAuditStore(db).ListAsync(owner, new AuditQuery(), 50, CancellationToken.None);
 

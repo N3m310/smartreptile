@@ -5,14 +5,17 @@ every screen a keeper will use, filled with generated data — and every thresho
 escalation, suppression and coverage decision on those screens is made by a real implementation of the rules in
 `docs/`.
 
-Run it:
+Run it (the prototype is **opt-in** since 2026-10-14 — the app opens on its own VIVARIUMGUARD shell by default):
 
 ```bash
 cd app
-flutter run -d web-server --web-port=8099        # then open http://127.0.0.1:8099
-flutter run -d chrome                             # or a Chrome window
-flutter test test/prototype                       # 100+ tests, about a second
+flutter run -d chrome --dart-define=PROTOTYPE=true            # or -d web-server --web-port=8099, then open that URL
+flutter run -d android --dart-define=PROTOTYPE=true           # on a device
+flutter test test/prototype                                   # 100+ tests, about a second
 ```
+
+Without the flag the app builds and runs its own screens (`lib/app.dart`), which is what a keeper sees; this
+document describes the working aid behind the flag, whose whole point is that its rules are the real ones.
 
 Sign in with the pre-filled demo credentials (`linh@example.com` / `demo1234`).
 
@@ -26,8 +29,9 @@ Sign in with the pre-filled demo credentials (`linh@example.com` / `demo1234`).
 | The notification *channels* (nothing is sent anywhere) | The notification *decision*: the whole `02-design/05` §4 flow |
 | Log-in: the credentials are pre-filled and nothing is stored | The exposures, coverages, light deficits and compliance numbers |
 
-Nothing on this path touches the network or the disk. `--dart-define=PROTOTYPE=false` switches to the M1 live path
-(real `ApiClient`, real `TelemetryProvider`), which still shows only honest empty and offline states.
+Nothing on this path touches the network or the disk. Dropping `--dart-define=PROTOTYPE=true` builds the app's own
+shell instead (`lib/app.dart`, `lib/screens/`) — one binary, two surfaces, and the mode is a compile-time constant
+so neither can drift into the other at runtime.
 
 ## Why the rules live in their own package
 

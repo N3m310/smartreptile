@@ -8,7 +8,7 @@ import {
   type StoredSession,
 } from '../api/client';
 import * as auth from '../api/endpoints';
-import type { UserProfile } from '../api/types';
+import type { PermissionCode, UserProfile } from '../api/types';
 
 /**
  * Who is signed in, and the one place that changes.
@@ -18,9 +18,9 @@ import type { UserProfile } from '../api/types';
  * 1. **Sign in / register / sign out** against `/auth/*`, storing the session through `api/client` so the
  *    transport and the shell never disagree about whether a session exists.
  * 2. **Re-read the profile** on mount when a stored session exists. `localStorage` is user-editable and a
- *    role read from it would be a permission decision made by the page (`02-design/06` §3), so the role the UI
- *    gates on comes from `GET /auth/me`. A failure here is not an error to shout about: it means the session is
- *    gone, which is exactly what signing out looks like.
+ *    role read from it would be a permission decision made by the page (`02-design/06` §3), so the role and the
+ *    permission codes the UI gates on come from `GET /auth/me`. A failure here is not an error to shout about: it
+ *    means the session is gone, which is exactly what signing out looks like.
  * 3. **Explain a lost session.** A failed rotation drops the session from inside the transport, so the provider
  *    subscribes and reports `expired` — otherwise the keeper is bounced to the sign-in form with no reason
  *    given, which reads as a bug in the app rather than a 15-minute token that could not be rotated.
@@ -29,6 +29,13 @@ import type { UserProfile } from '../api/types';
 interface SessionValue {
   session: StoredSession | null;
   user: UserProfile | null;
+  /**
+   * True when the account's role grants `code`. This — never the role's name — is what a screen gates on: a
+   * deployment may re-point a role at another permission set, and a screen that tested the name would keep
+   * rendering the old answer (`02-design/06` §3, FR-18). An unknown or absent code is false, so a screen is
+   * hidden rather than shown to someone who cannot use it.
+   */
+  hasPermission: (code: PermissionCode) => boolean;
   /** Set when the transport lost the session, cleared once shown. */
   lostReason: 'expired' | null;
   clearLostReason: () => void;
@@ -116,17 +123,30 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
+  // A set rather than a scan of the array: the sidebar asks this once per entry on every render, and the account's
+  // permissions do not change while a session lives.
+  const permissions = useMemo(
+    () => new Set(session?.user?.permissions ?? []),
+    [session?.user?.permissions]
+  );
+
+  const hasPermission = useCallback(
+    (code: PermissionCode) => permissions.has(code),
+    [permissions]
+  );
+
   const value = useMemo<SessionValue>(
     () => ({
       session,
       user: session?.user ?? null,
+      hasPermission,
       lostReason,
       clearLostReason: () => setLostReason(null),
       signIn,
       signOut,
       refreshProfile,
     }),
-    [session, lostReason, signIn, signOut, refreshProfile]
+    [session, hasPermission, lostReason, signIn, signOut, refreshProfile]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

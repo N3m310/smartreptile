@@ -140,7 +140,7 @@ public static class AuthEndpoints
 
             return profile is null ? Results.Unauthorized() : Results.Ok(profile);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
         .RequireRateLimiting("authSession")
         .Produces<UserProfile>(StatusCodes.Status200OK)
         .WithSummary("The signed-in account")
@@ -156,11 +156,60 @@ public static class AuthEndpoints
             var outcome = await auth.ChangePasswordAsync(principal.GetUserId() ?? Guid.Empty, request, ct);
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
         .RequireRateLimiting("auth")
         .WithSummary("Change the password")
         .WithDescription("Re-proves the current password and ends every other session of the account, keeping the one "
                        + "whose refresh token the request names.");
+
+        group.MapPatch("/me", async (
+            UpdateProfileRequest request,
+            ClaimsPrincipal principal,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            var outcome = await auth.UpdateProfileAsync(
+                principal.GetUserId() ?? Guid.Empty,
+                request,
+                ct);
+
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            var profile = await auth.GetProfileAsync(principal.GetUserId() ?? Guid.Empty, ct);
+
+            return profile is null ? Results.Unauthorized() : Results.Ok(profile);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
+        .RequireRateLimiting("authSession")
+        .WithSummary("Edit the signed-in account's preferences")
+        .WithDescription("A patch: an omitted field keeps its current value. `preferredLanguage` is `vi` or `en`, "
+                       + "`timeZoneId` must come from `GET /api/v1/time-zones`, and quiet hours are a pair of "
+                       + "`HH:mm` values (an empty pair clears them). `fcmToken` is an empty string to clear. "
+                       + "Username, email and password are not editable here. Answers the updated profile.");
+
+        group.MapDelete("/me", async (
+            ClaimsPrincipal principal,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            var outcome = await auth.DeleteAccountAsync(
+                principal.GetUserId() ?? Guid.Empty,
+                RequestActor.From(context),
+                ct);
+
+            return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
+        .RequireRateLimiting("auth")
+        .WithSummary("Delete the signed-in account")
+        .WithDescription("Disables the account and ends every session it holds, so it can no longer be signed into. "
+                       + "The row is kept: the terrariums, alerts, readings and audit rows that name it stay, which "
+                       + "is why this is not a purge. A later sign-in attempt answers a refusal.");
 
         return app;
     }
@@ -176,6 +225,7 @@ public static class AuthEndpoints
         {
             "account_locked" or "ip_blocked" => StatusCodes.Status429TooManyRequests,
             "registration_invalid" or "password_policy_violation" => StatusCodes.Status400BadRequest,
+            "profile_invalid" => StatusCodes.Status400BadRequest,
             "registration_conflict" => StatusCodes.Status409Conflict,
             "identifier_unknown" => StatusCodes.Status404NotFound,
             _ => StatusCodes.Status401Unauthorized,

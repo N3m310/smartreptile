@@ -15,9 +15,11 @@ using SmartReptile.Api.Hubs;
 using SmartReptile.Api.Middleware;
 using SmartReptile.Api.OpenApi;
 using SmartReptile.Api.Security;
+using SmartReptile.Application.Admin;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
 using SmartReptile.Application.Ingest;
+using SmartReptile.Application.Reference;
 using SmartReptile.Application.Species;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Identity;
@@ -74,8 +76,10 @@ var unauthorizedBody = new
 
 var forbiddenBody = new
 {
+    // The code stays `insufficient_role` because it is what a deployed client already handles; the title says what
+    // the refusal now means, which since 2026-10-17 is a missing permission rather than a missing role.
     type = "https://smartreptile.example/problems/insufficient_role",
-    title = "Your role does not allow this action.",
+    title = "Your account does not hold the permission this action needs.",
     status = StatusCodes.Status403Forbidden,
     code = "insufficient_role",
 };
@@ -147,14 +151,15 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
-    // Policies, not role strings, at the endpoint (§02-design/06 §3). Owner is listed in the Technician policy
-    // explicitly rather than implied: an Owner may do everything a Technician may, and saying so is cheaper than
-    // a hierarchy rule that has to be discovered.
-    options.AddPolicy(AuthorizationPolicies.Owner, policy =>
-        policy.RequireClaim("role", nameof(UserRole.Owner)));
+    // One policy per permission in the catalogue (FR-18). The names are the codes, so an endpoint asks for the
+    // capability it needs and no route translates a role into one — see AuthorizationPolicies for why that
+    // translation moved into the database.
+    options.AddPermissionPolicies();
 
-    options.AddPolicy(AuthorizationPolicies.Technician, policy =>
-        policy.RequireClaim("role", nameof(UserRole.Owner), nameof(UserRole.Technician)));
+    // The routes that are about the caller's own account carry a token and nothing more: signing yourself out,
+    // reading your own profile, changing your own password. Keeping this as a named policy means every other
+    // endpoint in the codebase names a permission, so "which capability does this route need" is always answered.
+    options.AddPolicy(AuthorizationPolicies.Authenticated, policy => policy.RequireAuthenticatedUser());
 });
 
 /// <summary>Writes an RFC 7807 body for a response the framework would otherwise leave empty.</summary>
@@ -203,9 +208,26 @@ builder.Services.AddScoped<SpeciesProfileService>();
 
 // The silence watchdog's settings (FR-07, roadmap task 3.3). The missed-interval count is the one the read surface
 // already derives the online badge from, so a deployment that changes it moves the stored status and the badge
-// together; the 30-minute critical threshold is a rule, not a setting.
+// together; the 30-minute critical threshold is a rule, not a setting. The device-onboarding service takes the same
+// value, so the fleet screen's badge and the terrarium header's badge cannot disagree (TASKS 2026-10-14, item 9b).
 builder.Services.AddSingleton(sp => new DeviceSilenceSettings(
     sp.GetRequiredService<IOptions<DefaultsOptions>>().Value.SilentAfterIntervals));
+
+// Reference data (TASKS 2026-10-14, item 11). No settings: the catalogue is the table, seeded from the code that
+// owns it.
+builder.Services.AddScoped<ReferenceService>();
+
+// Account management for the administrator (TASKS 2026-10-14, item 12). No settings of its own: the guards are
+// rules rather than deployment choices.
+builder.Services.AddScoped<UserAdminService>();
+
+// The role/permission matrix as data (TASKS 2026-10-14, item 12). Editing it is an administrative write, so the
+// service is registered like any other account operation.
+builder.Services.AddScoped<RoleAdminService>();
+
+// The administrator's get-all dashboard (TASKS 2026-10-14, item 13). Read-only and cross-account: every route that
+// reaches it names `data.read.any`.
+builder.Services.AddScoped<AdminService>();
 
 // ---- rate limiting (§07-appendices/03 §5) ------------------------------------------------------------
 builder.Services.AddRateLimiter(options =>
@@ -317,6 +339,11 @@ builder.Services.AddSwaggerGen(options =>
     // dialog and never sends it — every authenticated call then answers `401 unauthenticated`, which reads as a bad
     // token. That is what this filter is for; a definition alone is only what makes the dialog appear.
     options.OperationFilter<BearerSecurityOperationFilter>();
+
+    // The other half of the same problem, for the conditional header an update must carry: the parameter is bound
+    // as nullable so the endpoint can answer `428` itself, which would otherwise leave the document describing it
+    // as optional. See the filter's remarks.
+    options.OperationFilter<RequiredIfMatchOperationFilter>();
 });
 
 var app = builder.Build();
@@ -414,7 +441,12 @@ app.MapDeviceEndpoints();
 app.MapTerrariumEndpoints();
 app.MapSpeciesProfileEndpoints();
 app.MapAlertEndpoints();
+app.MapNotificationEndpoints();
 app.MapAuditEndpoints();
+app.MapReferenceEndpoints();
+app.MapUserEndpoints();
+app.MapRoleEndpoints();
+app.MapAdminEndpoints();
 app.MapIngestEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
@@ -438,6 +470,7 @@ app.MapGet("/", () => Results.Ok(new
         "/api/v1/terrariums/{terrariumId}/silences", "/api/v1/terrariums/{terrariumId}/silences/{silenceId}",
         "/api/v1/alerts", "/api/v1/alerts/{alertId}", "/api/v1/alerts/{alertId}/ack",
         "/api/v1/alerts/{alertId}/resolve", "/api/v1/alerts/{alertId}/timeline",
+        "/api/v1/notifications", "/api/v1/notifications/{notificationId}/read", "/api/v1/notifications/read-all",
         "/api/v1/audit",
     },
     docs = "docs/README.md",
@@ -459,9 +492,12 @@ await using (var scope = app.Services.CreateAsyncScope())
     {
         var outcome = await initializer.InitializeAsync();
         logger.LogInformation(
-            "Start-up complete: migrationsApplied={MigrationsApplied}, profilesSeeded={ProfilesSeeded}, version={Version}",
+            "Start-up complete: migrationsApplied={MigrationsApplied}, profilesSeeded={ProfilesSeeded}, "
+            + "timeZonesSeeded={TimeZonesSeeded}, adminSeeded={AdminSeeded}, version={Version}",
             outcome.MigrationsApplied,
             outcome.ProfilesSeeded,
+            outcome.TimeZonesSeeded,
+            outcome.AdminSeeded,
             applicationVersion);
     }
     catch (Exception ex)

@@ -61,6 +61,18 @@ public class Alert
         Thresholds.ThresholdPhase phase) =>
         $"{terrariumId}:{(int?)metric ?? 0}:{(int)severity}:{(int)phase}";
 
+    /// <summary>
+    /// The family an episode about <paramref name="metric"/> belongs to.
+    /// </summary>
+    /// <remarks>
+    /// A metric-less alert is a statement about the board or the enclosure rather than about the animal — a silent
+    /// sensor, a lost board, a clock that drifted — so it lands in the enclosure family. That is what
+    /// <see cref="AlertSource"/>'s device-level members are for.
+    /// </remarks>
+    /// <param name="metric">Metric the episode is about, or null for a device-level one.</param>
+    public static AlertFamily FamilyFor(Metrics.MetricCode? metric) =>
+        metric is { } code ? Metrics.MetricDictionary.Get(code).Family : AlertFamily.Enclosure;
+
     /// <summary>Surrogate key.</summary>
     public long Id { get; set; }
 
@@ -72,6 +84,18 @@ public class Alert
 
     /// <summary>Metric that misbehaved; null for device-level alerts (silence, sensor fault).</summary>
     public Metrics.MetricCode? Metric { get; set; }
+
+    /// <summary>
+    /// Which of the two families the alert belongs to (TASKS 2026-10-14, item 1): the enclosure's own condition, or
+    /// the animal's thermal and UV bands.
+    /// </summary>
+    /// <remarks>
+    /// Denormalised from <see cref="Metric"/> on purpose, the same way <see cref="BandMin"/>/<see cref="BandMax"/>
+    /// are. A device-level alert has no metric to derive a family from, and the family is what the alert list is
+    /// filtered and grouped by — deriving it would mean a join or a null check in every read path, and the answer is
+    /// a fact about the episode rather than about the metric dictionary's current contents.
+    /// </remarks>
+    public AlertFamily Family { get; set; } = AlertFamily.Enclosure;
 
     /// <summary>Current severity.</summary>
     public AlertSeverity Severity { get; set; }

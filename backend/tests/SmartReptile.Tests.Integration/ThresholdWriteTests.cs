@@ -1,11 +1,17 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Thresholds;
 using SmartReptile.Infrastructure.Evaluation;
+using SmartReptile.Infrastructure.Mqtt;
+using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
+using SmartReptile.Infrastructure.Security;
 using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Tests.Integration;
@@ -120,7 +126,27 @@ public sealed class ThresholdWriteTests(DatabaseFixture fixture)
     }
 
     private static TerrariumService NewService(SmartReptileDbContext db) =>
-        new(new EfTerrariumStore(db), new SystemClock(), new TerrariumSettings("Asia/Ho_Chi_Minh", 3));
+        new(
+            new EfTerrariumStore(db),
+            new EfTimeZoneStore(db),
+            NewProvisioningService(db),
+            new SystemClock(),
+            new TerrariumSettings("Asia/Ho_Chi_Minh", 3));
+
+    /// <summary>
+    /// The claim use case the create-with-device path stages through (TASKS 2026-10-14, item 2). Built over the same
+    /// context, so a create that binds a board commits both writes in the one unit of work the real services share.
+    /// </summary>
+    private static DeviceProvisioningService NewProvisioningService(SmartReptileDbContext db) =>
+        new(
+            new EfProvisioningStore(db),
+            new ClaimCodeGenerator(Options.Create(new ProvisioningOptions())),
+            new DeviceCredentials(),
+            new InMemoryOnboardingThrottleStore(),
+            new DeviceSessionRegistry(),
+            new SystemClock(),
+            new ProvisioningSettings(ClaimCode.DefaultAlphabet, ClaimCode.DefaultLength, 15, OnboardingLimits.Documented),
+            new DeviceSilenceSettings(3));
 
     private static ThresholdOverrideInput Input(
         string metric,

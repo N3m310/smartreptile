@@ -22,16 +22,18 @@ class Env {
   /// Default sampling interval assumed when the device has not reported one yet.
   static const int defaultSamplingIntervalSec = 60;
 
-  /// Whether to run the clickable prototype instead of the real (currently empty) data path.
+  /// Whether to run the clickable prototype instead of the app's own screens.
   ///
-  /// Default `true`, because until the M2 endpoints exist the live path can only show empty states. Override with
-  /// `--dart-define=PROTOTYPE=false` to see the M1 screens against the real `ApiClient`.
+  /// Default `false`: the app opens on the VIVARIUMGUARD shell (`app/lib/app.dart`), which is the client a keeper
+  /// sees — the prototype is a working aid, not the product, and it still carries the pre-rename `SmartReptile`
+  /// wordmark. Turn it on with `--dart-define=PROTOTYPE=true` for the Rule Lab and the scenario walkthroughs
+  /// (`app/PROTOTYPE.md`).
   ///
   /// Both paths stay compiled on purpose: a prototype that is the only thing that still builds is a prototype nobody
   /// notices has drifted away from the data layer it is pretending to be.
   static const bool prototypeMode = bool.fromEnvironment(
     'PROTOTYPE',
-    defaultValue: true,
+    defaultValue: false,
   );
 
   /// Number of missed intervals after which a value is considered stale (FR-07 / BR-07.2).

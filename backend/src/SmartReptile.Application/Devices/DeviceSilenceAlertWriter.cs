@@ -37,8 +37,11 @@ public static class DeviceSilenceAlertWriter
             DeviceId = device.Id,
 
             // Silence is not a metric misbehaving, which is why this row carries no band and no reading at all
-            // (§02-design/02 §3.14: MetricId is null for DeviceSilent and SensorFault).
+            // (§02-design/02 §3.14: MetricId is null for DeviceSilent and SensorFault). With no metric there is
+            // nothing to derive a family from — and the board going quiet is a statement about the enclosure, not
+            // about the animal in it.
             Metric = null,
+            Family = AlertFamily.Enclosure,
             Phase = ThresholdPhase.Any,
             Severity = severity,
             DedupeKey = Alert.DedupeKeyFor(terrariumId, null, severity, ThresholdPhase.Any),

@@ -59,6 +59,11 @@ public sealed class EfAlertStore(SmartReptileDbContext db) : IAlertStore
             rows = rows.Where(row => row.Alert.Metric == metric);
         }
 
+        if (query.Family is { } family)
+        {
+            rows = rows.Where(row => row.Alert.Family == family);
+        }
+
         if (query.FromUtc is { } from)
         {
             rows = rows.Where(row => row.Alert.TriggeredAt >= from);
@@ -136,6 +141,24 @@ public sealed class EfAlertStore(SmartReptileDbContext db) : IAlertStore
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<NotificationAttemptRecord>> ReadDeliveriesAsync(
+        long alertId,
+        CancellationToken cancellationToken) =>
+        await db.NotificationLogs
+            .Where(row => row.AlertId == alertId)
+            .OrderBy(row => row.CreatedAt)
+            .ThenBy(row => row.Id)
+            .Select(row => new NotificationAttemptRecord(
+                row.CreatedAt,
+                row.Channel,
+                row.Step,
+                row.Status,
+                row.SuppressedReason,
+                row.Title))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
     public Task<EvaluationState?> FindExcursionStateAsync(

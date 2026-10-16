@@ -632,6 +632,9 @@ class Labels {
   /// Row label: role.
   static const settingsRole = 'Role';
 
+  /// Row label: how many permission codes the account's role grants.
+  static const settingsPermissions = 'Permissions';
+
   /// Row label: email.
   static const settingsEmail = 'Email';
 

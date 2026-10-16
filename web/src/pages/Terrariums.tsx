@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { Box, ExternalLink, History as HistoryIcon, Loader2, Plus } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
-import type { SpeciesProfileList, TerrariumList } from '../api/types';
+import { PERMISSION_CODES } from '../api/types';
+import type { DeviceList, SpeciesProfileList, TerrariumList, TimeZoneList } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
 import { useI18n } from '../i18n';
 import { formatDateTime, formatRelative } from '../lib/format';
@@ -25,11 +26,13 @@ const POLL_MS = 30_000;
 
 export const Terrariums: React.FC = () => {
   const { t, lang } = useI18n();
-  const { user } = useSession();
+  const { hasPermission } = useSession();
   const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), POLL_MS);
   const items = terrariums.data?.items ?? [];
   const [createOpen, setCreateOpen] = useState(false);
-  const canCreate = user?.role === 'Owner';
+  // The create route names `terrarium.write`, not the Owner role: a deployment may grant the write to another
+  // role, and a screen that tested the name would keep hiding the form from somebody who holds it (FR-18).
+  const canCreate = hasPermission(PERMISSION_CODES.terrariumWrite);
 
   return (
     <div className="space-y-6">
@@ -151,32 +154,51 @@ export const Terrariums: React.FC = () => {
 const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
   const { t } = useI18n();
   const profiles = usePolled<SpeciesProfileList>(() => api.listSpeciesProfiles(), null);
+
+  // The catalogue and the fleet are loaded once each rather than polled, for the reason the profile list is: they
+  // change when someone else edits them, and a picker that reshuffles under a half-filled form is worse than one a
+  // minute old (TASKS 2026-10-14, items 2 and 11).
+  const zones = usePolled<TimeZoneList>(() => api.listTimeZones(), null);
+  const boards = usePolled<DeviceList>(() => api.listDevices(), null);
+
   const [name, setName] = useState('');
   const [speciesProfileId, setSpeciesProfileId] = useState('');
   const [location, setLocation] = useState('');
+  const [timeZoneId, setTimeZoneId] = useState('');
+  const [deviceId, setDeviceId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [created, setCreated] = useState(false);
+  const [secret, setSecret] = useState<string | null>(null);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     setCreated(false);
+    setSecret(null);
 
     try {
-      await api.createTerrarium({
+      const item = await api.createTerrarium({
         name,
         speciesProfileId,
         // An empty box is "not given", not an empty location: the contract stores null for the latter and the
-        // card renders the difference.
+        // card renders the difference. The same applies to the zone and the board.
         location: location.trim() === '' ? null : location,
+        timeZoneId: timeZoneId === '' ? null : timeZoneId,
+        deviceId: deviceId === '' ? null : deviceId,
       });
 
       setName('');
       setSpeciesProfileId('');
       setLocation('');
+      setTimeZoneId('');
+      setDeviceId('');
       setCreated(true);
+
+      // Shown once, by the server's own rule: naming a board is a claim, so this is the only moment the secret
+      // exists outside the board (item 2). It is deliberately kept out of the list below.
+      setSecret(item.deviceSecret ?? null);
       onCreated();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
@@ -187,10 +209,18 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
 
   const nameError = fieldMessage(t, error, 'name');
   const profileError = fieldMessage(t, error, 'speciesProfileId');
+  const zoneError = fieldMessage(t, error, 'timeZoneId');
+  const deviceError = fieldMessage(t, error, 'deviceId') ?? fieldMessage(t, error, 'macAddress');
   const inputClass = (field: string) =>
     `mt-1 w-full rounded-lg border bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand ${
       fieldHasError(error, field) ? 'border-critical' : 'border-hairline'
     }`;
+
+  // Only boards that are the caller's and not already bound can be chosen: the server refuses the rest with
+  // `device_already_bound`, and offering a row whose only outcome is a refusal is a worse form.
+  const claimable = (boards.data?.items ?? []).filter(
+    (board) => board.terrariumId === null && board.status !== 'revoked'
+  );
 
   return (
     <form onSubmit={submit} className="space-y-3 rounded-2xl border border-hairline bg-surface p-5">
@@ -248,6 +278,59 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
         />
       </div>
 
+      {/*
+        The zone comes from the catalogue rather than a free-text box (item 11): the server validates against the
+        same list, so a typed id could only be refused, and the offset is what a keeper actually reads off it.
+      */}
+      <div>
+        <label htmlFor="terrarium-zone" className="text-[11px] text-muted">
+          {t('terrariumTimeZone')}
+        </label>
+        <select
+          id="terrarium-zone"
+          value={timeZoneId}
+          onChange={(event) => setTimeZoneId(event.target.value)}
+          className={inputClass('timeZoneId')}
+        >
+          <option value="">{t('terrariumTimeZoneDefault')}</option>
+          {(zones.data?.items ?? []).map((zone) => (
+            <option key={zone.ianaId} value={zone.ianaId}>
+              {`${zone.utcOffset} — ${zone.displayName}`}
+            </option>
+          ))}
+        </select>
+        {zoneError ? <p className="mt-1 text-[11px] text-critical">{zoneError}</p> : null}
+        {zones.error ? <p className="mt-1 text-[11px] text-critical">{describeError(t, zones.error)}</p> : null}
+      </div>
+
+      {/*
+        Naming a board here is a claim: the enclosure and the binding commit together, and the answer carries the
+        secret once (item 2). Only a board with no enclosure is offered — the rest would be refused by the server.
+      */}
+      <div>
+        <label htmlFor="terrarium-device" className="text-[11px] text-muted">
+          {t('terrariumBindDevice')}
+        </label>
+        <select
+          id="terrarium-device"
+          value={deviceId}
+          onChange={(event) => setDeviceId(event.target.value)}
+          className={inputClass('deviceId')}
+        >
+          <option value="">{t('terrariumBindDeviceNone')}</option>
+          {claimable.map((board) => (
+            <option key={board.deviceId} value={board.deviceId}>
+              {board.deviceName === '' ? board.deviceId : `${board.deviceName} (${board.deviceId})`}
+            </option>
+          ))}
+        </select>
+        {deviceError ? <p className="mt-1 text-[11px] text-critical">{deviceError}</p> : null}
+        {boards.error ? <p className="mt-1 text-[11px] text-critical">{describeError(t, boards.error)}</p> : null}
+        {boards.data && claimable.length === 0 && !boards.loading ? (
+          <p className="mt-1 text-[11px] text-muted">{t('terrariumBindDeviceEmpty')}</p>
+        ) : null}
+      </div>
+
       {error ? (
         <div className="rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
           <p>{describeError(t, error)}</p>
@@ -264,6 +347,16 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
         >
           {t('terrariumCreated')}
         </p>
+      ) : null}
+
+      {secret ? (
+        <div
+          role="status"
+          className="space-y-1 rounded-lg border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] text-ink"
+        >
+          <p>{t('terrariumDeviceSecretOnce')}</p>
+          <code className="block select-all break-all font-mono text-[11px] text-ink">{secret}</code>
+        </div>
       ) : null}
 
       <button

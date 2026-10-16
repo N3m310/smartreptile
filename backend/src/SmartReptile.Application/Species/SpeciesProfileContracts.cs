@@ -136,6 +136,16 @@ public sealed record SpeciesProfileBandView(
 /// <param name="MinLightHoursPerDay">Hours of light below which a deficit is signalled.</param>
 /// <param name="Notes">Husbandry summary and caveats, null when there are none.</param>
 /// <param name="Bands">The profile's bands, ordered by metric then phase.</param>
+/// <param name="ImageUrl">
+/// Path of the profile's picture, null when it has none. Relative to the API's own origin, and it needs the
+/// caller's bearer token like every other read — so a client *fetches* it rather than pointing an <c>img</c> tag
+/// at it, which is what <c>web/src/api</c> does. Null is the ordinary state of a profile, not a fault: three of the
+/// four built-ins ship without a picture, and the UI shows nothing rather than an empty frame.
+/// </param>
+/// <param name="ImageUpdatedAt">
+/// When the picture was last set. It is the cache-busting value for <see cref="ImageUrl"/> — a client that keeps
+/// the bytes should key them on this, because replacing a picture does not change its URL.
+/// </param>
 public sealed record SpeciesProfileView(
     Guid Id,
     string Name,
@@ -147,7 +157,28 @@ public sealed record SpeciesProfileView(
     decimal LightThresholdLux,
     decimal MinLightHoursPerDay,
     string? Notes,
-    IReadOnlyList<SpeciesProfileBandView> Bands);
+    IReadOnlyList<SpeciesProfileBandView> Bands,
+    string? ImageUrl,
+    DateTimeOffset? ImageUpdatedAt);
+
+/// <summary>
+/// A picture handed to <c>POST /species-profiles/{id}/image</c>: the bytes, and the media type the caller *claimed*
+/// for them.
+/// </summary>
+/// <remarks>
+/// The claim is inspected and then discarded — what the profile records is the type the bytes were sniffed as. A
+/// caller's word for what its file is cannot be the reason a browser later renders it as an image, which is the
+/// difference between a picture and an uploaded payload with an image's name.
+/// </remarks>
+/// <param name="Content">The uploaded bytes; read to the end, and bounded by the service rather than by the caller.</param>
+/// <param name="DeclaredContentType">The multipart part's own <c>Content-Type</c>, checked against the bytes.</param>
+public sealed record ProfileImageUpload(Stream Content, string? DeclaredContentType);
+
+/// <summary>A stored picture, ready to stream: its bytes, its sniffed media type, and when it was set.</summary>
+/// <param name="Content">Readable stream the caller disposes.</param>
+/// <param name="ContentType">Media type recorded when the bytes were stored.</param>
+/// <param name="UpdatedAt">When the picture was last set; served as <c>Last-Modified</c>.</param>
+public sealed record SpeciesProfileImage(Stream Content, string ContentType, DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// The answer to <c>GET /species-profiles</c>. Wrapped in an object rather than returned as a bare array, so a
@@ -174,8 +205,11 @@ public sealed record SpeciesProfileOutcome
     /// <summary>Set by list.</summary>
     public IReadOnlyList<SpeciesProfileView>? Profiles { get; init; }
 
-    /// <summary>Set by create, duplicate and patch.</summary>
+    /// <summary>Set by create, duplicate, patch, and the two picture writes.</summary>
     public SpeciesProfileView? Profile { get; init; }
+
+    /// <summary>Set by the picture read, which answers bytes rather than a view.</summary>
+    public SpeciesProfileImage? Image { get; init; }
 
     /// <summary>Set when the use case failed.</summary>
     public SpeciesProfileProblem? Problem { get; init; }
@@ -194,6 +228,20 @@ public sealed record SpeciesProfileOutcome
 
     /// <summary>A success that produced nothing to return — the delete route, which answers `204`.</summary>
     public static SpeciesProfileOutcome Deleted() => new();
+
+    /// <summary>A success carrying the stored picture.</summary>
+    /// <param name="image">The bytes and how to serve them.</param>
+    public static SpeciesProfileOutcome WithImage(SpeciesProfileImage image) => new() { Image = image };
+
+    /// <summary>
+    /// The profile is visible to the caller but has no picture. A `404` of its own rather than the plain
+    /// <c>not_found</c>, because the two mean different things to a client: one says "nothing to show here", the
+    /// other says "no such profile", and only the second is a reason to reload a list.
+    /// </summary>
+    public static SpeciesProfileOutcome ImageNotSet() =>
+        Failed(new SpeciesProfileProblem(
+            "image_not_set",
+            "This species profile has no picture."));
 
     /// <summary>A failure the caller caused or should see.</summary>
     /// <param name="problem">What went wrong.</param>

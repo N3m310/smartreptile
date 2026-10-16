@@ -12,8 +12,8 @@ from the referenced FR unless a story adds a specific check.
 | US-01 | As a new keeper I want to create an account with just a username, email and password so that I can start without a long setup. | FR-01 | Must |
 | US-02 | As a returning keeper I want to stay logged in on my phone so that I do not retype credentials every time. | FR-01 | Must |
 | US-03 | As a keeper I want to log out on a shared device so that nobody else sees my terrarium data. | FR-01 | Must |
-| US-04 | As an owner I want to invite a friend as a viewer so that they can see my animal's conditions. | FR-02 | Must |
-| US-05 | As an owner I want a technician role for the person who fixes the setup so that they can acknowledge alerts without deleting my data. | FR-02 | Should |
+| US-04 | As an administrator I want to put an account on the read-only `Viewer` role so that whoever needs to look at the conditions cannot change anything. | FR-02 | Must |
+| US-05 | As an administrator I want to put an account on the `Technician` role so that the person who fixes the setup can acknowledge and silence alerts without holding the enclosure or board writes. | FR-02 | Should |
 
 ### Setup
 
@@ -132,7 +132,7 @@ see their acceptance criteria in `03-functional-requirements.md`.
 
 **Alternative / exception flows**
 - **A1 — Invalid ordering:** save is blocked with per-field errors; nothing is persisted.
-- **A2 — Editing a shared/built-in profile:** built-ins are read-only; the UI offers "Duplicate to custom profile".
+- **A2 — Editing a shared/built-in profile:** built-ins are read-only; the catalogue's writes are `Admin`-only, so an `Owner` who wants a different band either duplicates the profile (which also needs Admin) or, staying inside their own account, sets a per-terrarium override (BR-10.3).
 - **A3 — Concurrent edit:** second writer gets `409 version_conflict` with the current values (optimistic concurrency via `RowVersion`).
 - **A4 — Change while an alert is open:** the alert keeps its original band (for the record) and is re-evaluated against the new band on the next sample; if now in range it auto-resolves.
 

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Auditing;
 using SmartReptile.Domain.Auditing;
+using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Api.Endpoints;
 
@@ -21,7 +22,7 @@ public static class AuditEndpoints
     {
         var group = app.MapGroup("/api/v1/audit")
             .WithTags("audit")
-            .RequireAuthorization(AuthorizationPolicies.Owner);
+            .RequireAuthorization(Permissions.AuditRead);
 
         group.MapGet(string.Empty, async (
             string? entity,
@@ -56,7 +57,7 @@ public static class AuditEndpoints
             return outcome.Succeeded ? Results.Ok(outcome.Page) : Problem(outcome.Problem!);
         })
         .WithSummary("Query the audit trail")
-        .WithDescription("Requires the Owner role and answers with the caller's own rows: what their account did, "
+        .WithDescription("Requires `audit.read` and answers with the caller's own rows: what their account did, "
                        + "plus what anyone did to a device in one of their terrariums. Newest first, and **paged** "
                        + "— `?cursor=&pageSize=` (default 50, max 200) with the next position returned as "
                        + "`nextCursor` and absent on the last page. Filter by `entity` ("

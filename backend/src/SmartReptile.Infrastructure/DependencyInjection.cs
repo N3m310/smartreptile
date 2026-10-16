@@ -4,12 +4,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Admin;
 using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Auditing;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Evaluation;
 using SmartReptile.Application.Ingest;
+using SmartReptile.Application.Notifications;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Infrastructure.Admin;
 using SmartReptile.Infrastructure.Alerts;
 using SmartReptile.Infrastructure.Auditing;
 using SmartReptile.Infrastructure.Devices;
@@ -17,11 +20,13 @@ using SmartReptile.Infrastructure.Evaluation;
 using SmartReptile.Infrastructure.Health;
 using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Infrastructure.Mqtt;
+using SmartReptile.Infrastructure.Notifications;
 using SmartReptile.Infrastructure.Observability;
 using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
 using SmartReptile.Infrastructure.Security;
 using SmartReptile.Infrastructure.Species;
+using SmartReptile.Infrastructure.Storage;
 using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Infrastructure;
@@ -57,6 +62,7 @@ public static class DependencyInjection
         services.AddOptions<RetentionOptions>().Bind(configuration.GetSection(RetentionOptions.SectionName)).ValidateOnStart();
         services.AddOptions<DefaultsOptions>().Bind(configuration.GetSection(DefaultsOptions.SectionName)).ValidateOnStart();
         services.AddOptions<StartupOptions>().Bind(configuration.GetSection(StartupOptions.SectionName));
+        services.AddOptions<AdminAccountOptions>().Bind(configuration.GetSection(AdminAccountOptions.SectionName));
         services.AddOptions<IngestOptions>().Bind(configuration.GetSection(IngestOptions.SectionName)).ValidateOnStart();
         services.AddOptions<ProvisioningOptions>()
             .Bind(configuration.GetSection(ProvisioningOptions.SectionName))
@@ -89,6 +95,7 @@ public static class DependencyInjection
         services.AddSingleton<ILoginThrottleStore, InMemoryLoginThrottleStore>();
         services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
         services.AddScoped<IUserStore, EfUserStore>();
+        services.AddScoped<IAdminStore, EfAdminStore>();
 
         // Account recovery (BR-01.5). The hash primitive is shared with device credentials — one implementation
         // of SHA-256(secret ‖ salt) for every high-entropy secret the system issues.
@@ -110,6 +117,15 @@ public static class DependencyInjection
         // Terrarium read surface (FR-03, FR-08, FR-09 — roadmap task 2.8).
         services.AddScoped<ITerrariumStore, EfTerrariumStore>();
         services.AddScoped<ISpeciesProfileStore, EfSpeciesProfileStore>();
+
+        // Reference data (TASKS 2026-10-14, item 11): the time-zone catalogue the picker reads and the terrarium
+        // write paths validate against.
+        services.AddScoped<ITimeZoneStore, EfTimeZoneStore>();
+
+        // Stored files (FR-10's profile picture; the camera snapshots of FR-15/FR-17 will share it). A singleton
+        // because the store holds nothing per request but the resolved root — the filesystem is the state.
+        services.AddOptions<StorageOptions>().Bind(configuration.GetSection(StorageOptions.SectionName));
+        services.AddSingleton<IFileStore, FileSystemFileStore>();
 
         // Broker session registry (FR-05 BR-05.4): the broker writes it, the revoke use case reads it.
         services.AddSingleton<DeviceSessionRegistry>();
@@ -178,6 +194,30 @@ public static class DependencyInjection
         services.AddScoped<IAuditStore, EfAuditStore>();
         services.AddScoped<AuditService>();
 
+        // The notification layer (roadmap 3.5). The dispatcher sweeps on a timer, so what it needs from
+        // infrastructure is the store and the channels; a channel that is switched off in configuration is simply
+        // not registered, and the dispatcher records "no channel is configured" rather than pretending it delivered.
+        services.AddOptions<NotificationOptions>().Bind(configuration.GetSection(NotificationOptions.SectionName));
+        services.AddScoped<INotificationStore, EfNotificationStore>();
+        services.AddScoped<NotificationDispatcher>();
+        services.AddScoped<NotificationInboxService>();
+        services.AddHttpClient(nameof(FcmNotificationChannel));
+
+        var notificationSettings = configuration.GetSection(NotificationOptions.SectionName).Get<NotificationOptions>()
+            ?? new NotificationOptions();
+
+        if (notificationSettings.Fcm.Enabled)
+        {
+            services.AddSingleton<INotificationChannel, FcmNotificationChannel>();
+        }
+
+        if (notificationSettings.Smtp.Enabled)
+        {
+            services.AddSingleton<INotificationChannel, SmtpNotificationChannel>();
+        }
+
+        services.AddHostedService<NotificationDispatcherWorker>();
+
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();
 
@@ -188,6 +228,8 @@ public static class DependencyInjection
         services.AddHostedService<MqttBrokerHostedService>();
 
         services.AddScoped<ReferenceDataSeeder>();
+        services.AddScoped<IdentitySeeder>();
+        services.AddScoped<SystemAdminAccountSeeder>();
         services.AddScoped<DatabaseInitializer>();
 
         services.AddHealthChecks()

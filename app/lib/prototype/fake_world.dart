@@ -11,6 +11,7 @@ library;
 
 import 'dart:math' as math;
 
+import '../core/permissions.dart';
 import 'rules/daily_summary.dart';
 import 'rules/domain.dart';
 import 'rules/events.dart';
@@ -19,24 +20,41 @@ import 'rules/silence.dart';
 import 'rules/species_profiles.dart';
 import 'rules/threshold_engine.dart';
 
-/// Role of a user, mirroring the RBAC model of FR-02.
-enum UserRole {
-  /// Owns terrariums and devices; may edit thresholds and claim devices.
-  owner('Owner'),
+/// The demo accounts' permission sets, mirroring the four system roles the API seeds (`SystemRoles.Seed`).
+///
+/// Written out rather than derived, because the point of the prototype is to be *read*: a reviewer comparing these
+/// lists with the roles screen is checking the product's rule, and a list computed by a helper would hide it.
+const List<String> demoOwnerPermissions = [
+  Permissions.terrariumRead,
+  Permissions.terrariumWrite,
+  Permissions.deviceRead,
+  Permissions.deviceWrite,
+  Permissions.deviceProvision,
+  Permissions.alertRead,
+  Permissions.alertWrite,
+  Permissions.silenceWrite,
+  Permissions.notificationRead,
+  Permissions.auditRead,
+  Permissions.speciesRead,
+];
 
-  /// May acknowledge and resolve, may not edit thresholds (BR-12.6 grants silences to Technician too).
-  technician('Technician'),
+/// What the seeded `Technician` holds: the alert writes, and none of the enclosure or board writes.
+const List<String> demoTechnicianPermissions = [
+  Permissions.terrariumRead,
+  Permissions.deviceRead,
+  Permissions.alertRead,
+  Permissions.alertWrite,
+  Permissions.silenceWrite,
+  Permissions.notificationRead,
+  Permissions.speciesRead,
+];
 
-  /// Read-only.
-  viewer('Viewer');
-
-  const UserRole(this.label);
-
-  /// Display label.
-  final String label;
-}
-
-/// A fake account.
+/// A fake account, shaped like the real one: a role *code*, and the permission codes that role grants.
+///
+/// The prototype used to carry a `UserRole` enum whose `label` a screen rendered and whose value a test asserted.
+/// That is the shape the product stopped having — a role is now a named set of permission codes, and anything that
+/// keyed off the name would keep showing an answer a deployment had already changed (FR-18). The demo world
+/// therefore carries the same two fields the login response carries, and the same `hasPermission` the session has.
 class FakeUser {
   /// Creates a user.
   const FakeUser({
@@ -44,6 +62,7 @@ class FakeUser {
     required this.name,
     required this.email,
     required this.role,
+    required this.permissions,
     required this.preferences,
   });
 
@@ -56,11 +75,17 @@ class FakeUser {
   /// Login email.
   final String email;
 
-  /// Role.
-  final UserRole role;
+  /// Code of the role, e.g. `Owner`. Shown to a reader, never tested.
+  final String role;
+
+  /// Permission codes the role grants, in catalogue order.
+  final List<String> permissions;
 
   /// Notification preferences (BR-13.2), identical to the ones the engine consumes.
   final NotificationPreferences preferences;
+
+  /// True when this account may do whatever [code] names.
+  bool hasPermission(String code) => permissions.contains(code);
 
   /// Returns a copy with different preferences.
   FakeUser withPreferences(NotificationPreferences preferences) => FakeUser(
@@ -68,6 +93,7 @@ class FakeUser {
     name: name,
     email: email,
     role: role,
+    permissions: permissions,
     preferences: preferences,
   );
 }
@@ -546,14 +572,16 @@ class FakeWorldFactory {
           id: 'u-linh',
           name: 'Linh Trần',
           email: 'linh@example.com',
-          role: UserRole.owner,
+          role: SystemRoleCodes.owner,
+          permissions: demoOwnerPermissions,
           preferences: NotificationPreferences(),
         ),
         FakeUser(
           id: 'u-nam',
           name: 'Nam Phạm',
           email: 'nam@example.com',
-          role: UserRole.technician,
+          role: SystemRoleCodes.technician,
+          permissions: demoTechnicianPermissions,
           preferences: NotificationPreferences(
             channels: {Channel.inApp, Channel.email},
             minSeverity: Severity.critical,

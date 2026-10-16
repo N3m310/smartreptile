@@ -32,6 +32,15 @@ public static class DeviceProvisioningRules
         && !IsClaimed(device)
         && device.Status != DeviceStatus.Revoked;
 
+    /// <summary>
+    /// True when the device may be bound by its MAC address (TASKS 2026-10-14, item 8). Unlike
+    /// <see cref="ClaimCodeIsUsable"/> there is no expiry to check: a MAC is not a credential, so the only
+    /// conditions are that the board registered with this server, is not already bound to an enclosure and has not
+    /// been revoked.
+    /// </summary>
+    public static bool IsClaimableByMac(Device device) =>
+        !IsClaimed(device) && device.Status != DeviceStatus.Revoked;
+
     /// <summary>Expiry stamped on a freshly issued (or re-issued) claim code.</summary>
     public static DateTimeOffset ClaimCodeExpiry(DateTimeOffset nowUtc, int ttlMinutes) =>
         nowUtc.AddMinutes(ttlMinutes);

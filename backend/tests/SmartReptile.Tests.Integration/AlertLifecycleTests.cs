@@ -56,10 +56,7 @@ public sealed class AlertLifecycleTests(DatabaseFixture fixture)
         var mine = await OwnedAsync(db, "deleted");
         var store = new EfAlertStore(db);
 
-        var terrarium = await db.Terrariums.SingleAsync(row => row.Id == mine.TerrariumId);
-        terrarium.DeletedAt = Now;
-
-        await db.SaveChangesAsync();
+        await Seed.SoftDeleteAsync(db, mine.TerrariumId);
 
         (await store.ListAsync(mine.UserId, new AlertQuery(), 10, CancellationToken.None)).Should().BeEmpty(
             "the soft-delete filter on Terrarium has to reach an alert through its foreign key, not only its own table");
@@ -76,6 +73,9 @@ public sealed class AlertLifecycleTests(DatabaseFixture fixture)
         var mine = await OwnedAsync(db, "paging");
         var store = new EfAlertStore(db);
 
+        // Four alerts exist for this account: the one the fixture added at Now, plus three more at Now+1…Now+3. The
+        // count matters — a page of two leaves exactly two rows behind it, which is what makes "nothing repeated and
+        // nothing skipped" a claim this case can actually fail.
         for (var index = 1; index <= 3; index++)
         {
             await AddAlertAsync(db, mine, TriggeredAt: Now.AddMinutes(index), dedupe: $"paging-{index}");
@@ -90,9 +90,18 @@ public sealed class AlertLifecycleTests(DatabaseFixture fixture)
         var second = await store
             .ListAsync(mine.UserId, new AlertQuery(PageSize: 2, Cursor: cursor), 3, CancellationToken.None);
 
-        second.Should().HaveCount(1);
-        second[0].Alert.TriggeredAt.Should().Be(Now.AddMinutes(1), "newest first, and the newest two are behind us");
-        pageOne.Select(row => row.Alert.Id).Should().NotContain(second[0].Alert.Id);
+        second.Should().HaveCount(2);
+        second.Select(row => row.Alert.TriggeredAt).Should().Equal(
+            Now.AddMinutes(1),
+            Now);
+
+        var acrossBothPages = pageOne.Concat(second).ToArray();
+
+        acrossBothPages.Select(row => row.Alert.Id).Should().OnlyHaveUniqueItems(
+            "a cursor that repeated the row it was built from would show one alert twice");
+
+        acrossBothPages.Select(row => row.Alert.TriggeredAt).Should().BeInDescendingOrder();
+        acrossBothPages.Should().HaveCount(4, "two pages of two cover the four alerts and nothing else");
 
         await tx.RollbackAsync();
     }
@@ -231,6 +240,7 @@ public sealed class AlertLifecycleTests(DatabaseFixture fixture)
             TerrariumId = owner.TerrariumId,
             DeviceId = owner.DeviceId,
             Metric = MetricCode.TempC,
+            Family = Alert.FamilyFor(MetricCode.TempC),
             Severity = AlertSeverity.Warning,
             Phase = ThresholdPhase.Any,
             DedupeKey = dedupe,

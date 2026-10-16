@@ -78,6 +78,17 @@ Deployment rules:
   broken migration cannot silently take the host down (`03-implementation/03` §2).
 - Seeding runs once after migration (`ReferenceDataSeeder`), idempotent **by presence, not by content**: it creates
   what is missing and never rewrites a row that already exists, so changed seed data needs a volume reset (§3.1).
+- **The system administrator is configuration, not a seed row** (`SystemAdminAccountSeeder`): set
+  `ADMIN_USERNAME`/`ADMIN_EMAIL`/`ADMIN_PASSWORD` in `.env` (mapped to `Admin__*` by `docker-compose.yml`) and
+  restart, because registration only ever produces an `Owner`. That account holds the seeded **`Admin` role** — all
+  sixteen permission codes — which is what lets it author the species-profile catalogue
+  (`species.write`), manage accounts at `/api/v1/users` (`user.read`/`user.manage`), edit the role matrix at
+  `/api/v1/admin/roles` and read every account's data through `/api/v1/admin/*` (`data.read.any`). An empty
+  `ADMIN_USERNAME` is the documented default and means no account can author the catalogue, manage accounts or see
+  another account's enclosures;
+  nothing else is affected. The password must satisfy the login policy (8+ characters with a letter, a digit, an
+  upper-case letter and a symbol), and the section owns that credential: editing `ADMIN_PASSWORD` and restarting
+  rotates it, which is also the reset path — the account has no recovery code and no reset channel.
 - `backend/.dockerignore` is **required**, not an optimisation: without it `COPY src/ src/` overwrites the
   container's Linux restore output with the developer's `obj/project.assets.json`, whose `packageFolders` hard-code
   `C:\Users\<user>\.nuget\packages\`, and the build dies with `NETSDK1064` for a package that is present.
@@ -145,6 +156,12 @@ flutter test                                   # widget/unit suite green
 flutter build appbundle --release --dart-define=API_BASE=https://<host> --dart-define=APP_VERSION=1.0.0+10
 flutter build apk --release --split-per-abi
 ```
+
+Neither build passes a `PROTOTYPE` define, and that is deliberate rather than incidental: the mode is off by
+default (`Env.prototypeMode`), so the artifact carries the app's own VIVARIUMGUARD shell. The clickable prototype —
+fake data with the real rule kernel — is a development surface and is built only with
+`--dart-define=PROTOTYPE=true` (`app/PROTOTYPE.md`); a release that shipped it would be a demo of the rules rather
+than the product, and the mode is a compile-time constant, so it cannot be turned on in the field.
 
 Signing (first time only):
 

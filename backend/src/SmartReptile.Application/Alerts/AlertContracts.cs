@@ -3,6 +3,7 @@ using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Evaluation;
 using SmartReptile.Domain.Metrics;
+using SmartReptile.Domain.Notifications;
 using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Application.Alerts;
@@ -79,6 +80,10 @@ public static class AlertCursor
 /// <param name="State">Only alerts in this lifecycle state.</param>
 /// <param name="Severity">Only alerts at this severity.</param>
 /// <param name="Metric">Only alerts about this metric; device-level alerts are excluded by any value.</param>
+/// <param name="Family">
+/// Only alerts of this family: <c>enclosure</c> for the enclosure's own humidity, light and board, <c>species</c>
+/// for the animal's temperature and UV (TASKS 2026-10-14, item 1).
+/// </param>
 /// <param name="FromUtc">Only alerts triggered at or after this instant.</param>
 /// <param name="ToUtc">Only alerts triggered at or before this instant.</param>
 /// <param name="Cursor">Position to continue from, or null for the first page.</param>
@@ -87,6 +92,7 @@ public sealed record AlertQuery(
     AlertState? State = null,
     AlertSeverity? Severity = null,
     MetricCode? Metric = null,
+    AlertFamily? Family = null,
     DateTimeOffset? FromUtc = null,
     DateTimeOffset? ToUtc = null,
     string? Cursor = null,
@@ -97,6 +103,10 @@ public sealed record AlertQuery(
 /// <param name="TerrariumId">Terrarium that raised it — the clients' key for everything else.</param>
 /// <param name="DeviceId">Public device id, not the surrogate key, because that is the only one clients see.</param>
 /// <param name="Metric">Metric the alert is about, as the REST key (<c>tempC</c>); null for a device-level alert.</param>
+/// <param name="Family">
+/// Which of the two alert families this row answers to, as the REST key (<c>enclosure</c> or <c>species</c>). Present
+/// on every alert, including the device-level ones that carry no metric and could not otherwise be placed.
+/// </param>
 /// <param name="Severity">Current severity: <c>Info</c>, <c>Warning</c> or <c>Critical</c>.</param>
 /// <param name="State">Current lifecycle state: <c>Open</c>, <c>Acknowledged</c> or <c>Resolved</c>.</param>
 /// <param name="Source">What produced it.</param>
@@ -116,6 +126,7 @@ public sealed record AlertView(
     Guid TerrariumId,
     string DeviceId,
     string? Metric,
+    string Family,
     string Severity,
     string State,
     string Source,
@@ -154,17 +165,38 @@ public sealed record AlertDetailView(
     bool SeriesTruncated);
 
 /// <summary>One step of an alert's response timeline (FR-12, <c>GET /alerts/{id}/timeline</c>).</summary>
-/// <param name="Event">What happened: <c>triggered</c>, <c>acknowledged</c> or <c>resolved</c>.</param>
+/// <param name="Event">
+/// What happened: <c>opened</c>, <c>escalated</c>, <c>acknowledged</c>, <c>resolved</c> or <c>notified</c>.
+/// </param>
 /// <param name="At">When it happened.</param>
 /// <param name="ActorUserId">Who did it, when a user did.</param>
-/// <param name="Reason">Resolution reason, on a <c>resolved</c> entry.</param>
-/// <param name="Note">What the keeper wrote, on a <c>resolved</c> entry.</param>
+/// <param name="Reason">Resolution reason on a <c>resolved</c> entry; the channel or the suppression on a
+/// <c>notified</c> one.</param>
+/// <param name="Note">What the keeper wrote on a <c>resolved</c> entry; the delivery's own text on a
+/// <c>notified</c> one.</param>
 public sealed record AlertTimelineEntry(
     string Event,
     DateTimeOffset At,
     Guid? ActorUserId = null,
     string? Reason = null,
     string? Note = null);
+
+/// <summary>
+/// One delivery row of an alert, as the timeline needs it (roadmap task 3.5).
+/// </summary>
+/// <param name="At">Instant of the attempt.</param>
+/// <param name="Channel">Channel the row records.</param>
+/// <param name="Step">Escalation step: 0 is the first delivery, 1–3 the ladder of §02-design/05 §6.</param>
+/// <param name="Status">What happened to the attempt.</param>
+/// <param name="Reason">Suppression reason or bypass marker, when the row carries one.</param>
+/// <param name="Title">Rendered title, so the timeline can show what was actually said.</param>
+public sealed record NotificationAttemptRecord(
+    DateTimeOffset At,
+    NotificationChannel Channel,
+    byte Step,
+    NotificationStatus Status,
+    string? Reason,
+    string Title);
 
 /// <summary>One page of alerts, newest first.</summary>
 /// <param name="Items">The alerts.</param>
@@ -283,6 +315,17 @@ public interface IAlertStore
     /// <param name="alertId">Alert identity.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<IReadOnlyList<AuditLog>> ReadAuditAsync(long alertId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Delivery rows written about one alert, oldest first — what §02-design/05 §6 calls "the full response
+    /// timeline of one incident", assembled from the records task 3.5 writes rather than from a second set of
+    /// escalation columns on the alert.
+    /// </summary>
+    /// <param name="alertId">Alert identity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<IReadOnlyList<NotificationAttemptRecord>> ReadDeliveriesAsync(
+        long alertId,
+        CancellationToken cancellationToken);
 
     /// <summary>The dwell key one metric and phase is tracking, or null when nothing is being tracked for it.</summary>
     /// <param name="terrariumId">Terrarium the key belongs to.</param>

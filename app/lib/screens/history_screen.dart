@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../state/app_data_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -82,9 +83,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       onPressed: () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
+                            // No file is written and no request is made: the button is here to show where the
+                            // export will live, and it says so rather than reporting a success (FR-15).
                             content: Text(
-                                'Đã xuất dữ liệu CSV của ${current.name} thành công!'),
-                            backgroundColor: AppColors.primary,
+                              AppLocalizations.of(context).mockDataNoOpNotice,
+                            ),
+                            backgroundColor: AppColors.bgCardHover,
                           ),
                         );
                       },

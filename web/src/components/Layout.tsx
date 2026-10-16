@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Box,
   Cpu,
+  Gauge,
   History,
   KeyRound,
   LayoutDashboard,
@@ -16,10 +17,13 @@ import {
   Settings,
   ShieldCheck,
   User,
+  Users,
   X,
 } from 'lucide-react';
 import { apiBaseUrl, ApiError, readSession } from '../api/client';
 import * as auth from '../api/endpoints';
+import { PERMISSION_CODES } from '../api/types';
+import type { PermissionCode } from '../api/types';
 import { useI18n } from '../i18n';
 import { LANGUAGES } from '../i18n/strings';
 import { useSession } from '../state/session';
@@ -43,9 +47,20 @@ import { MockDataNotice } from './MockDataNotice';
 
 const MOCK_ROUTES = ['/devices', '/alerts', '/settings'];
 
+/**
+ * One entry of the sidebar. `permission` is what the signed-in account's role must grant for the entry to appear —
+ * `null` for the screens every signed-in account may open.
+ */
+interface NavEntry {
+  name: string;
+  path: string;
+  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: 'true' }>;
+  permission: PermissionCode | null;
+}
+
 export const Layout: React.FC = () => {
   const { t, lang, setLang } = useI18n();
-  const { user, signOut } = useSession();
+  const { user, hasPermission, signOut } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -59,17 +74,68 @@ export const Layout: React.FC = () => {
   const online = navigator.onLine;
   const showsMockNotice = MOCK_ROUTES.some((route) => location.pathname.startsWith(route));
 
-  const navItems = [
-    { name: t('navDashboard'), path: '/dashboard', icon: LayoutDashboard },
-    { name: t('navTerrariums'), path: '/terrariums', icon: Box },
-    { name: t('navSpeciesProfiles'), path: '/species-profiles', icon: Leaf },
-    { name: t('navDevices'), path: '/devices', icon: Cpu },
-    { name: t('navAlerts'), path: '/alerts', icon: AlertTriangle },
-    { name: t('navHistory'), path: '/history', icon: History },
-    { name: t('navSettings'), path: '/settings', icon: Settings },
-    { name: t('navSystem'), path: '/system', icon: ServerCog },
-    { name: t('navWallboard'), path: '/wallboard', icon: MonitorPlay },
+  const navItems: NavEntry[] = [
+    { name: t('navDashboard'), path: '/dashboard', icon: LayoutDashboard, permission: null },
+    { name: t('navTerrariums'), path: '/terrariums', icon: Box, permission: null },
+    { name: t('navSpeciesProfiles'), path: '/species-profiles', icon: Leaf, permission: null },
+    { name: t('navDevices'), path: '/devices', icon: Cpu, permission: null },
+    { name: t('navAlerts'), path: '/alerts', icon: AlertTriangle, permission: null },
+    { name: t('navHistory'), path: '/history', icon: History, permission: null },
+    { name: t('navSettings'), path: '/settings', icon: Settings, permission: null },
+    { name: t('navSystem'), path: '/system', icon: ServerCog, permission: null },
+    { name: t('navWallboard'), path: '/wallboard', icon: MonitorPlay, permission: null },
   ];
+
+  /**
+   * The administrator's entries, shown only to an account whose role grants what the screens behind them need
+   * (FR-18). A menu entry that leads to a redirect is a worse answer than no entry, and the same guard sits on the
+   * routes themselves, so typing the URL changes nothing.
+   */
+  const adminItems: NavEntry[] = [
+    {
+      name: t('adminOverviewEntry'),
+      path: '/admin',
+      icon: Gauge,
+      permission: PERMISSION_CODES.dataReadAny,
+    },
+    {
+      name: t('adminAccountsEntry'),
+      path: '/admin/accounts',
+      icon: Users,
+      permission: PERMISSION_CODES.userRead,
+    },
+    {
+      name: t('adminRolesEntry'),
+      path: '/admin/roles',
+      icon: ShieldCheck,
+      permission: PERMISSION_CODES.userRead,
+    },
+  ];
+  const visibleAdminItems = adminItems.filter(
+    (item) => item.permission !== null && hasPermission(item.permission)
+  );
+
+  /** One sidebar entry, so the administrator's block is the same link rendered from the same place. */
+  const renderNavLink = (item: NavEntry) => {
+    const Icon = item.icon;
+    return (
+      <NavLink
+        key={item.path}
+        to={item.path}
+        onClick={() => setSidebarOpen(false)}
+        className={({ isActive }) =>
+          `flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all ${
+            isActive
+              ? 'bg-brand font-semibold text-white shadow-md shadow-brand/20'
+              : 'text-muted hover:bg-raised hover:text-ink'
+          }`
+        }
+      >
+        <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <span>{item.name}</span>
+      </NavLink>
+    );
+  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -137,26 +203,16 @@ export const Layout: React.FC = () => {
         </div>
 
         <nav className="flex-1 space-y-1.5 overflow-y-auto px-4 py-6">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-brand font-semibold text-white shadow-md shadow-brand/20'
-                      : 'text-muted hover:bg-raised hover:text-ink'
-                  }`
-                }
-              >
-                <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                <span>{item.name}</span>
-              </NavLink>
-            );
-          })}
+          {navItems.map(renderNavLink)}
+
+          {visibleAdminItems.length > 0 ? (
+            <div className="mt-3 space-y-1.5 border-t border-hairline pt-3">
+              <p className="px-3.5 py-1 text-[10px] uppercase tracking-widest text-muted">
+                {t('navAdmin')}
+              </p>
+              {visibleAdminItems.map(renderNavLink)}
+            </div>
+          ) : null}
         </nav>
 
         <div className="border-t border-hairline bg-field/50 p-4">

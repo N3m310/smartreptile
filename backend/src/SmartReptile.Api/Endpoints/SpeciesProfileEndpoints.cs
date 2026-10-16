@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Species;
+using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Api.Endpoints;
 
@@ -8,9 +9,9 @@ namespace SmartReptile.Api.Endpoints;
 /// The species-profile catalogue (FR-10 — roadmap 3.9). Contract: <c>07-appendices/03</c> §4.3.
 /// </summary>
 /// <remarks>
-/// Reads need a valid token; every write names the Owner policy, which is what the contract's <c>O</c> column means.
-/// The catalogue is unpaged on purpose: it is four built-ins plus whatever the account authored, and the picker in
-/// <c>POST /terrariums</c> needs all of them in one answer.
+/// Reads need a valid token; every write names the Admin policy, which is the one role allowed to author the
+/// catalogue. The catalogue is unpaged on purpose: it is four built-ins plus whatever has been authored, and the
+/// picker in <c>POST /terrariums</c> needs all of them in one answer.
 /// <para>
 /// Create and duplicate answer <c>200</c> with the profile rather than <c>201</c> with a <c>Location</c>, because
 /// the contract has no read-by-id route to point one at. The profile comes back whole, bands included, so a client
@@ -22,6 +23,11 @@ namespace SmartReptile.Api.Endpoints;
 /// profile a terrarium is assigned to is <c>409 profile_in_use</c>. The three are distinguished because the client
 /// does something different with each: offer "duplicate it instead", reload the list, or point at the terrariums.
 /// </para>
+/// <para>
+/// The picture is the one part of a profile that is not JSON: it arrives as a multipart part and leaves as bytes,
+/// on routes of its own. Both writes answer the whole profile in the same shape the reads use — the threshold edits
+/// set that precedent — so a client re-renders from the payload it was just handed instead of reading again.
+/// </para>
 /// </remarks>
 public static class SpeciesProfileEndpoints
 {
@@ -30,7 +36,7 @@ public static class SpeciesProfileEndpoints
     {
         var group = app.MapGroup("/api/v1/species-profiles")
             .WithTags("species-profiles")
-            .RequireAuthorization();
+            .RequireAuthorization(Permissions.SpeciesRead);
 
         group.MapGet(string.Empty, async (
             ClaimsPrincipal principal,
@@ -65,10 +71,10 @@ public static class SpeciesProfileEndpoints
                 ? Results.Ok(outcome.Profile)
                 : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.SpeciesWrite)
         .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
         .WithSummary("Create a custom species profile")
-        .WithDescription("Requires the Owner role. Every band is validated as a whole (BR-10.2); a name this account "
+        .WithDescription("Requires `species.write`. Every band is validated as a whole (BR-10.2); a name this account "
                        + "already uses is a 409 profile_name_taken.");
 
         group.MapPost("/{profileId:guid}/duplicate", async (
@@ -90,11 +96,11 @@ public static class SpeciesProfileEndpoints
                 ? Results.Ok(outcome.Profile)
                 : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.SpeciesWrite)
         .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
         .WithSummary("Copy a profile into one this account owns")
-        .WithDescription("Requires the Owner role. The copy is always a custom profile: a built-in is read-only "
-                       + "(FR-10 A2), so this is the way to tune one. The source may be a built-in or a profile of "
+        .WithDescription("Requires `species.write`. The copy is always a custom profile: a built-in is read-only "
+                       + "(FR-10 u2), so this is the way to tune one. The source may be a built-in or a profile of "
                        + "the caller's own.");
 
         group.MapPatch("/{profileId:guid}", async (
@@ -116,10 +122,10 @@ public static class SpeciesProfileEndpoints
                 ? Results.Ok(outcome.Profile)
                 : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.SpeciesWrite)
         .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
         .WithSummary("Edit one of this account's own profiles")
-        .WithDescription("Requires the Owner role. Omitted fields are left alone; sending bands replaces the whole "
+        .WithDescription("Requires `species.write`. Omitted fields are left alone; sending bands replaces the whole "
                        + "set. A built-in answers 403 builtin_immutable.");
 
         group.MapDelete("/{profileId:guid}", async (
@@ -139,11 +145,110 @@ public static class SpeciesProfileEndpoints
                 ? Results.NoContent()
                 : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.SpeciesWrite)
         .Produces(StatusCodes.Status204NoContent)
         .WithSummary("Delete one of this account's own profiles")
-        .WithDescription("Requires the Owner role. A profile assigned to a terrarium answers 409 profile_in_use, "
+        .WithDescription("Requires `species.write`. A profile assigned to a terrarium answers 409 profile_in_use, "
                        + "including terrariums that were soft-deleted, because their rows still point at it.");
+
+        group.MapPost("/{profileId:guid}/image", async (
+            Guid profileId,
+            IFormFile? file,
+            HttpContext context,
+            ClaimsPrincipal principal,
+            SpeciesProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            // Refused here rather than in the service because "the part is missing" is a fact about the multipart
+            // body, which the transport is the only layer that can see.
+            if (file is null)
+            {
+                return Problem(new SpeciesProfileProblem(
+                    "image_required",
+                    "A picture is required: send one file part named 'file'.",
+                    [new IdentityViolation("file", "image_required", "Choose a picture.")]));
+            }
+
+            var outcome = await service.SetImageAsync(
+                profileId,
+                principal.GetUserId() ?? Guid.Empty,
+                RequestActor.From(context),
+                new ProfileImageUpload(file.OpenReadStream(), file.ContentType),
+                cancellationToken);
+
+            return outcome.Succeeded
+                ? Results.Ok(outcome.Profile)
+                : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(Permissions.SpeciesWrite)
+        // The credential here is a bearer token, never a cookie, so there is no ambient authority for a cross-site
+        // request to borrow: the antiforgery token the framework would demand protects a session this API does not
+        // have. Nothing else on this surface is exempt, because nothing else takes a form body.
+        .DisableAntiforgery()
+        .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
+        .WithSummary("Set or replace a profile's picture")
+        .WithDescription("Requires `species.write`. `multipart/form-data` with one part named `file` — PNG, JPEG or "
+                       + "WebP, at most 2 MB, and the type is read from the bytes rather than from the part's own "
+                       + "Content-Type. Answers the updated profile, the same shape the reads return, so a client "
+                       + "renders the new picture from one payload. A built-in answers 403 builtin_immutable.");
+
+        group.MapGet("/{profileId:guid}/image", async (
+            Guid profileId,
+            HttpResponse response,
+            ClaimsPrincipal principal,
+            SpeciesProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.OpenImageAsync(
+                profileId,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken);
+
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            var image = outcome.Image!;
+
+            // Private, because the route needs the caller's token: a shared cache holding a picture it cannot
+            // re-authorise would serve it to whoever asks next. `max-age` is short and the URL carries
+            // `?v={imageUpdatedAt}` in the view, so a replaced picture is fetched rather than remembered.
+            response.Headers.CacheControl = "private, max-age=300";
+
+            return Results.File(image.Content, image.ContentType, lastModified: image.UpdatedAt);
+        })
+        .Produces(StatusCodes.Status200OK, contentType: "image/png")
+        .WithSummary("A profile's picture")
+        .WithDescription("The built-in profiles and the account's own, exactly the set the list returns. Needs the "
+                       + "caller's bearer token like every other read, so a client fetches the bytes rather than "
+                       + "pointing an `img` tag at this URL. `404 image_not_set` when the profile has no picture, "
+                       + "and `404 not_found` when the profile is not one the caller may see.");
+
+        group.MapDelete("/{profileId:guid}/image", async (
+            Guid profileId,
+            HttpContext context,
+            ClaimsPrincipal principal,
+            SpeciesProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.RemoveImageAsync(
+                profileId,
+                principal.GetUserId() ?? Guid.Empty,
+                RequestActor.From(context),
+                cancellationToken);
+
+            return outcome.Succeeded
+                ? Results.Ok(outcome.Profile)
+                : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(Permissions.SpeciesWrite)
+        .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
+        .WithSummary("Remove a profile's picture")
+        .WithDescription("Requires `species.write`. Idempotent: a profile with no picture is not an error, and "
+                       + "nothing is written to the audit trail because nothing changed. Answers the updated "
+                       + "profile rather than a 204, since the two picture routes answer the same shape and a "
+                       + "client re-renders from one payload.");
 
         return app;
     }
@@ -162,6 +267,10 @@ public static class SpeciesProfileEndpoints
             "profile_in_use" => StatusCodes.Status409Conflict,
             "profile_name_taken" => StatusCodes.Status409Conflict,
             "not_found" => StatusCodes.Status404NotFound,
+            // A visible profile with no picture: the same 404 status as a profile that does not exist, because the
+            // client's request succeeded in both cases and the caches should treat them alike — but a code of its
+            // own, because "nothing to show" and "no such profile" are different sentences.
+            "image_not_set" => StatusCodes.Status404NotFound,
             "unauthenticated" => StatusCodes.Status401Unauthorized,
             _ => StatusCodes.Status400BadRequest,
         };

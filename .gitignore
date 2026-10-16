@@ -42,6 +42,11 @@ firmware/.pio/
 firmware/include/secrets.h
 firmware/.pioenvs/
 
+# ---- stored files ----
+# The API keeps pictures out of the database and writes them under Storage:RootPath, which defaults to `uploads`
+# beside its content root. The compose stack uses a named volume instead, so this covers a local `dotnet run`.
+uploads/
+
 # ---- node / tooling ----
 node_modules/
 *.log

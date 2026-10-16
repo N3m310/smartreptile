@@ -1,4 +1,4 @@
-# 01 — Architecture Decision Log (ADR-001 … ADR-022)
+# 01 — Architecture Decision Log (ADR-001 … ADR-025)
 
 Append-only. Each entry: **Context → Decision → Consequences → Rejected alternatives.** Numbers are never
 reused; a superseded ADR keeps its id and gains a "Superseded by" note.
@@ -728,3 +728,93 @@ for the same metric and duration**: it would hide the alert *and* the evidence, 
 the dashboard would show a suppression the keeper never asked for. **Suppressing new alerts while an
 `Accepted`-resolved alert's condition continues** (a permanent "accepted" state on the key): that is a suppression
 with no end, which is the one thing a silence explicitly may not be.
+
+---
+
+## ADR-024 — The permission matrix is data: roles are rows, and the catalogue is code
+**Status:** Accepted · **Date:** 2026-10-17 · **Related:** FR-02, FR-19, `02-design/06` §3, `07-appendices/02` §3.16/§3.18, `07-appendices/03` §4.7, roadmap (the re-framing block)
+
+**Context.** Authorisation was an `int` column on `User` holding a three-member `UserRole`, with the role→permission
+mapping written as C# policies (`Owner`, `Technician`). That made every change to who may do what a code change and a
+release, and it left two things the 2026-10-14 review asked for impossible to express: an account-management surface
+that a deployment could hand to a second person without also handing it the whole system, and an answer to "which data
+does this role map to" that a screen could print. The review asked for a `Role` table and, separately, for the
+administrator to be able to manage accounts and see everything.
+
+**Decision.** Split the question in two and answer each where it belongs. The **catalogue** — the sixteen things the
+software can be asked to do — stays in code (`Permissions`), because a permission the software does not implement
+cannot be granted by inserting a row. The **mapping** of codes to roles becomes data (`Role`, `RolePermission`), and a
+**policy name is a permission code**: `AuthorizationPolicies.AddPermissionPolicies()` registers one policy per
+catalogue entry and every route names the code it needs. The four shipped roles are seeded by migration
+`20261016161825_AddRolesAndPermissions` with ids fixed in `SystemRoles`, and `IdentitySeeder` reconciles them on every
+start-up. The two permissions that reach past an account are `data.read.any` and `data.write.any`, held by `Admin`
+alone; ownership stays `Terrarium.UserId`, with the cross-account reads in a separate store that has no owner
+parameter. Permissions travel in the access token, one `perm` claim per code, with `ver` = `2`.
+
+**Consequences.**
+- A deployment can re-grant a role, or create one, without a release — which is the point, and what makes the
+  administrator's console a real surface rather than a report.
+- A role name appears nowhere in the API, and both clients gate on codes (`hasPermission('terrarium.write')`), so a
+  re-banded role changes what a screen offers with no client change.
+- `OwnerOrAdmin` is deleted rather than kept: `Admin`'s seed is a superset of `Owner`'s, so the composite policy had
+  nothing left to say. The `TerrariumAccessRequirement` handler of the design's sketch is still unnecessary, because
+  the cross-account case is a permission rather than a scope rule.
+- `Admin` cannot be registered into existence (registration produces `Owner`), so the two `.any` codes are held by the
+  seeded account alone unless an administrator deliberately promotes somebody — which is also how the last-admin
+  guard is made survivable.
+- The last-administrator guard counts **holders of `user.manage`** rather than comparing role names, so a deployment
+  that splits or renames the administrator role is still protected.
+- Staleness is bounded and documented: a role change, a password reset and a delete end the account's refresh tokens,
+  while an edit to a role's *permission set* takes effect within one access-token lifetime (15 minutes).
+- The seeder is asymmetric — a missing role is created **with** its shipped grants, an existing grant is never
+  re-applied — because an administrator's edit must not be undone by a restart.
+- The migration is reversible: `Down` restores the enum column by joining `Role.Code`, verified with a round trip.
+
+**Rejected.** **A fourth enum member** (`Admin = 3`, the shape of the intermediate working tree): smallest diff, and
+it answers none of the review — no editable matrix, no account surface, and the "which data" question still a branch in
+a service. **A `Scope` column on the role** (`own`/`any`) instead of two permissions: one bit cannot express the case
+the product actually has, because `species.read` is cross-account for every role while `terrarium.read` is for none of
+them below `Admin`; it would also have made the answer a sentence in a service rather than a property of the set.
+**Putting the permission catalogue in a table** so that a deployment could add codes: a code the build does not
+implement grants nothing, and a catalogue row that no endpoint honours is a permission that silently does nothing.
+**A membership table** (`UserTerrarium`) so that `data.*.any` could be replaced by an ownership join: the product has
+one keeper per enclosure, so the table would exist to express a relationship that is already a column (`L-07`).
+
+---
+
+## ADR-025 — An alert carries a family, and the split is a property of the metric
+**Status:** Accepted · **Date:** 2026-10-17 · **Related:** FR-12 (`BR-12.4a`), `02-design/05` §2, `07-appendices/02` §3.7/§3.17, `07-appendices/03` §4.5, roadmap (the re-framing block)
+
+**Context.** The 2026-10-14 review asked for two alert lists that are managed separately: the **enclosure's** own
+warnings (humidity, light) and the **animal's** (temperature). Alerts were one flat list, and the client would have had
+to know which metric belonged to which subject — the same mistake `DOC_CHANGES_2026-10-03` §1 records for the web
+client, which carried a copy of a server-side list and drifted from it.
+
+**Decision.** The split is a property of the **metric**, written once as `MetricDefinition.Family` in the metric
+dictionary: `TempC`, `UvIndex` and `SurfaceTempC` are `species`; `HumidityPct`, `LightLux`, `BatteryPct`, `RssiDbm` are
+`enclosure`. Every metric-less alert (silence, sensor fault, clock skew) is `enclosure`, because the board's condition
+is a statement about the enclosure rather than about the animal. The family is **persisted** on the row
+(`Alert.Family`, migration `20261016162814_AddAlertFamily`, back-filled from the metric), returned on every alert in
+REST and on the `alertChanged` payload, and filterable with `?family=enclosure|species` — on the keeper's list and on
+the administrator's, where the dashboard reports the two families' open counts separately.
+
+**Consequences.**
+- A client renders two views from the payload alone, and the metric keys a tab should name come from
+  `/admin/overview`'s `families[]` rather than from a list compiled into TypeScript.
+- Persisting rather than deriving is the same trade `BandMin`/`BandMax` already make, with one addition: a
+  device-level alert has no metric, so there is nothing to derive from.
+- An unknown `?family=` key is `400 family_invalid` rather than "both", because a client that misspells it would
+  otherwise show one family's rows under the other family's heading.
+- Adding a metric is the only place the question is answered again; a metric added without a family would silently
+  inherit the first enumeration member, which is why a unit test asserts the two families cover the whole dictionary.
+- The evaluator writes the family where the episode becomes a row (`ThresholdAlertWriter`, `DeviceSignalAlertWriter`,
+  `DeviceSilenceAlertWriter`), so an alert's family is fixed at the moment the excursion is understood.
+
+**Rejected.** **Deriving the family in the read path** from a metric→family map: it makes every list query join or
+branch, and it leaves the two device-level sources unclassifiable. **A column on `SpeciesProfile`** (the bands are the
+species', so the family could come from there): humidity bands are the enclosure's condition even when a profile sets
+them, and a profile-less enclosure — the state a terrarium is in before a profile is assigned — would have nowhere to
+put its light or board alerts. **Two separate alert tables**: the lifecycle, the dedupe key, the silence mechanism and
+the timeline are identical, and duplicating them to express a filter would double every rule in `02-design/05`.
+**Naming the families after the screens** (`habitat`/`animal`, or `box`/`species`): the two words would then have to
+change with the UI, and the stored value would be a UI decision rather than a domain one.
