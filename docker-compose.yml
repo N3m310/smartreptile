@@ -128,6 +128,10 @@ services:
     container_name: smartreptile-mailpit
     ports:
       - "127.0.0.1:8025:8025"   # the web UI: http://127.0.0.1:8025
+      # SMTP, published so an API run *outside* Compose (`dotnet run`, whose smtp host is 127.0.0.1:1025 in
+      # appsettings.json) reaches the same sink. Without this mapping that run cannot deliver while this stack can,
+      # which is the asymmetry that makes "it works in Docker" untrue.
+      - "127.0.0.1:1025:1025"
     restart: unless-stopped
 
   web:
