@@ -113,7 +113,9 @@ class _PrototypeShellState extends State<PrototypeShell> {
               child: Center(
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
-                    value: state.activeTerrariumId,
+                    value: state.terrariums.any((t) => t.id == state.activeTerrariumId)
+                        ? state.activeTerrariumId
+                        : (state.terrariums.isNotEmpty ? state.terrariums.first.id : null),
                     style: Theme.of(context).textTheme.bodySmall,
                     items: [
                       for (final terrarium in state.terrariums)

@@ -41,7 +41,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     Expanded(
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
-                          value: current.id,
+                          value: data.terrariums.any((t) => t.id == current.id)
+                              ? current.id
+                              : (data.terrariums.isNotEmpty ? data.terrariums.first.id : null),
                           isExpanded: true,
                           dropdownColor: AppColors.bgCardHover,
                           icon: const Icon(Icons.arrow_drop_down,

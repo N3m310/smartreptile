@@ -68,6 +68,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final data = context.watch<AppDataProvider>();
     final devices = data.devices;
 
+    // Đảm bảo _currentTerrariumId luôn tồn tại trong danh sách terrariums từ Database
+    if (data.terrariums.isNotEmpty &&
+        !data.terrariums.any((t) => t.id == _currentTerrariumId)) {
+      _currentTerrariumId = data.terrariums.first.id;
+      final first = data.terrariums.first;
+      _tempMinCtrl.text = first.thresholds.tempMin.toString();
+      _tempMaxCtrl.text = first.thresholds.tempMax.toString();
+      _humMinCtrl.text = first.thresholds.humidityMin.toString();
+      _humMaxCtrl.text = first.thresholds.humidityMax.toString();
+      _lightMinCtrl.text = first.thresholds.lightMin.toString();
+      _lightMaxCtrl.text = first.thresholds.lightMax.toString();
+    }
+
+    final terrariumItems = data.terrariums;
+    final selectedValue = terrariumItems.any((t) => t.id == _currentTerrariumId)
+        ? _currentTerrariumId
+        : (terrariumItems.isNotEmpty ? terrariumItems.first.id : null);
+
     return Scaffold(
       backgroundColor: AppColors.bgMain,
       body: ListView(
@@ -100,29 +118,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: AppColors.textMain,
                       ),
                     ),
-                    DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _currentTerrariumId,
-                        dropdownColor: AppColors.bgCardHover,
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                    if (terrariumItems.isNotEmpty)
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedValue,
+                          dropdownColor: AppColors.bgCardHover,
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                          items: [
+                            for (final t in terrariumItems)
+                              DropdownMenuItem(value: t.id, child: Text(t.name)),
+                          ],
+                          onChanged: (id) {
+                            if (id != null) {
+                              final target = data.terrariums.firstWhere(
+                                (t) => t.id == id,
+                              );
+                              _loadTerrariumThresholds(target);
+                            }
+                          },
                         ),
-                        items: [
-                          for (final t in data.terrariums)
-                            DropdownMenuItem(value: t.id, child: Text(t.name)),
-                        ],
-                        onChanged: (id) {
-                          if (id != null) {
-                            final target = data.terrariums.firstWhere(
-                              (t) => t.id == id,
-                            );
-                            _loadTerrariumThresholds(target);
-                          }
-                        },
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 4),

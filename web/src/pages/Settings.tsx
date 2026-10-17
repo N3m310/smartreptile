@@ -11,9 +11,11 @@ import {
   Mail,
   Phone,
 } from 'lucide-react';
+import { useSession } from '../state/session';
 
 export const Settings: React.FC = () => {
   const navigate = useNavigate();
+  const { signOut } = useSession();
 
   // Profile state
   const [profile, setProfile] = useState({
@@ -270,7 +272,10 @@ export const Settings: React.FC = () => {
           </p>
         </div>
         <button
-          onClick={() => navigate('/')}
+          onClick={async () => {
+            await signOut();
+            navigate('/');
+          }}
           className="px-5 py-2.5 bg-[#e05530]/15 hover:bg-[#e05530] text-[#e05530] hover:text-white border border-[#e05530]/30 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
