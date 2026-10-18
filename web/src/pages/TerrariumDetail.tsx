@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Activity, BatteryMedium, Cpu, Loader2, Pencil, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
+import { ArrowLeft, Activity, BatteryMedium, Cpu, History, Loader2, Pencil, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
@@ -81,18 +81,38 @@ export const TerrariumDetail: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <Link to="/terrariums" className="inline-flex items-center gap-1 text-sm text-accent hover:underline">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        {t('backToTerrariums')}
-      </Link>
+      <div className="flex items-center justify-between gap-4">
+        <Link to="/terrariums" className="inline-flex items-center gap-1 text-sm text-accent hover:underline">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          {t('backToTerrariums')}
+        </Link>
+        <Link
+          to={`/history?terrarium=${item.id}`}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-ink shadow-sm transition hover:border-brand/60 hover:text-brand hover:bg-surface-raised"
+        >
+          <History className="h-3.5 w-3.5 text-brand" aria-hidden="true" />
+          {t('navHistory')}
+        </Link>
+      </div>
 
       <header className="rounded-2xl border border-hairline bg-surface p-5">
-        <h1 className="font-heading text-2xl font-bold text-ink">{item.name}</h1>
-        <p className="mt-1 text-sm text-muted">
-          {item.speciesName}
-          {item.location ? ` · ${item.location}` : ''}
-        </p>
-        {item.description ? <p className="mt-2 text-sm text-muted">{item.description}</p> : null}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="font-heading text-2xl font-bold text-ink">{item.name}</h1>
+            <p className="mt-1 text-sm text-muted">
+              {item.speciesName}
+              {item.location ? ` · ${item.location}` : ''}
+            </p>
+            {item.description ? <p className="mt-2 text-sm text-muted">{item.description}</p> : null}
+          </div>
+          <Link
+            to={`/history?terrarium=${item.id}`}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-brand/30 bg-brand/10 px-3.5 py-2 text-xs font-semibold text-brand transition hover:bg-brand/20"
+          >
+            <History className="h-4 w-4" aria-hidden="true" />
+            <span>{t('navHistory')}</span>
+          </Link>
+        </div>
 
         <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-2 text-xs sm:grid-cols-2">
           <div className="flex justify-between gap-3">
@@ -203,6 +223,30 @@ export const TerrariumDetail: React.FC = () => {
             {hasDevice ? t('signingIn') : t('errorDeviceNotBound')}
           </p>
         )}
+      </section>
+
+      {/* History section: provides quick access to historical charts and samples for this terrarium */}
+      <section className="rounded-2xl border border-hairline bg-surface px-5 py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-brand" aria-hidden="true" />
+              <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-muted">
+                {t('navHistory')}
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              {t('historyTitle')} — {item.name}
+            </p>
+          </div>
+          <Link
+            to={`/history?terrarium=${item.id}`}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-hairline bg-surface-raised px-4 py-2 text-xs font-semibold text-ink shadow-sm transition hover:border-brand hover:text-brand hover:bg-surface"
+          >
+            <History className="h-3.5 w-3.5 text-brand" aria-hidden="true" />
+            <span>{t('navHistory')}</span>
+          </Link>
+        </div>
       </section>
 
       <ThresholdsSection terrariumId={id} canEdit={canEditThresholds} />
