@@ -15,7 +15,7 @@ semantics and status vocabulary are shared; the component implementations are no
 | S3 | Register | `/register` | Create account | FR-01 |
 | S4 | Home / Dashboard | `/home` | Live cards for the selected terrarium, device status, open alerts banner | FR-08, FR-11 |
 | S5 | History | `/history` | Range picker + chart + alert overlays + daily summaries | FR-09, FR-14 |
-| S6 | Alerts | `/alerts` | Filterable alert inbox with ack/resolve actions | FR-12 |
+| S6 | Alerts | `/alerts` | Filterable alert inbox with ack/resolve actions, presented as the **two families** (`enclosure` / `species`) rather than one list | FR-12 |
 | S7 | Alert detail | `/alerts/:id` | Full episode: value timeline, band, actions, reason picker | FR-12 |
 | S8 | Terrariums | `/terrariums` | List, add, edit, delete, switch active | FR-03 |
 | S9 | Thresholds | `/terrariums/:id/thresholds` | Effective bands per metric, overrides, day/night, dwell | FR-10 |
@@ -26,6 +26,11 @@ semantics and status vocabulary are shared; the component implementations are no
 | S14 | Profile / Settings | `/settings` | Language, theme, notification channels, quiet hours, min severity | FR-13 |
 | S15 | Camera (optional) | `/camera` | Latest snapshot + refresh | FR-17 |
 | S16 | Diagnostics | `/settings/diagnostics` | Coverage %, last sample, rates (read-only, honest numbers) | FR-18 |
+| S17 | Administration hub | `/admin` | The administrator's entry point, shown **only** when the session holds an administrative permission | FR-19 |
+| S18 | Deployment overview | `/admin/overview` | Get-all: deployment counts, both alert families with their metric keys and open counts, and every account with its holdings | FR-19 |
+| S19 | Accounts | `/admin/accounts` | List/search/page, create, edit, reset password, change role, disable, enable, delete (soft or purge) | FR-19 |
+| S20 | Roles | `/admin/roles` | The permission matrix: a role's grants against the catalogue, create a custom role, edit, delete | FR-19 |
+| S21 | Deployment lists | `/admin/lists` | Every account's enclosures, boards and alerts, each with its owner and family | FR-19 |
 
 ### 1.2 Web dashboard
 
@@ -39,6 +44,29 @@ semantics and status vocabulary are shared; the component implementations are no
 | W6 | Devices | Fleet table with last-seen age in seconds |
 | W7 | Report | Daily summary table + export button (report screenshots come from here) |
 | W8 | Admin | Audit log viewer, retention status, `/metrics` snapshot |
+| W9 | Admin overview | Deployment counts, both alert families, every account with its holdings (get-all) |
+| W10 | Admin accounts | Account list/search/page with create, edit, reset password, role change, disable/enable and delete |
+| W11 | Admin roles | The permission matrix: a role's grants against the catalogue, create/edit/delete a custom role |
+
+**Revised 2026-10-17 — the two clients gained the administrator's surface, and the alerts are read as two
+families.** W9–W11 and S17–S21 are the screens the role/permission re-framing made possible: the API's `/admin/*`
+routes are the first that answer with another account's data, and the role matrix is the first thing an
+administrator can edit that changes what *other* accounts may do. Three consequences for navigation, all of them
+permission-driven rather than role-driven, because a deployment can re-band a role:
+
+- **The entries are conditional on a permission, not on a role name.** The web routes are wrapped in a
+  `RequirePermission` guard and the app adds its administration destination only when the session holds one of the
+  administrative codes, so an account without them sees no dead screen. `species.write` likewise gates the catalogue
+  editor, and `terrarium.write` the enclosure editor.
+- **The alert screens are two views, not one list with a filter banner.** `enclosure` is "what is wrong with the
+  setup" — humidity, light, and the board itself — and `species` is "is my animal's thermal environment right",
+  judged against its species profile. The family arrives on every alert, so a client needs no table of metric keys;
+  the tab labels and the metric keys each family covers come from `/admin/overview`'s `families[]` where a client
+  wants to name them.
+- **A revocation is not instant, and the console says so.** Editing a role's permission set does not end the sessions
+  of the accounts holding it: it takes effect within one access-token lifetime (15 minutes), so the matrix screen
+  warns rather than implying the change is immediate. Changing an account's role, resetting its password or deleting
+  it *does* end its refresh tokens at once.
 
 **Where the client sits (revised 2026-10-06 by `ADR-019`; promotion complete 2026-10-07; **renamed VIVARIUMGUARD
 2026-10-09**).** `web/` holds the client: React + Vite + Tailwind, eight screens (login, dashboard, terrariums,

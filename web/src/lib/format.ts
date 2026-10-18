@@ -22,7 +22,17 @@ const METRIC_KEY: Record<string, string> = {
   lightLux: 'metricLightLux',
   uvIndex: 'metricUvIndex',
   surfaceTempC: 'metricSurfaceTempC',
+  batteryPct: 'metricBatteryPct',
+  rssiDbm: 'metricRssiDbm',
 };
+
+/**
+ * The dictionary's REST keys, in dictionary order (`Domain/Metrics/MetricDictionary.cs`, §02-design/02 §3.8) — what
+ * an authoring form offers when it has to name a metric. The list lives here because no route publishes the
+ * dictionary yet; the server is still the one that decides, refusing a key it does not know with
+ * `400 metric_invalid`, and an unknown key that arrives in a response renders as its own code.
+ */
+export const metricKeys = Object.keys(METRIC_KEY);
 
 export function metricLabel(t: TFunc, code: string): string {
   return METRIC_KEY[code] ? t(METRIC_KEY[code]) : code;

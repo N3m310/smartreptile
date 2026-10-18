@@ -381,4 +381,24 @@ public class ThresholdDecisionTests
         empty.LastEvaluatedSampleId.Should().Be(0);
         empty.LastNotificationAt.Should().BeNull();
     }
+
+    [Fact]
+    public void GivenAKeyRe_armedByAHandResolution_ThenTheStillOutOfBandValueNeedsAFreshDwell()
+    {
+        var band = TestBands.LeopardGecko();
+        var state = EvaluationState.Empty();
+
+        // The excursion opens as usual …
+        Decide(band, 33.0m, 1, state);
+        Decide(band, 33.4m, 7, state).Kind.Should().Be(DecisionKind.Open);
+        state.OpenAlertId = 1;
+
+        // … and a keeper closes it by hand, which re-arms the key (roadmap 3.4's rule). The band is never re-entered:
+        // the value stays above the target for the whole test.
+        state.Rearm();
+
+        Decide(band, 33.6m, 8, state).Kind.Should().Be(DecisionKind.None, "the dwell starts again from the re-arm");
+        Decide(band, 33.8m, 10, state).Kind.Should().Be(DecisionKind.None);
+        Decide(band, 34.0m, 13, state).Kind.Should().Be(DecisionKind.Open, "five minutes after the re-arm, as for any excursion");
+    }
 }

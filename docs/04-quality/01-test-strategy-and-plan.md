@@ -21,7 +21,7 @@ path get the most tests**, not the CRUD endpoints.
 | Firmware unit (native) | TC-U-FW-01…12 | PlatformIO `native` + Unity | Filters, ring buffer, payload builder, plausibility, state machine transitions | < 5 s total |
 | Backend unit | TC-U-01…50 | xUnit + FluentAssertions, `Clock.Fake`, fakes for all ports | Validators, calibration, `ThresholdDecision` matrix, band resolution, exposure maths, notification policy matrix | < 20 s total |
 | Backend integration | TC-I-01…15 | xUnit + Testcontainers (SQL Server) + in-process MQTT client + `WireMock.Net` | Ingest → persist → evaluate → notify, retention, exports, coverage, SignalR, auth | < 3 min total |
-| App widget/unit | TC-W-01…18 | `flutter_test` + `mocktail` | Providers, metric cards, staleness, claim flow, threshold validation, role gating, navigation, a11y labels | < 60 s total |
+| App widget/unit | TC-W-01…18 | `flutter_test` + `mocktail` | Providers, metric cards, staleness, claim flow, threshold validation, permission gating, navigation, a11y labels | < 60 s total |
 | End-to-end | TC-E2E-01…06 | Real ESP32 + Docker host + real phone/browser, scripted manual runs | The whole chain including hardware and push delivery | One 30 min session per milestone |
 | Exploratory / chaos | (unscripted) | Human | Kill broker/DB, unplug node, wrong clock, Wi-Fi change | M5 |
 
@@ -34,7 +34,7 @@ but not gated — chasing coverage there produces assertion-free tests, which is
 | FR | Unit | Integration | Widget | E2E | Note |
 |---|---|---|---|---|---|
 | FR-01 auth | ✅ U-32…35 | ✅ I-13 | ✅ W-01…03 | | Hashing, rotation, throttle |
-| FR-02 RBAC | ✅ U-36 | ✅ I-13 | ✅ W-12 | | 404 vs 403 distinction |
+| FR-02 RBAC | ✅ U-36 | ✅ I-13 | ✅ W-12 | | the matrix is data (`02-design/06` §3); 404 vs 403 distinction |
 | FR-03 terrariums | | ✅ I-07 | ✅ W-04 | ✅ E2E-01 | Cascade + soft delete |
 | FR-04 provisioning | | ✅ I-05, I-13 | ✅ W-14 | ✅ E2E-01 | Claim code TTL/single-use |
 | FR-05 device auth | ✅ U-05 | ✅ I-05, I-13 | | ✅ E2E-01 | Revoke + rotate grace |
@@ -113,6 +113,12 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 > `pio run -e esp32dev`, the full-history secret scan, and an **integration job** with a SQL Server 2022 service
 > container that runs 8 tests — migrations applied, reference data seeded idempotently, the SQL-level invariants —
 > and then boots the API and requires `/health/ready` to report Healthy.
+>
+> **Corrected 2026-10-17.** That count is a dated snapshot, not the current pipeline: there are **six** jobs now —
+> `web` (typecheck, locale-key parity, production build) was added with the web client in `5dd9c6a` — and the five
+> measured figures have since moved to **947 backend unit tests**, `flutter analyze` + **182 app tests**, 22 firmware
+> host tests, the full-history secret scan, and an integration job running **55 tests**. All six are green on run
+> `38949606361`.
 >
 > Still missing from that row: the E2E script set, the overnight soak and the chaos drills, which belong to M3/M5 as
 > planned. One caveat worth stating rather than letting a green check imply otherwise: the integration tests run

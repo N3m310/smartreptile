@@ -58,6 +58,17 @@ class MetricFormat {
     return '${age.inHours} h';
   }
 
+  /// Absolute instant for the administration tables: `16/10/2026 23:51`, in the device's own zone.
+  ///
+  /// Deliberately not a relative age: an administrative row about an account created three weeks ago is unreadable
+  /// as "506 h ago", and the deployment view is read long after the fact rather than watched.
+  static String dateTime(DateTime instant) {
+    final local = instant.toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${two(local.day)}/${two(local.month)}/${local.year} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
   /// Plural bucket used to pick the localised "x seconds ago" message.
   static AgeBucket ageBucket(Duration age) {
     if (age.inSeconds < 60) {

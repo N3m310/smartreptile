@@ -1,7 +1,10 @@
+using System.ComponentModel;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Metrics;
+using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Api.Endpoints;
 
@@ -11,12 +14,17 @@ namespace SmartReptile.Api.Endpoints;
 /// </summary>
 /// <remarks>
 /// Every route is authenticated and every query is scoped to the caller. A terrarium that belongs to someone else
-/// answers exactly like one that does not exist, so the endpoints cannot be used to enumerate ids (BR-02.2) — which
-/// is why there is no <c>forbidden</c> code here.
+/// is refused with <c>403 forbidden_terrarium</c>, and one that was deleted with <c>410 terrarium_deleted</c>, so a
+/// keeper can tell a mistyped id from an enclosure that is not theirs or is gone. This narrows BR-02.2 — whose
+/// uniform <c>404</c> the other resources still answer — for this one resource, on the review request recorded in
+/// TASKS_2026-10-14 items 3 and 5. Reads name <c>terrarium.read</c> and the writes <c>terrarium.write</c>, and
+/// "administrator" is no longer a case the routes know about: the cross-account answer is now the
+/// <c>data.read.any</c>/<c>data.write.any</c> permissions, which the seeds grant to the administrator role and to
+/// nothing else.
 /// <para>
-/// Role gating is deliberately light: reads need a valid token and ownership, and only <c>create</c> names a policy
-/// (Owner). The Technician/Viewer split lands with the membership model in M3, because there is nothing for a
-/// technician to be a member of yet.
+/// Role gating is deliberately light: the two mutations and the threshold writes name a policy, and nothing else
+/// does. The scoping is the security boundary here — a role grants what may be asked for, never whose data is
+/// answered.
 /// </para>
 /// </remarks>
 public static class TerrariumEndpoints
@@ -26,7 +34,7 @@ public static class TerrariumEndpoints
     {
         var group = app.MapGroup("/api/v1/terrariums")
             .WithTags("terrariums")
-            .RequireAuthorization();
+            .RequireAuthorization(Permissions.TerrariumRead);
 
         // An empty suffix makes the group prefix the whole route, so this answers "/api/v1/terrariums" — the path
         // the clients, the spec and the report snapshots all use.
@@ -35,18 +43,24 @@ public static class TerrariumEndpoints
             TerrariumService service,
             CancellationToken cancellationToken) =>
         {
-            var outcome = await service.ListAsync(principal.GetUserId() ?? Guid.Empty, cancellationToken);
+            var outcome = await service.ListAsync(
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded
                 ? Results.Ok(new { items = outcome.Terrariums })
                 : Problem(outcome.Problem!);
         })
         .WithSummary("List the signed-in account's terrariums")
-        .WithDescription("Each entry carries the device state, the newest sample time and the open-alert count.");
+        .WithDescription("Each entry carries the device state, the newest sample time and the open-alert count. An "
+                       + "administrator sees every account's terrariums, and each entry then names its owner "
+                       + "(`ownerUserId`).");
 
         group.MapPost(string.Empty, async (
             CreateTerrariumRequest request,
             HttpResponse response,
+            HttpContext context,
             ClaimsPrincipal principal,
             TerrariumService service,
             CancellationToken cancellationToken) =>
@@ -54,7 +68,8 @@ public static class TerrariumEndpoints
             var outcome = await service.CreateAsync(
                 request,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                RequestActor.From(context));
 
             if (!outcome.Succeeded)
             {
@@ -62,11 +77,18 @@ public static class TerrariumEndpoints
             }
 
             SetETag(response, outcome.RowVersion);
-            return Results.Created($"/api/v1/terrariums/{outcome.Terrarium!.Id}", outcome.Terrarium);
+            return Results.Created($"/api/v1/terrariums/{outcome.Terrarium!.Id}", TerrariumPayload(outcome));
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.TerrariumWrite)
         .WithSummary("Create a terrarium")
-        .WithDescription("Requires the Owner role. A device cannot be claimed before a terrarium exists to bind it to.");
+        .WithDescription("Requires `terrarium.write`. Name a board with `deviceId` (its public id, `sr-3f9a2c`) or "
+                       + "`macAddress` to bind it in the same request — the two are one act, because a board with no "
+                       + "credential can neither report nor be claimed afterwards, so the response carries the "
+                       + "one-time `deviceSecret` exactly as `POST /devices/claim` does. Leaving both out is the "
+                       + "behaviour that existed before: create the enclosure, claim a board later. A board that is "
+                       + "unknown, already bound or revoked is refused before anything is written. The created item "
+                       + "comes with the version to update it from: the `ETag` header and the `rowVersion` field "
+                       + "carry the same value.");
 
         group.MapGet("/{terrariumId:guid}", async (
             Guid terrariumId,
@@ -78,7 +100,8 @@ public static class TerrariumEndpoints
             var outcome = await service.GetAsync(
                 terrariumId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             if (!outcome.Succeeded)
             {
@@ -86,23 +109,33 @@ public static class TerrariumEndpoints
             }
 
             SetETag(response, outcome.RowVersion);
-            return Results.Ok(outcome.Terrarium);
+            return Results.Ok(TerrariumPayload(outcome));
         })
         .WithSummary("One terrarium")
-        .WithDescription("Carries the rowversion as an `ETag`; send it back as `If-Match` to update the terrarium.");
+        .WithDescription("This is the route to read the version an update has to send back: it answers the rowversion "
+                       + "as an `ETag` response header and, for a client that cannot read headers or is calling from "
+                       + "Swagger UI, as the `rowVersion` field of the body. Send that value as `If-Match` on "
+                       + "`PATCH /api/v1/terrariums/{id}`. An id that belongs to another account is `403 "
+                       + "forbidden_terrarium`, and one that was deleted is `410 terrarium_deleted` — except for an "
+                       + "administrator, who reads any account's terrarium.");
 
         group.MapPatch("/{terrariumId:guid}", async (
             Guid terrariumId,
             UpdateTerrariumRequest request,
-            HttpRequest httpRequest,
+            [FromHeader(Name = "If-Match")]
+            [Description("The terrarium's current version: the `ETag` response header or the `rowVersion` field of "
+                       + "`GET /api/v1/terrariums/{id}`, with or without the surrounding quotes. `*` accepts any "
+                       + "version. Required — without it the answer is `428 precondition_required`.")]
+            string? ifMatch,
             HttpResponse response,
+            HttpContext context,
             ClaimsPrincipal principal,
             TerrariumService service,
             CancellationToken cancellationToken) =>
         {
             // No token, no update: the whole point of the round trip is that the client states which version it
             // edited, and a missing header means it did not read one.
-            if (ParseIfMatch(httpRequest.Headers.IfMatch) is not { } expectedRowVersion)
+            if (ParseIfMatch(ifMatch) is not { } expectedRowVersion)
             {
                 return PreconditionRequired();
             }
@@ -112,7 +145,9 @@ public static class TerrariumEndpoints
                 request,
                 principal.GetUserId() ?? Guid.Empty,
                 expectedRowVersion,
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount(),
+                RequestActor.From(context));
 
             if (!outcome.Succeeded)
             {
@@ -120,17 +155,23 @@ public static class TerrariumEndpoints
             }
 
             SetETag(response, outcome.RowVersion);
-            return Results.Ok(outcome.Terrarium);
+            return Results.Ok(TerrariumPayload(outcome));
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.TerrariumWrite)
         .WithSummary("Update a terrarium")
-        .WithDescription("Requires the Owner role and an `If-Match` header carrying the current `ETag`. Omitted "
-                       + "fields are left unchanged; an empty `location` or `description` clears it. A stale ETag "
-                       + "answers `412 precondition_failed`.");
+        .WithDescription("Requires `terrarium.write`. Needs an `If-Match` header carrying the "
+                       + "current version. Read it first — `GET /api/v1/terrariums/{id}` answers it as both the "
+                       + "`ETag` response header and the `rowVersion` field of the body, and this route answers the "
+                       + "new one the same two ways. Omitted fields are left unchanged; an empty `location` or "
+                       + "`description` clears it. A missing or unparseable value answers `428 "
+                       + "precondition_required`, a stale one `412 precondition_failed`, and `*` accepts any "
+                       + "version. An administrator editing another account's terrarium is recorded in the audit "
+                       + "trail.");
 
         group.MapDelete("/{terrariumId:guid}", async (
             Guid terrariumId,
             bool? allowUnboundDevice,
+            HttpContext context,
             ClaimsPrincipal principal,
             TerrariumService service,
             CancellationToken cancellationToken) =>
@@ -139,15 +180,20 @@ public static class TerrariumEndpoints
                 terrariumId,
                 principal.GetUserId() ?? Guid.Empty,
                 allowUnboundDevice ?? false,
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount(),
+                RequestActor.From(context));
 
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
-        .RequireAuthorization(AuthorizationPolicies.Owner)
+        .RequireAuthorization(Permissions.TerrariumWrite)
         .WithSummary("Delete a terrarium")
-        .WithDescription("Requires the Owner role. A soft delete: readings and alert history survive. When a live "
-                       + "device is bound the request must pass `?allowUnboundDevice=true`, which detaches the "
-                       + "board; without it the answer is `409 conflict_device_bound`.");
+        .WithDescription("Requires `terrarium.write`. A soft delete: the row and its readings and "
+                       + "alert history survive, the enclosure is hidden from reads, and a later read of its id "
+                       + "answers `410 terrarium_deleted`. When a live device is bound the request must pass "
+                       + "`?allowUnboundDevice=true`, which detaches the board; without it the answer is `409 "
+                       + "conflict_device_bound`. An administrator deleting another account's terrarium is recorded "
+                       + "in the audit trail.");
 
         group.MapGet("/{terrariumId:guid}/thresholds", async (
             Guid terrariumId,
@@ -158,30 +204,62 @@ public static class TerrariumEndpoints
             var outcome = await service.EffectiveThresholdsAsync(
                 terrariumId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
-            if (!outcome.Succeeded)
-            {
-                return Problem(outcome.Problem!);
-            }
-
-            var thresholds = outcome.Thresholds!;
-
-            // Named `effectiveThresholds` on the wire, which is the field name `07-appendices/03` §4.2 and
-            // BR-10.3 use; the container's member is spelled the same so the two cannot drift.
-            return Results.Ok(new
-            {
-                terrariumId = thresholds.TerrariumId,
-                capturedAtUtc = thresholds.CapturedAtUtc,
-                timeZoneId = thresholds.TimeZoneId,
-                effectiveThresholds = thresholds.EffectiveThresholds,
-            });
+            return outcome.Succeeded ? Results.Ok(ThresholdsPayload(outcome.Thresholds!)) : Problem(outcome.Problem!);
         })
         .WithSummary("The effective band per metric")
         .WithDescription("Resolves terrarium override → species profile (BR-10.3) at this instant and reports "
                        + "`source` per metric, so a limit can be explained rather than guessed at. A metric with "
-                       + "no band for the current phase is absent. Read-only: `PUT`/`DELETE` overrides are not "
-                       + "built yet.");
+                       + "no band for the current phase is absent. The administrator may read any account's "
+                       + "terrarium; anyone else gets `403 forbidden_terrarium` for one that is not theirs.");
+
+        group.MapPut("/{terrariumId:guid}/thresholds", async (
+            Guid terrariumId,
+            UpdateThresholdsRequest request,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.UpsertThresholdsAsync(
+                terrariumId,
+                request,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken,
+                principal.CanWriteAnyAccount());
+
+            return outcome.Succeeded ? Results.Ok(ThresholdsPayload(outcome.Thresholds!)) : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(Permissions.TerrariumWrite)
+        .WithSummary("Write band overrides")
+        .WithDescription("Requires `terrarium.write`. Upserts the band for each (metric, phase) the body names and "
+                       + "answers with the resulting effective set — the same shape `GET` returns. Every band is "
+                       + "validated before anything is written, so one incoherent band changes nothing. A change "
+                       + "records a `ThresholdSnapshot`, which is how an alert already open keeps the band it was "
+                       + "judged against. A band identical to the stored one is a no-op and writes no snapshot.");
+
+        group.MapDelete("/{terrariumId:guid}/thresholds/{metric}", async (
+            Guid terrariumId,
+            string metric,
+            ClaimsPrincipal principal,
+            TerrariumService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.DeleteThresholdOverrideAsync(
+                terrariumId,
+                metric,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken,
+                principal.CanWriteAnyAccount());
+
+            return outcome.Succeeded ? Results.Ok(ThresholdsPayload(outcome.Thresholds!)) : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(Permissions.TerrariumWrite)
+        .WithSummary("Revert one metric to its profile band")
+        .WithDescription("Requires `terrarium.write`. Removes every override the terrarium holds for the metric, "
+                       + "whichever phase, and answers with the resulting effective set. Idempotent: a metric that "
+                       + "carries no override is not an error.");
 
         group.MapGet("/{terrariumId:guid}/readings/latest", async (
             Guid terrariumId,
@@ -192,7 +270,8 @@ public static class TerrariumEndpoints
             var outcome = await service.LatestReadingsAsync(
                 terrariumId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Readings) : Problem(outcome.Problem!);
         })
@@ -228,7 +307,8 @@ public static class TerrariumEndpoints
                 metricCode,
                 fromUtc,
                 toUtc,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Series) : Problem(outcome.Problem!);
         })
@@ -257,51 +337,47 @@ public static class TerrariumEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 fromUtc,
                 toUtc,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Coverage) : Problem(outcome.Problem!);
         })
         .WithSummary("Expected versus received samples")
         .WithDescription("Coverage for a window, derived from the bound device's sampling interval.");
 
-        group.MapGet("/species-profiles", async (
-            TerrariumService service,
-            CancellationToken cancellationToken) =>
-        {
-            var items = await service.ListSpeciesProfilesAsync(cancellationToken);
-            return Results.Ok(new { items });
-        })
-        .AllowAnonymous()
-        .WithSummary("List all available species profiles")
-        .WithDescription("Returns built-in and user profiles so clients can populate species selection dropdowns.");
-
-        // Also alias on top-level /api/v1/species-profiles for convenience
-        app.MapGet("/api/v1/species-profiles", async (
-            TerrariumService service,
-            CancellationToken cancellationToken) =>
-        {
-            var items = await service.ListSpeciesProfilesAsync(cancellationToken);
-            return Results.Ok(new { items });
-        })
-        .AllowAnonymous()
-        .WithTags("species")
-        .WithSummary("List all available species profiles");
-
         return app;
     }
 
     /// <summary>
-    /// Maps a read failure to RFC 7807. Only three shapes exist: the terrarium is not yours (or not there), no
-    /// device is bound so coverage has no meaning, or the caller sent something the API could not use — which
-    /// covers a bad metric and a bad range under one status, the way the contract documents them.
+    /// Shapes the effective set for the wire. It is named <c>effectiveThresholds</c> because that is the field name
+    /// `07-appendices/03` §4.2 and BR-10.3 use, and the write routes answer with the same shape as the read so a
+    /// client re-renders its editor from one payload rather than two.
+    /// </summary>
+    private static object ThresholdsPayload(TerrariumThresholds thresholds) => new
+    {
+        terrariumId = thresholds.TerrariumId,
+        capturedAtUtc = thresholds.CapturedAtUtc,
+        timeZoneId = thresholds.TimeZoneId,
+        effectiveThresholds = thresholds.EffectiveThresholds,
+    };
+
+    /// <summary>
+    /// Maps a read failure to RFC 7807. Ownership has three answers rather than BR-02.2's one: the terrarium is not
+    /// there (<c>404</c>), it is someone else's (<c>403</c>) or it was deleted (<c>410</c>). Beyond those: no device
+    /// is bound so coverage has no meaning, a live one blocks a delete, the caller's version is stale, or the caller
+    /// sent something the API could not use — which covers a bad metric and a bad range under one status, the way the
+    /// contract documents them.
     /// </summary>
     private static IResult Problem(TerrariumProblem problem)
     {
         var status = problem.Code switch
         {
+            "unauthenticated" => StatusCodes.Status401Unauthorized,
+            "forbidden_terrarium" => StatusCodes.Status403Forbidden,
             "not_found" => StatusCodes.Status404NotFound,
             "device_not_bound" => StatusCodes.Status409Conflict,
             "conflict_device_bound" => StatusCodes.Status409Conflict,
+            "terrarium_deleted" => StatusCodes.Status410Gone,
             "precondition_failed" => StatusCodes.Status412PreconditionFailed,
             _ => StatusCodes.Status400BadRequest,
         };
@@ -324,6 +400,21 @@ public static class TerrariumEndpoints
             type: $"https://smartreptile.example/problems/{problem.Code}",
             extensions: extensions);
     }
+
+    /// <summary>
+    /// Shapes one terrarium for the body, with the rowversion the client sends back as <c>If-Match</c> beside it.
+    /// </summary>
+    /// <remarks>
+    /// The value is published twice on purpose. A standards-following client reads the <c>ETag</c> header and never
+    /// looks here; Swagger UI renders no header box for this route and shows no response headers, so before the
+    /// field existed the route could be read but not legitimately updated from it (TASKS 2026-10-14, item 4).
+    /// Plain base64 rather than the quoted header form, because a quoted value has to be unescaped to be pasted
+    /// back, and <c>ParseIfMatch</c> accepts it either way.
+    /// </remarks>
+    private static TerrariumSummary TerrariumPayload(TerrariumOutcome outcome) =>
+        outcome.RowVersion is { Length: > 0 } rowVersion
+            ? outcome.Terrarium! with { RowVersion = Convert.ToBase64String(rowVersion) }
+            : outcome.Terrarium!;
 
     /// <summary>
     /// Publishes the rowversion as an <c>ETag</c>. Quoted and strong, not weak: the value is the database's own
@@ -375,10 +466,20 @@ public static class TerrariumEndpoints
         }
     }
 
-    /// <summary>An update without <c>If-Match</c>: the client has not stated which version it edited (FR-03).</summary>
+    /// <summary>
+    /// An update without <c>If-Match</c>, or with one that is not a base64 token: the client has not stated which
+    /// version it edited (FR-03).
+    /// </summary>
+    /// <remarks>
+    /// The title names the route that hands the value out, in both places it is carried: Swagger UI renders no
+    /// <c>If-Match</c> box for a route that does not declare one, so a caller reading only this answer had no way
+    /// to learn where the ETag comes from (TASKS 2026-10-14, item 4).
+    /// </remarks>
     private static IResult PreconditionRequired() =>
         Results.Problem(
-            title: "An If-Match header carrying the terrarium's current ETag is required to update it.",
+            title: "An If-Match header carrying the terrarium's current version is required to update it. Read "
+                 + "GET /api/v1/terrariums/{id} first — it returns that version as its ETag header and as the "
+                 + "rowVersion field of the body — and send it back in If-Match.",
             statusCode: StatusCodes.Status428PreconditionRequired,
             type: "https://smartreptile.example/problems/precondition_required",
             extensions: new Dictionary<string, object?>

@@ -4,7 +4,10 @@
 
 | Term (glossary) | Entity | Notes |
 |---|---|---|
-| User | `User` | Account + role; owns terrariums |
+| User | `User` | Account + its role (`RoleId`, a non-null foreign key); owns terrariums |
+| Role | `Role` | A named set of permissions; the four system roles plus custom ones (2026-10-17) |
+| Permission | `Permission` | One entry of the permission catalogue the build implements |
+| Role grant | `RolePermission` | The row that says this role holds this permission |
 | Terrarium | `Terrarium` | The monitored enclosure; 1 device max in v1 |
 | Species profile | `SpeciesProfile` | Bands + photoperiod + literature references |
 | Threshold | `Threshold` | One band for one metric in one phase |
@@ -30,6 +33,9 @@
 
 ```mermaid
 erDiagram
+  ROLE ||--o{ USER : "assigned to"
+  ROLE ||--o{ ROLE_PERMISSION : grants
+  PERMISSION ||--o{ ROLE_PERMISSION : "granted by"
   USER ||--o{ TERRARIUM : owns
   USER ||--o{ NOTIFICATION_LOG : receives
   USER ||--o{ AUDIT_LOG : acts
@@ -71,7 +77,7 @@ Types are SQL Server. `TBC` = to be confirmed. Full column list with indexes and
 | `PasswordHash` | varbinary(64) | PBKDF2-SHA256 output |
 | `PasswordSalt` | varbinary(16) | |
 | `PasswordIterations` | int | 210 000 default; enables rehash-on-login upgrades |
-| `Role` | tinyint | 0 Owner, 1 Technician, 2 Viewer |
+| `RoleId` | FK → `Role` | the account's role; non-null, so registration always writes `Owner`'s fixed id (2026-10-17) |
 | `PreferredLanguage` | varchar(2) | `vi` default |
 | `TimeZoneId` | varchar(64) | default `Asia/Ho_Chi_Minh` |
 | `QuietHoursStart/End` | time | nullable |
@@ -91,9 +97,18 @@ Types are SQL Server. `TBC` = to be confirmed. Full column list with indexes and
 | `PhotoperiodHours` | decimal(4,2) | e.g. 12.00 |
 | `LightsOnLocalTime` | time | e.g. 07:00 |
 | `Notes` | nvarchar(1000) | husbandry summary |
+| `ImageStorageKey` | nvarchar(64) NULL | the picture's key in the file store, not the bytes (2026-10-14) |
+| `ImageContentType` | nvarchar(100) NULL | media type sniffed from the bytes, e.g. `image/png` |
+| `ImageUpdatedAt` | datetimeoffset NULL | when the picture was set, replaced or removed |
 | `CreatedByUserId` | uniqueidentifier NULL | null for seeded |
 | `RowVersion` | rowversion | optimistic concurrency (UC-03 A3) |
 | `CreatedAt`/`UpdatedAt` | datetime2(3) | |
+
+The picture is the one part of a profile that is not a column: the bytes live in the file store (FR-10, added
+2026-10-14) and the row holds the key, the sniffed type and when it changed, so listing the catalogue never drags
+image bytes through a query and a profile without a picture costs nothing. `ImageContentType` is the type the bytes
+were *found* to be, never the type the uploader declared. The columns are nullable in both directions: a profile
+either has all three set or none, and a removal nulls the first two while dating the third.
 
 ### 3.3 `Threshold`
 | Column | Type | Notes |
@@ -124,9 +139,10 @@ profile row for that `(MetricId, Phase)`; resolution order is override → profi
 | `Name` | nvarchar(60) | |
 | `SpeciesProfileId` | FK | required |
 | `Location`, `Description` | nvarchar | optional |
-| `TimeZoneId` | varchar(64) | drives local-day bucketing |
+| `TimeZoneId` | varchar(64) | drives local-day bucketing; validated against the `TimeZone` catalogue and stored in its spelling (2026-10-14, TASKS item 11) |
 | `DeviceId` | uniqueidentifier NULL | 0..1 |
-| `CreatedAt`, `UpdatedAt`, `DeletedAt` | datetime2(3) | soft delete |
+| `Status` | int | `Active`/`Deleted`, **the source of truth for "has this been deleted"** (2026-10-14, TASKS item 6) |
+| `CreatedAt`, `UpdatedAt`, `DeletedAt` | datetime2(3) | `DeletedAt` is now only *when* the delete happened, never *whether* |
 | `RowVersion` | rowversion | **added 2026-10-09**: the concurrency token `PATCH` sends as `If-Match`, so a stale edit matches zero rows instead of overwriting an edit it never saw |
 
 The device is bound through `Device.TerrariumId` rather than a `DeviceId` column here (the sketch's `DeviceId`
@@ -164,18 +180,22 @@ the filtered unique index `IX_Device_TerrariumId`).
 | `IssuedByUserId` | FK NULL | null = self-registration during claim |
 
 ### 3.8 `Metric` (dictionary, seeded)
-| Id | Code | Unit | ValueType | Precision | Core? |
-|---|---|---|---|---|---|
-| 1 | `TempC` | °C | decimal | 2 | yes |
-| 2 | `HumidityPct` | %RH | decimal | 2 | yes |
-| 3 | `LightLux` | lx | decimal | 1 | yes |
-| 4 | `UvIndex` | UVI | decimal | 2 | yes |
-| 5 | `SurfaceTempC` | °C | decimal | 2 | optional |
-| 6 | `BatteryPct` | % | decimal | 1 | no (health) |
-| 7 | `RssiDbm` | dBm | int | 0 | no (health) |
+| Id | Code | Unit | ValueType | Precision | Core? | Family |
+|---|---|---|---|---|---|---|
+| 1 | `TempC` | °C | decimal | 2 | yes | species |
+| 2 | `HumidityPct` | %RH | decimal | 2 | yes | enclosure |
+| 3 | `LightLux` | lx | decimal | 1 | yes | enclosure |
+| 4 | `UvIndex` | UVI | decimal | 2 | yes | species |
+| 5 | `SurfaceTempC` | °C | decimal | 2 | optional | species |
+| 6 | `BatteryPct` | % | decimal | 1 | no (health) | enclosure |
+| 7 | `RssiDbm` | dBm | int | 0 | no (health) | enclosure |
 
 The dictionary exists so a v2 metric (e.g. `MotionIndex`, `ActivityScore`) is a **row**, not a schema
-migration (ADR-004).
+migration (ADR-004). `Family` is the alert family the metric belongs to (`AlertFamily`, 2026-10-17): the
+animal's own bands are the *species* family and everything about the box — humidity, light, the board —
+is the *enclosure's*. It is stated once, here, and written onto each alert at creation (§3.14); every
+alert with no metric at all is an enclosure alert, because a silent board is a statement about the
+enclosure rather than about the animal.
 
 ### 3.9 `TelemetrySample`
 | Column | Type | Notes |
@@ -221,12 +241,24 @@ LightDeficitHours, AlertCount, CriticalAlertCount, ComputedAt, IsLowConfidence)`
 effective thresholds for a terrarium change (UC-03 A4). Alerts and rollups reference the snapshot in
 force, so history is explainable: *"this alert used the summer bands"*.
 
+**Built 2026-10-13** (roadmap 3.1's write half, migration `20261013025001_AddThresholdSnapshots`). Two as-built
+notes, each with its reason:
+- `EffectiveThresholdsJson` holds the **resolved set**, in the same camelCase shape
+  `GET /terrariums/{id}/thresholds` returns — one entry per metric that resolved at `CapturedAtUtc`, ordered by
+  metric key — rather than the override rows. The question the table answers is "what was in force", and that answer
+  depends on the profile too, so a snapshot of the overrides alone could not answer it.
+- Deciding whether anything changed is **not** a hash comparison on this column. A band written byte-for-byte
+  identically to the stored one writes no row, while a *real* change is recorded even when the phase in force does
+  not use it — a Day band authored at midnight still moves the configuration. `ThresholdVersionHash` therefore
+  identifies a version for a future alert claim (`Alert.ThresholdSnapshotId`), it is not a uniqueness key.
+
 ### 3.14 `Alert`
 | Column | Type | Notes |
 |---|---|---|
 | `Id` | bigint identity PK | |
 | `TerrariumId`, `DeviceId` | FK | |
 | `MetricId` | FK NULL | null for `DeviceSilent` / `SensorFault` |
+| `Family` | tinyint | 0 Enclosure, 1 Species; taken from the metric at creation and `Enclosure` for an alert with no metric at all (2026-10-17, migration `20261016162814_AddAlertFamily`) |
 | `Severity` | tinyint | 1 Warning, 2 Critical (0 Info reserved) |
 | `Phase` | tinyint | as evaluated |
 | `DedupeKey` | varchar(80) | `{terrariumId}:{metric}:{severity}:{phase}` |
@@ -245,6 +277,20 @@ force, so history is explainable: *"this alert used the summer bands"*.
 ### 3.15 `MetricSilence`
 `(Id, TerrariumId, MetricId, UntilUtc, Reason, CreatedByUserId, CreatedAt, CancelledAt)`.
 
+**Built 2026-10-10** (roadmap 3.4, migration `20261010045253_AddMetricSilences`). Three as-built differences, each
+with its reason:
+
+- **`Id` is a `uniqueidentifier` and the primary key**, unlike the identity columns its neighbours use: the key is
+  known before the insert, which is what lets the audit row recording who asked for the window name it in the *same*
+  unit of work. An identity would make the trail either wrong (`0`) or a second commit, and a silence whose audit row
+  commits separately is exactly the gap the audit rule forbids (`AuditLog`'s own remark).
+- **`MetricId` is nullable, and null means every metric of the terrarium** — including its device-level alerts. The
+  contract's route takes `metricId?`, and the whole-box case is what a keeper going away for the weekend wants.
+- **Column widths and index**, read back from the schema: `Reason nvarchar(200)`, the three instants
+  `datetimeoffset(3)` like every other instant here (ADR-015), and `IX_MetricSilence_TerrariumId_UntilUtc` — because
+  "what is suppressing this terrarium right now" is the query the dashboard renders and the dispatcher asks before
+  every notification. A foreign key to `Terrarium` cascades, so a purge takes its windows with it.
+
 ### 3.16 `NotificationLog`
 `(Id, UserId, AlertId NULL, TerrariumId NULL, Channel tinyint, Title, Body, DeepLink, Status tinyint
 (0 Queued, 1 Sent, 2 Failed, 3 Suppressed), Attempts, LastError, IsRead, CreatedAt, SentAt, ReadAt,
@@ -258,9 +304,11 @@ Status tinyint (0 Available, 1 Expired, 2 Deleted))`.
 ### 3.18 `AuditLog`
 `(Id, UserId NULL, DeviceId NULL, EntityName varchar(40), EntityId nvarchar(64), Action varchar(40),
 BeforeJson nvarchar(max) NULL, AfterJson nvarchar(max) NULL, IpAddress, UserAgent, CorrelationId,
-OccurredAt)`. Actions are a closed vocabulary: `user.login`, `user.login_failed`, `user.role_changed`,
-`device.claimed`, `device.bound`, `device.unbound`, `device.secret_rotated`, `device.revoked`,
-`device.calibrated`, `threshold.created`, `threshold.updated`, `threshold.deleted`, `alert.acknowledged`,
+OccurredAt)`. Actions are a closed vocabulary: `user.login`, `user.login_failed`, `account.role_changed`,
+`role.created`, `role.updated`, `role.deleted`, `device.claimed`, `device.bound`, `device.unbound`,
+`device.secret_rotated`, `device.revoked`,
+`device.calibrated`, `threshold.created`, `threshold.updated`, `threshold.deleted`, `profile.created`,
+`profile.updated`, `profile.deleted`, `profile.duplicated`, `alert.acknowledged`,
 `alert.resolved`, `alert.silenced`, `data.purged`, `export.generated`.
 
 ### 3.19 `ExportJob`
@@ -314,12 +362,31 @@ stateDiagram-v2
   [*] --> Open: dwell satisfied outside band
   Open --> Open: excursion continues (LastObservedAt, PeakValue updated)
   Open --> Critical: value crosses critical band (severity upgrade)
-  Open --> Acknowledged: technician/owner ack
+  Open --> Acknowledged: ack (`alert.write`)
   Open --> Resolved: auto-recovery or manual resolve
   Acknowledged --> Resolved: recovery or manual resolve (reason required)
   Resolved --> [*]
 ```
 `Resolved` is terminal. Recurrence creates a new row (BR-12.1) — history is immutable.
+
+**As built (2026-10-10, roadmap 3.4).** The transitions above are implemented as a pure rule
+(`Domain/Alerts/AlertLifecycle.cs`) and the reading each one needed is stated here rather than only in the code:
+
+- **`Open → Acknowledged` is the only acknowledgement edge**, so a second acknowledgement is refused with the same
+  `409 alert_not_open` a resolved alert answers: in both cases the caller's request changed nothing, and one code is
+  one thing for a client to handle.
+- **`Open → Resolved` is allowed** — a keeper who sees the alert and knows the answer does not have to acknowledge it
+  first — and it deliberately does **not** fabricate an acknowledgement. What happened is a resolve, and the timeline
+  says so.
+- **`Resolved` is terminal for the row, and the key behind it is re-armed when the alert was a threshold alert.** The
+  `EvaluationState` window for `(terrarium, metric, phase)` is cleared, so the excursion is over for both the record
+  and the engine: the alert may only return after the band has been left for the dwell again. Without that step a
+  value that never returned inside the band would satisfy a dwell that had already expired and re-open on the very
+  next sample — a keeper who chose `Accepted` would be told the same thing one interval later. Deliberate, longer
+  suppression is what a `MetricSilence` is for (ADR-023), and the two mechanisms stay different on purpose: a resolve
+  ends an episode, a silence stops the telling.
+- **Nothing here touches severity.** Escalation is the evaluator's, and a human lowering a severity would be editing
+  the record of what the biology did.
 
 ### 4.3 Export job
 `Queued → Running → Completed | Failed | Expired` (Expired after the 24 h download window, file removed by the sweeper).
@@ -337,7 +404,64 @@ stateDiagram-v2
 | DI-07 | Rollups for a range must be recomputable from raw data for the last 48 h | Upsert logic + `TC-I-06` |
 | DI-08 | A summary with `CoveragePct < 80` is flagged `IsLowConfidence = 1` | RollupWorker |
 | DI-09 | Claim codes are single-use and expire; reuse returns the same error as unknown | ClaimService + `TC-I-13` |
-| DI-10 | Deleting a terrarium is soft, and its device is unbound first | DeleteTerrariumCommand |
+| DI-10 | Deleting a terrarium is soft, and its device is unbound first | `Terrarium.Status = Deleted` (2026-10-14; a nullable `DeletedAt` was the state until then) + the model's query filter on that column + `DeleteAsync` |
+
+### 3.x `TimeZone` (added 2026-10-14, TASKS item 11)
+
+| Column | Type | Notes |
+|---|---|---|
+| `IanaId` | nvarchar(64) PK | the IANA id itself (`Asia/Ho_Chi_Minh`), which is what `Terrarium.TimeZoneId` and `User.TimeZoneId` store (ADR-015) |
+| `DisplayName` | nvarchar(120) | label for a picker, built from the places the zone covers |
+| `CountryCode` | nvarchar(2) | ISO-3166 alpha-2, empty for a zone belonging to no country (`UTC`) |
+| `StandardUtcOffsetMinutes` | int | standard-time offset; display metadata, never used for arithmetic |
+| `SortOrder` | int | position in the curated list, ordered west to east |
+
+Reference data the code owns: `ReferenceDataSeeder.Catalogue` is the source, and re-running the seeder inserts what
+is missing and rewrites a row whose label, country, offset or position changed. The canonical spelling is the key,
+so a second way to name one zone is impossible rather than merely discouraged.
+
+### 3.y `Role`, `Permission` and `RolePermission` (added 2026-10-17, the role/permission re-framing)
+
+The account's role is a **row** now rather than an enum member: `User.RoleId` is a non-null foreign key to `Role`,
+what a role grants is a row in `RolePermission`, and `Permission` holds the catalogue of codes this build
+implements. Which permission each of the four seeded roles maps to is in `02-design/06` §3.
+
+**`Role`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `Id` | uniqueidentifier PK | **fixed for the four system roles** (`SystemRoles`), which is what lets registration assign `Owner` without a lookup that can fail on an unseeded database |
+| `Code` | nvarchar(40) | unique and case-insensitive: `Admin`, `Owner`, `Technician`, `Viewer`, or a code an administrator chose |
+| `Name`, `Description` | nvarchar(80)/(300) | free text; the code is what the seed, the clients and the matrix refer to |
+| `IsSystem` | bit | the seed and the clients name this role, so it cannot be deleted or re-coded — its permission set may still be edited |
+| `Rank` | int | display order (Admin, Owner, Technician, Viewer), **never an authorisation input** |
+| `RowVersion` | rowversion | optimistic concurrency, so two administrators editing one matrix cannot overwrite each other silently (UC-03 A3's rule) |
+| `CreatedAt`/`UpdatedAt` | datetimeoffset | |
+
+**`Permission`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `Code` | nvarchar(60) PK | the catalogue's only identity, e.g. `terrarium.write` |
+| `Group` | nvarchar(40) | Enclosure, Alerts, Account, Catalogue, Accounts, Whole system |
+| `Name`, `Description` | nvarchar(80)/(300) | what the console shows |
+| `CrossesAccounts` | bit | true for `data.read.any` / `data.write.any`; reported as `crossAccountPermissions` on a role |
+| `SortOrder` | int | position inside the group |
+
+Seeded by `IdentitySeeder` from `Permissions.cs` and never edited by a user: a permission the software does not
+implement cannot be granted by inserting a row, which is why the catalogue stays in code while the grants do not.
+
+**`RolePermission`**
+
+`(RoleId FK, PermissionCode FK)`, primary key on both. A row's existence is the whole statement, which is why the
+table has no timestamp and no soft-delete flag: revoking is deleting the row, and the audit entry is the record of
+who did.
+
+**`IdentitySeeder` reconciles the two, and is deliberately asymmetric.** A *missing* row is created with its
+shipped grants; an *existing* grant is never re-applied, because an administrator who removed a permission from a
+role has made a decision a start-up must not undo, and a permission a later release adds to the catalogue appears in
+the console granted to nobody. The rows and their grants also arrive with the migration that creates the tables, so
+the seeder is a repair rather than the only path (`02-design/06` §3).
 
 **Note on claim codes.** Codes are 8 chars from a 31-symbol unambiguous alphabet (≈ 8.5 × 10¹¹ space,
 birthday-safe for a demo fleet) and are stored **plaintext but with a hard 15-minute TTL and single-use
@@ -367,8 +491,9 @@ optional. (Test `TC-I-14` measures the real number and the report quotes it.)
 
 1. All schema changes go through EF Core migrations; `database update` runs automatically on API start
    in Development and as an explicit step in the release runbook (never in Production startup).
-2. Seed data (`Metric`, four built-in `SpeciesProfile` + their `Threshold` rows) is applied by
-   idempotent seeders keyed on `Code`/`Name`, so re-running never duplicates.
+2. Seed data (`Metric`, four built-in `SpeciesProfile` + their `Threshold` rows, the permission catalogue
+   and the four system roles) is applied by idempotent seeders keyed on `Code`/`Name`, so re-running never
+   duplicates.
 3. Backwards compatibility rule for telemetry: **new metrics may be added at any time; existing metric
    semantics never change silently.** If a metric's meaning or unit must change, a new `Metric.Code` is
    introduced and the old one is deprecated (`IsDeprecated = 1`) rather than reinterpreted — this keeps

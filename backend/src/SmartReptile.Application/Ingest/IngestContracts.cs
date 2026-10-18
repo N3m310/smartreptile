@@ -1,4 +1,5 @@
 using SmartReptile.Domain.Metrics;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Readings;
 
 namespace SmartReptile.Application.Ingest;
@@ -132,6 +133,13 @@ public sealed record IngestOutcome
     /// <summary>Metric keys dropped because this build has no such metric (rule V-10).</summary>
     public IReadOnlyList<string> DroppedMetricKeys { get; init; } = [];
 
+    /// <summary>
+    /// Alerts the batch's own evidence opened or closed — the clock-skew notice of 3.3 — so the fan-out can push
+    /// `alertChanged` once the commit has given them their identities. Empty for the batches that signal nothing,
+    /// which is almost all of them.
+    /// </summary>
+    public IReadOnlyList<AlertChange> AlertChanges { get; init; } = [];
+
     /// <summary>The expected failure, when the batch was refused.</summary>
     public IngestProblem? Problem { get; init; }
 
@@ -145,8 +153,15 @@ public sealed record IngestOutcome
     public static IngestOutcome Accepted(
         IReadOnlyList<PersistedSample> stored,
         int duplicates,
-        IReadOnlyList<string>? droppedKeys = null) =>
-        new() { Stored = stored, Duplicates = duplicates, DroppedMetricKeys = droppedKeys ?? [] };
+        IReadOnlyList<string>? droppedKeys = null,
+        IReadOnlyList<AlertChange>? alertChanges = null) =>
+        new()
+        {
+            Stored = stored,
+            Duplicates = duplicates,
+            DroppedMetricKeys = droppedKeys ?? [],
+            AlertChanges = alertChanges ?? [],
+        };
 
     /// <summary>A refused batch.</summary>
     public static IngestOutcome Rejected(string code, string message) =>

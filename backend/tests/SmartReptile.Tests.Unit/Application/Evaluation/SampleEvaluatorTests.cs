@@ -259,6 +259,36 @@ public class SampleEvaluatorTests
     }
 
     [Fact]
+    public async Task An_opened_alert_carries_the_family_its_metric_belongs_to()
+    {
+        // The evaluator is where a threshold episode becomes a row, so this is where the metric's family has to be
+        // written down: the alerts screen's two tabs read the stored value rather than looking the metric up.
+        var humidity = new ThresholdBand
+        {
+            Metric = MetricCode.HumidityPct,
+            Phase = ThresholdPhase.Any,
+            TargetMin = 50m,
+            TargetMax = 70m,
+            DwellWarnMinutes = 1,
+            DwellCritMinutes = 1,
+            RecoveryMargin = 0.5m,
+        };
+
+        _store.Add(Context(Band(humidity)));
+        _store.EpisodeValues[MetricCode.HumidityPct] = [80m];
+
+        await _evaluator.EvaluateAsync([Sample(1, [(MetricCode.HumidityPct, 80m)])], CancellationToken.None);
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        await _evaluator.EvaluateAsync(
+            [Sample(2, [(MetricCode.HumidityPct, 80m)], Noon.AddMinutes(2))],
+            CancellationToken.None);
+
+        _store.AddedAlerts.Single().Family.Should().Be(
+            AlertFamily.Enclosure,
+            "humidity is the enclosure's own condition rather than the animal's band");
+    }
+
+    [Fact]
     public async Task A_terrarium_that_no_longer_exists_is_skipped()
     {
         // Nothing registered: the terrarium was deleted between the commit and this pass.

@@ -32,22 +32,127 @@ mTLS (both recorded as accepted limitations / v1.1 candidates).
 
 ## 3. Roles and permissions
 
-| Action | Owner | Technician | Viewer |
-|---|---|---|---|
-| View dashboard, history, summaries, exports | ✅ | ✅ | ✅ |
-| Acknowledge / resolve alerts | ✅ | ✅ | ❌ |
-| Silence a metric (≤ 24 h) | ✅ | ✅ | ❌ |
-| Create/edit/delete terrarium | ✅ | ❌ | ❌ |
-| Claim / rebind / revoke device, rotate secret | ✅ | ❌ | ❌ |
-| Edit thresholds and overrides | ✅ | ❌ | ❌ |
-| Set calibration offsets | ✅ | ❌ | ❌ |
-| Change roles, invite users | ✅ | ❌ | ❌ |
-| Purge data, delete account | ✅ | ❌ | ❌ |
-| View audit log for own terrariums | ✅ | ⚠ read-only | ❌ |
+**Revised 2026-10-17: the matrix is data.** The three-member `UserRole` enum on `User.Role` is gone. A role is a row
+in `Role`, a permission is a row in `Permission`, and the grant between them is a row in `RolePermission`. A
+deployment can therefore re-band a role without a release, and an administrator's edit is a write an audit row
+records. What stayed in code is the **catalogue** — the sixteen things the software can be asked to do, in
+`Permissions.cs` — because a permission the software does not implement cannot be granted by inserting a row.
 
-Implementation: a single `TerrariumAccessRequirement` authorisation handler resolves
-`(userId, terrariumId) → role` from the membership table, so an endpoint never has to remember the rule
-itself. Foreign resources return **`404`** rather than `403` to prevent id existence probing (BR-02.2).
+| Code | Group | What granting it allows (the caller's own account, unless marked) |
+|---|---|---|
+| `terrarium.read` | Enclosure | Read the caller's own enclosures, their bands and their readings. |
+| `terrarium.write` | Enclosure | Create, edit and delete the caller's own enclosures, including per-enclosure threshold overrides. |
+| `device.read` | Enclosure | Read the caller's own boards and their health. |
+| `device.write` | Enclosure | Rename or remove a board the caller owns. |
+| `device.provision` | Enclosure | Claim a board, pair one by MAC address, rotate its secret or revoke it. |
+| `alert.read` | Alerts | Read the alerts of the caller's own enclosures, of **both families**. |
+| `alert.write` | Alerts | Acknowledge and resolve alerts. |
+| `silence.write` | Alerts | Open a time-boxed silence window and cancel one early. |
+| `notification.read` | Alerts | Read the caller's own notification inbox. |
+| `audit.read` | Account | Read the audit rows of the caller's own account and enclosures. |
+| `species.read` | Catalogue | Read the shared species-profile catalogue. |
+| `species.write` | Catalogue | Author the shared species-profile catalogue — the built-in bands every enclosure is judged against (FR-10). |
+| `user.read` | Accounts | See accounts other than the caller's own. |
+| `user.manage` | Accounts | Create an account, edit it, reset its password, disable, re-enable, change its role or delete it. |
+| `data.read.any` | Whole system | **Cross-account:** read every account's enclosures, boards and alerts — the administrator's get-all dashboard. |
+| `data.write.any` | Whole system | **Cross-account:** edit and delete any account's enclosure. |
+
+### 3.1 Which data each role maps to
+
+The four system roles ship with these grants. Their ids are fixed in `SystemRoles` (a deterministic id is what lets
+registration assign `Owner` without a lookup that can fail on an unseeded database), and a migration writes them, so
+a fresh deployment is complete before the application has run once.
+
+| Role | Rank | Permissions | Reach |
+|---|---|---|---|
+| **Admin** | 0 | all sixteen | every account's data (`data.read.any`, `data.write.any`) plus the account and catalogue writes |
+| **Owner** | 1 | 11 | the caller's own enclosures, boards, alerts, inbox and audit trail; species read-only |
+| **Technician** | 2 | 7 | the caller's own enclosures and boards read-only, plus the alert and silence writes |
+| **Viewer** | 3 | 5 | the caller's own data, read-only |
+
+Read as a ladder, each step adds exactly what a reader would expect — Viewer → Technician adds the two alert writes,
+Technician → Owner adds the enclosure and board writes plus the audit read, Owner → Admin adds the account
+permissions, the catalogue write and the two cross-account ones. **Admin is therefore a superset of Owner by
+construction**, which is what "Admin = toàn bộ dữ liệu" means as a fact about this seed rather than as a branch in a
+service.
+
+### 3.2 The scope decision: global, not membership
+
+The matrix answers *what* a role may do. It does not answer *whose* data is returned — that is not a role question at
+all:
+
+- **Ownership is a column, not a table.** A terrarium belongs to the account in `Terrarium.UserId`, and every
+  keeper-facing query is scoped to it in the store. There is deliberately no membership table: the product has one
+  keeper per enclosure, so a table would exist to express a relationship that is already a column.
+- **The cross-account case is a separate surface, not a flag on those queries.** `/api/v1/admin/*` is answered by a
+  store (`EfAdminStore`) that has no owner parameter, so a keeper's scoped read cannot be widened by a mistake in a
+  service. The only place a role widens a keeper-facing read is `TerrariumService.IsMemberAsync(..., mayReachAnyAccount)`,
+  driven by `data.read.any`, which is why those two codes are marked *cross-account* in the catalogue and reported as
+  `crossAccountPermissions` on every role.
+- **Editing shared data is not the same right as editing one's own.** `species.write` is Admin-only: the catalogue is
+  data every terrarium is judged against, so the keeper who may re-band their own enclosure may not rewrite the
+  built-ins (BR-10.1, FR-10 A2). A keeper who needs bands the built-ins do not cover stays inside their own account
+  with per-terrarium overrides (BR-10.3).
+
+**Consequences for the two rows the earlier matrix drew differently.** Account management (`/users/*`) moved from
+`Owner` to `user.manage`, so an administrator manages accounts and a keeper does not. `audit.read` stayed with the
+account's own trail and is held by Owner and Admin; a Technician no longer reads it. `species.write` remains
+Admin-only. Claim / rotate / revoke / rebind remain `device.provision`, which Owner holds and a Technician does not.
+
+### 3.3 How the API enforces it
+
+A **policy name is a permission code**. `AuthorizationPolicies.AddPermissionPolicies()` registers one policy per
+catalogue entry and each endpoint names the code it needs, so a route never repeats a rule and a role name appears
+nowhere in the API. A custom role created through the console authorises through the same policies with no code
+change — which is the point of the table. `silence.write` is named by the two silence writes and by nothing else:
+opening a silence is a decision about being told rather than about an alert's lifecycle, so a deployment that wants
+an account which may acknowledge but not go quiet can say so with that one grant.
+The API's OpenAPI descriptions name the same codes: a refusal there reads "Requires `terrarium.write`.", not
+"Requires the Owner role."
+
+The client side follows the same rule: `web/src` and `app/lib` gate screens on permission codes
+(`hasPermission('terrarium.write')`), never on a role name, because the matrix is a deployment's decision and a
+screen keyed on `Owner` would break the first time somebody re-banded a role.
+
+**The token carries the answer.** The access token holds one `perm` claim per code plus `role` (for display only —
+nothing authorises on it) and `ver` = `2`. `GET /auth/me` and the session body return `roleId` and `permissions`, so a
+client can render its navigation without a second call.
+
+**Session staleness is bounded and documented.** A role change, a password reset and a delete end the account's
+refresh tokens, so the next refresh fails rather than silently keeping the old rights. An edit to the **matrix**
+itself does *not* end sessions: accounts holding the role keep their tokens until they expire, so a revocation takes
+effect within one access-token lifetime (15 minutes). The console warns about this rather than hiding it.
+
+### 3.4 The guards, and the account that cannot be registered into existence
+
+- **No self-change.** `409 self_change_refused` for any administrative action on the caller's own account, because an
+  administrator who disables or demotes themselves is the one change nobody else may undo.
+- **Never the last administrator.** `409 last_administrator_refused` when a change would leave nobody able to manage
+  accounts. It is checked by *counting holders of `user.manage`* rather than by comparing role names, so a deployment
+  that re-banded or split the administrator role is still protected — the same check runs before a role edit that
+  would remove the permission from its last holder.
+- **In use.** `409 account_in_use` on a purge that would orphan enclosures, boards or alerts; those rows would be
+  data no screen could explain.
+- **Admin cannot be registered into existence.** `POST /auth/register` always produces an `Owner`. The one account
+  that holds `Admin` is seeded at start-up from the `Admin` configuration section (`Admin:Username`, `Admin:Email`,
+  `Admin:Password`, empty by default), which is also the credential's owner of record — editing `Admin:Password` and
+  restarting rotates it. A deployment that configures no administrator has no account that can author the catalogue
+  or manage accounts; promoting a second administrator through `/users` is how the last-admin guard is made
+  survivable.
+
+`IdentitySeeder` reconciles the catalogue and the four roles on every start-up, and it is deliberately asymmetric:
+a **missing** row is created with its shipped grants, and an **existing** grant is never re-applied. An
+administrator who removes `audit.read` from `Technician` has made a decision, and a start-up that re-applied the
+defaults would silently undo it. A new permission appears in the console and is granted to nobody, because widening
+a role's reach is not a decision a start-up may take.
+
+**The terrarium routes now answer three ways instead of one (2026-10-14, TASKS item 3).** A missing terrarium is
+`404 not_found`, one belonging to another account is `403 forbidden_terrarium`, and a soft-deleted one is
+`410 terrarium_deleted`. BR-02.2's uniform `404` exists to stop ids being probed, and the review's position is that a
+keeper who mistyped an id and a keeper looking at somebody else's enclosure need different next steps — the trade is
+accepted for **this resource only**, and recorded in `05-release/03` §5 so nobody assumes the other resources agree.
+Alerts, silences, species profiles and devices keep the uniform `404`. The realtime hub keeps it too, deliberately:
+a socket that names ids would otherwise become the probing surface the REST routes no longer are.
 
 ## 4. Device authentication
 
@@ -114,6 +219,28 @@ create junk rows but can never read or write other tenants' data.
 **Claim-code properties:** 8 chars from a 31-symbol alphabet excluding `0/O/1/I/L` (see
 `07-appendices/03` §2.1), 15-minute TTL, regenerated while in provisioning mode, single-use, and —
 crucially — **the same error is returned for unknown, expired and consumed codes** (BR-04.3).
+
+**The lower-trust pairing path (built 2026-10-14, TASKS item 8): `POST /devices/claim-by-mac`.** A claim code proves
+the caller has the board in front of them; a MAC proves nothing — it is printed on the case, broadcast on every
+network the board joins, and guessable in bulk. The route exists because a keeper holding a board whose screen has
+failed should not be stuck, and it is constrained so the weakness stays bounded:
+
+| Aspect | Decision |
+|---|---|
+| Who may use it | `Owner` only — the same role the code path requires, so it is an alternative to reading a screen rather than a way around authentication |
+| Which boards | Only one that has already self-registered (chip id and MAC on file, no secret issued yet) **and** is unbound and unrevoked (`DeviceProvisioningRules.IsClaimableByMac`) |
+| Matching | The address is normalised — `AA:BB:CC:DD:EE:FF`, `aa-bb-…`, `AABB.CCDD.EEFF` and bare hex all name one board — and compared case-insensitively against the stored colon form, which self-registration's own validator guarantees |
+| Failures | One `404 device_not_found` for unknown, already bound and revoked alike, so the route cannot be used to test whether an address belongs to this fleet |
+| Evidence | The audit row is `device.claimed` with `"method":"mac_address"`; the code path writes `"method":"claim_code"`, so the trail says how each board was bound |
+| Default | Unchanged: the code path remains the documented flow, and the route description says in as many words that this one is lower-trust |
+
+**Binding a board while creating its enclosure (built 2026-10-14, TASKS item 2).** `POST /terrariums` accepts
+`deviceId` or `macAddress`, and that path goes through the same rules and the same staging step as the two claim
+routes: one implementation of "what a binding is", reached from three entry points. It differs in one respect — the
+enclosure being created and the binding commit in **one unit of work**, so a failure between them cannot leave either
+an enclosure whose board nobody can use or a board pointing at an enclosure that was never written. The secret is
+returned once on that response, because binding without a credential would leave a board that can neither publish nor
+be claimed again.
 
 ## 6. Transport and platform security
 

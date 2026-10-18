@@ -18,7 +18,7 @@ technical terms kept in place, figures and code comments in English.
 | Case study / problem analysis | R2.1–R2.3 | Photos of the terrarium, persona table, competitor/product comparison |
 | Business analysis (users, value, feasibility) | R2.4–R2.6 | Personas, USP statement, cost BOM, feasibility table |
 | System design & architecture | R4 | Layered architecture diagram, component diagram, sequence diagram of one sample |
-| Requirements list (FR/NFR) | R3 | FR-01…18, NFR-01…12 with acceptance criteria |
+| Requirements list (FR/NFR) | R3 | FR-01…19, NFR-01…12 with acceptance criteria |
 | UI flow | R3.6, R4.4, R6.6 | Navigation graph, wireframes, real screenshots |
 | Database / API design | R4.3, R4.5 | ERD, table reference, endpoint table, MQTT topic table |
 | Implementation (source + comments) | R6 | Key code excerpts with explanations; link to the source archive |
@@ -62,7 +62,7 @@ are out (ADR-008) — plus the reason: monitoring failure must never endanger th
 
 ## R3 — Requirements
 **R3.1 Requirement ids and conventions.**
-**R3.2 Functional requirements.** FR-01…FR-18 with priority, rules and acceptance criteria (compressed from
+**R3.2 Functional requirements.** FR-01…FR-19 with priority, rules and acceptance criteria (compressed from
 `01-product/03`; the full text stays in the doc set).
 **R3.3 Non-functional requirements.** NFR-01…NFR-12 with budgets and verification method.
 **R3.4 Threshold provenance.** How the bands were derived, the citation table, and the statement of what is
@@ -107,7 +107,8 @@ and seeding policy.
 **R6.4 App state management.** Provider graph, `TelemetryProvider` excerpt, the three design decisions in
 `03-implementation/05` §2 (derived freshness, one notify per batch, injectable clock), offline behaviour table.
 **R6.5 Real-time path.** SignalR setup, reconnect + re-fetch rule, degraded polling mode.
-**R6.6 UI/UX implementation.** Screenshot gallery (Home, Alerts detail, Thresholds, Claim, Report, Wallboard),
+**R6.6 UI/UX implementation.** Screenshot gallery (Home, Alerts detail, Thresholds, Claim, Report, Wallboard,
+Admin — overview / accounts / roles),
 plus the "never render a value without its timestamp" rule and how the widget signature enforces it.
 **R6.7 Web.** Structure, and the **three** decisions that produced it (`ADR-017`, `ADR-018`, `ADR-019`). Tell it in
 the order it happened, because the reversal is the interesting part: `ADR-017` split `web/` in two, `ADR-018` kept
@@ -138,7 +139,7 @@ running ticker" class of lesson), what is *not* automated and why.
 
 ## R8 — Security and privacy
 **R8.1 Assets and threats.** Table from `02-design/06` §1.
-**R8.2 Authentication and authorisation.** User auth, device auth, RBAC matrix, 404-vs-403 policy.
+**R8.2 Authentication and authorisation.** User auth, device auth, the permission matrix (`02-design/06` §3: roles and permissions as rows, one policy per code), 404-vs-403 policy.
 **R8.3 Provisioning flow.** Sequence diagram, claim-code properties, anti-enumeration behaviour, the
 pairing-token decision (TBC-4 → `ADR-016`).
 **R8.4 Transport and platform security.** TLS, headers, rate limits, secrets handling, dependency scanning.

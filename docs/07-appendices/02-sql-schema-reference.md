@@ -5,7 +5,7 @@ Core migrations (`03-implementation/03` §2). This appendix is the human-readabl
 `DbContext` configuration and the reference for writing report queries by hand.
 
 Conventions: `Id` = `uniqueidentifier` (Guid) unless stated; `bigint identity` for high-volume tables;
-`rowversion` for optimistic concurrency on authored configuration; soft delete (`DeletedAt`) only on
+`rowversion` for optimistic concurrency on authored configuration; soft delete (`Terrarium.Status`) only on
 `Terrarium`.
 
 ---
@@ -14,9 +14,9 @@ Conventions: `Id` = `uniqueidentifier` (Guid) unless stated; `bigint identity` f
 
 | # | Table | Purpose | Growth | Retention |
 |---|---|---|---|---|
-| 1 | `User` | Accounts, roles, notification preferences | tiny | account lifetime |
+| 1 | `User` | Accounts and notification preferences; the role is a foreign key to `Role` | tiny | account lifetime |
 | 2 | `RefreshToken` | Rotating refresh tokens (hashed) | small | 30 days |
-| 3 | `Terrarium` | Monitored enclosure | tiny | soft delete |
+| 3 | `Terrarium` | Monitored enclosure; `Status` (`Active`/`Deleted`) is the soft-delete state | tiny | soft delete |
 | 4 | `SpeciesProfile` | Bands + photoperiod + sources | tiny | account lifetime |
 | 5 | `Threshold` | Band per (profile, metric, phase) | small | account lifetime |
 | 6 | `ThresholdOverride` | Per-terrarium band override | small | account lifetime |
@@ -38,10 +38,20 @@ Conventions: `Id` = `uniqueidentifier` (Guid) unless stated; `bigint identity` f
 | 22 | `Snapshot` | Camera still (optional) | medium | 7 days |
 | 23 | `PasswordResetCode` | Single-use password-reset codes (hashed) | tiny | 30-minute TTL; consumed, not swept |
 | 24 | `DeviceEvent` | Raw device-reported events (boot, sensor fault, buffer overflow, clock, calibration) | low | with the raw-data window (90 days); the sweeper of 5.3 must include it |
+| 25 | `TimeZone` | The IANA time-zone catalogue a picker reads and both stored zone ids are validated against (added 2026-10-14, TASKS item 11) | static | seeded; `ReferenceDataSeeder` owns it |
+| 26 | `Role` | A named set of permissions; the four the product ships are system roles (added 2026-10-17, role/permission re-framing) | static | seeded / administrator-managed |
+| 27 | `Permission` | The permission catalogue, one row per thing the software can be asked to do | static | seeded from `Permissions.All` |
+| 28 | `RolePermission` | The grant matrix: this role grants this code | static | seeded, then administrator-managed |
 
 Two columns are concurrency tokens rather than data: `Terrarium.RowVersion` (added 2026-10-09 for FR-03's
 `If-Match` round trip) and `EvaluationState.RowVersion`. Both are SQL Server `rowversion` columns, so they are
 maintained by the database and cannot be written by an `INSERT`/`UPDATE` statement that names them.
+
+`TimeZone` is keyed by the IANA id itself (`Asia/Ho_Chi_Minh`) rather than by a surrogate, because that string is
+what `Terrarium.TimeZoneId` and `User.TimeZoneId` already store (ADR-015) — a surrogate would add a translation step
+to every read and let the two columns disagree. The `Status` column on `Terrarium` is the state the model's query
+filter reads; `DeletedAt` remains beside it as the record of *when*, and the migration that added the column
+back-filled it from that timestamp so no previously deleted enclosure came back to life (TASKS item 6).
 
 ---
 
@@ -126,8 +136,14 @@ with `IX_Health_Device_Recorded (DeviceId, RecordedAt DESC)`.
 ## 3. Configuration and identity tables
 
 ### 3.1 `User`
-`(Id, Username nvarchar(32), Email nvarchar(256), PasswordHash varbinary(64), PasswordSalt varbinary(16), PasswordIterations int, RecoveryCodeHash varbinary(32) null, RecoveryCodeSalt varbinary(16) null, RecoveryCodeIssuedAt null, Role tinyint, PreferredLanguage varchar(2), TimeZoneId varchar(64), QuietHoursStart time null, QuietHoursEnd time null, MinNotifySeverity tinyint, ChannelsFcm bit, ChannelsEmail bit, FcmToken nvarchar(256) null, CreatedAt, LastLoginAt null, DisabledAt null)`
-Unique: `Username` (CI), `Email`.
+`(Id, Username nvarchar(32), Email nvarchar(256), PasswordHash varbinary(64), PasswordSalt varbinary(16), PasswordIterations int, RecoveryCodeHash varbinary(32) null, RecoveryCodeSalt varbinary(16) null, RecoveryCodeIssuedAt null, RoleId uniqueidentifier FK, PreferredLanguage varchar(2), TimeZoneId varchar(64), QuietHoursStart time null, QuietHoursEnd time null, MinNotifySeverity tinyint, ChannelsFcm bit, ChannelsEmail bit, FcmToken nvarchar(256) null, CreatedAt, LastLoginAt null, DisabledAt null)`
+Unique: `Username` (CI), `Email`. Index: `IX_User_RoleId`.
+
+`RoleId` replaced the `Role` tinyint column on 2026-10-17 (migration `20261016161825_AddRolesAndPermissions`): the
+role is a row in `Role` now, and the foreign key is `ON DELETE RESTRICT` so deleting a role cannot silently delete
+the accounts holding it — the role API refuses such a delete, and this is the database saying the same thing. The
+migration back-filled the column from the old enum (0 `Owner`, 1 `Technician`, 2 `Viewer`, 3 `Admin`, anything else
+`Owner`), which is why no account changed hands during the upgrade.
 
 The three `RecoveryCode*` columns are the backup recovery code issued at registration (`03-implementation/07`, the
 password-recovery block). They are nullable on purpose: an account created before recovery codes existed has none,
@@ -140,8 +156,13 @@ unlike the lookup-keyed `PasswordResetCode.CodeHash` in §3.13.
 Index: `(UserId, FamilyId)`, unique `(TokenHash)`.
 
 ### 3.3 `SpeciesProfile`
-`(Id, Name nvarchar(80), ScientificName nvarchar(120), ClimateZone tinyint, IsBuiltIn bit, PhotoperiodHours decimal(4,2), LightsOnLocalTime time, LightThresholdLux int, MinLightHoursPerDay decimal(4,2), Notes nvarchar(1000), CreatedByUserId null, RowVersion rowversion, CreatedAt, UpdatedAt)`
+`(Id, Name nvarchar(80), ScientificName nvarchar(120), ClimateZone tinyint, IsBuiltIn bit, PhotoperiodHours decimal(4,2), LightsOnLocalTime time, LightThresholdLux int, MinLightHoursPerDay decimal(4,2), Notes nvarchar(1000), ImageStorageKey nvarchar(64) null, ImageContentType nvarchar(100) null, ImageUpdatedAt datetimeoffset null, CreatedByUserId null, RowVersion rowversion, CreatedAt, UpdatedAt)`
 Unique: `(Name)` where `CreatedByUserId IS NULL` (built-ins unique); user profiles unique per `(CreatedByUserId, Name)`.
+
+`ImageStorageKey` names a file in the store `Storage:RootPath` points at (migration `20261014010606_AddSpeciesProfileImage`,
+2026-10-14) — the picture's bytes are deliberately not in this table, so no catalogue read pays for them.
+`ImageContentType` is the media type sniffed from those bytes when they arrived; `ImageUpdatedAt` is when the
+picture was last set, replaced or removed and is the cache-busting value the API publishes beside the image URL.
 
 ### 3.4 `Threshold` / `ThresholdOverride`
 `Threshold`: `(Id, SpeciesProfileId FK, MetricId FK, Phase tinyint /*0 Any, 1 Day, 2 Night*/, TargetMin decimal(9,3), TargetMax, CriticalMin null, CriticalMax null, DwellWarnMinutes smallint, DwellCritMinutes smallint, RecoveryMargin decimal(9,3), SourceRef nvarchar(300), SourceUrl nvarchar(400) null, Enabled bit)`
@@ -171,17 +192,26 @@ Index: `(DeviceId, RevokedAt)`.
 | 6 | `BatteryPct` | Battery | % | 1 | 0 | 100 | 0 |
 | 7 | `RssiDbm` | Wi-Fi signal | dBm | 0 | −120 | 0 | 0 |
 
+**Which alert family each metric belongs to is a property of the dictionary, not of a row** (2026-10-17):
+`MetricDefinition.Family` in `Metrics/MetricDictionary.cs` maps 1, 4 and 5 to `Species` — the animal's thermal and
+UV bands — and 2, 3, 6 and 7 to `Enclosure`, the enclosure's own condition and the board measuring it. The dictionary
+is the one place the split is written down; `Alert.Family` is filled from it when an episode opens, in the same way
+`BandMin`/`BandMax` are denormalised, because a device-level alert has no metric to derive a family from. See
+`02-design/05` §2 for the product rule.
+
 ### 3.8 `Alert`
 | Column | Type | Notes |
 |---|---|---|
 | `Id` | bigint identity PK | |
 | `TerrariumId`, `DeviceId` | FK | |
 | `MetricId` | int FK null | null for `DeviceSilent`/`SensorFault` |
+| `Family` | tinyint | 0 `Enclosure` (humidity, light, board), 1 `Species` (temperature, UV, basking surface) |
 | `Severity` | tinyint | 1 Warning, 2 Critical |
 | `Phase` | tinyint | evaluated phase |
 | `DedupeKey` | varchar(80) | `{terrariumId}:{metric}:{severity}:{phase}` |
 | `State` | tinyint | 0 Open, 1 Acknowledged, 2 Resolved |
-| `TriggeringValue`, `PeakValue` | decimal(9,3) null | peak is the max (hot) or min (cold) during the episode || `BandMin`, `BandMax` | decimal(9,3) null | band in force (denormalised for the alert card) |
+| `TriggeringValue`, `PeakValue` | decimal(9,3) null | peak is the max (hot) or min (cold) during the episode |
+| `BandMin`, `BandMax` | decimal(9,3) null | band in force (denormalised for the alert card) |
 | `Source` | tinyint | 0 Threshold, 1 DeviceSilent, 2 SensorFault, 3 ClockSkew |
 | `TriggeredAt`, `LastObservedAt`, `AcknowledgedAt`, `ResolvedAt` | datetime2(3) | |
 | `AcknowledgedByUserId`, `ResolvedByUserId` | FK null | |
@@ -195,12 +225,21 @@ Indexes: `IX_Alert_Terrarium_State_Triggered` `(TerrariumId, State, TriggeredAt 
 `Open` (a new episode, `TriggeredAt` back-dated to the excursion's start), `Touch` (`LastObservedAt` and an outward
 `PeakValue`), escalation (`Severity` and therefore `DedupeKey` become Critical on the same row) and `Resolve`
 (`State`, `ResolvedAt`, `ResolvedReason = Recovered`). Acknowledgement, manual resolution and the other reasons are
-the lifecycle API's (3.4), `Device`-level sources are 3.3's, and `ThresholdSnapshotId` is 3.1's remaining half —
-still null. **`Message` is left null by design**: §02-design/05 §7 composes the notification text from these fields
-at render time and localises it per user (ADR-013), so an English sentence here would be a second, unlocalisable
-copy of a message the clients already know how to build. `TriggeringValue` is the reading that started the episode
-and `PeakValue` the episode's worst reading so far — both filled from the stored `MetricReading` rows of the dwell
-window when the alert opens, since the excursion begins before the alert does.
+the lifecycle API's (**built 2026-10-10, roadmap 3.4**: `State`, `AcknowledgedAt`, `AcknowledgedByUserId`,
+`ResolvedAt`, `ResolvedByUserId` and `ResolvedReason`, each with one audit row and a re-armed dwell key — see
+`02-design/02` §4.2), and `Device`-level sources are 3.3's. **`Message` is left null by design**: §02-design/05 §7
+composes the notification text from these fields at render time and localises it per user (ADR-013), so an English
+sentence here would be a second, unlocalisable copy of a message the clients already know how to build. The
+resolution note a keeper sends travels on the audit entry for the same reason — this row has no column for prose, and
+the reason it does keep is the machine-readable one the report groups by. `TriggeringValue` is the reading that
+started the episode and `PeakValue` the episode's worst reading so far — both filled from the stored `MetricReading`
+rows of the dwell window when the alert opens, since the excursion begins before the alert does.
+
+**One row of the table above is a sketch rather than a column: `ThresholdSnapshotId`.** No built table has it and the
+`Alert` entity maps no such property — the 2026-10-07 database snapshot lists no such column, and until 3.1's
+remaining half creates the snapshot table there is nothing for a foreign key to point at. It is left in the sketch
+deliberately, as the shape 3.1 will add, but nothing reads or writes it, and `GET /alerts/{id}` therefore carries the
+band the alert denormalised and no snapshot reference (`07-appendices/03` §4.5 says so in the as-built note).
 
 
 ### 3.9 `EvaluationState`
@@ -230,8 +269,29 @@ properties of this table are worth knowing before touching the engine:
 
 
 ### 3.10 `NotificationLog`
-`(Id bigint, UserId FK null, AlertId bigint null, TerrariumId null, Channel tinyint /*0 InApp,1 Fcm,2 Smtp*/, Title nvarchar(160), Body nvarchar(500), DeepLink nvarchar(200), Status tinyint /*0 Queued,1 Sent,2 Failed,3 Suppressed*/, SuppressedReason varchar(40) null, Attempts tinyint, LastError nvarchar(300) null, IsRead bit, CreatedAt, SentAt null, ReadAt null)`
-Index: `(UserId, CreatedAt DESC)`, `(AlertId)`.
+`(Id bigint identity, UserId uniqueidentifier null, AlertId bigint null, TerrariumId uniqueidentifier null, Channel tinyint /*0 InApp,1 Fcm,2 Smtp*/, Title nvarchar(160), Body nvarchar(500), DeepLink nvarchar(200) null, Status tinyint /*0 Queued,1 Sent,2 Failed,3 Suppressed*/, SuppressedReason nvarchar(40) null, Attempts tinyint, LastError nvarchar(300) null, IsRead bit, CreatedAt datetimeoffset(3), SentAt datetimeoffset(3) null, ReadAt datetimeoffset(3) null, Step tinyint)`
+Index: `(UserId, CreatedAt DESC)`, `(AlertId)`, `(TerrariumId, CreatedAt)`.
+
+Created by `20261016143949_AddNotificationLog` (roadmap 3.5, 2026-10-16). Four things to read off the built table
+rather than the sketch:
+
+- **The character columns are `nvarchar`** and the instants are `datetimeoffset(3)`, like every other table here
+  (`varchar` is this catalogue's shorthand).
+- **`Step` is a column the sketch did not have.** §02-design/05 §6 assembles "the full response timeline of one
+  incident" out of these rows, and the alert row deliberately keeps no escalation instant (escalation edits the row
+  in place, DI-01). Without the step, a 30-minute escalation and an hourly repeat are indistinguishable — both are
+  "a second `Sent` row for the same alert" — so neither the timeline nor the ladder could be built out of them.
+  `0` is the first delivery, `1`–`3` are the ladder's 30 / 60 / 120 minutes, and a digest carries `0`.
+- **There is no foreign key**, to `Alert` or to anything else. The same rule `AuditLog` follows: the record of what a
+  keeper was told must not disappear with the alert it was about, so `AlertId` is a plain column and a future
+  retention job cannot cascade the delivery history away.
+- **`Attempts` counts the row, it does not accumulate.** The table is one row *per attempt* (§1), so this is the
+  attempt number this row records — `1`, `2` or `3` — and a suppressed row carries `0` because nothing was
+  attempted. The retry schedule is therefore readable from the rows' own `CreatedAt` values rather than from a
+  counter that says the retries happened somewhere.
+
+`TerrariumId` is part of an index because both of the questions the dispatcher asks on every sweep are scoped by
+terrarium inside a window: the hourly cap's count and the digest's grouping.
 
 ### 3.11 `AuditLog`
 `(Id bigint identity, UserId uniqueidentifier null, DeviceId uniqueidentifier null, EntityName nvarchar(40), EntityId nvarchar(64), Action nvarchar(40), BeforeJson nvarchar(max) null, AfterJson nvarchar(max) null, IpAddress nvarchar(45), UserAgent nvarchar(200) null, CorrelationId nvarchar(64) null, OccurredAt datetimeoffset(3))`
@@ -283,6 +343,74 @@ order", which is the query task 3.3's derived signals ask.
 topic the broker accepts and then drops looks like it worked. The event is kept whole rather than shredded into a
 column per type, so a signal rule added in 3.3 can be re-evaluated against history instead of against whatever the
 rule was when the message arrived.
+
+### 3.15 `MetricSilence`
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `Id` | uniqueidentifier PK | no | not an identity column: the key is known before the insert, so the audit row that records who asked for the window can name it in the same unit of work |
+| `TerrariumId` | uniqueidentifier FK → `Terrarium` (cascade) | no | |
+| `Metric` | tinyint | **yes** | null means every metric of the terrarium, device-level alerts included |
+| `UntilUtc` | datetimeoffset(3) | no | at most 24 h after `CreatedAt` — a rule, not a constraint (`MetricSilencePolicy`) |
+| `Reason` | nvarchar(200) | no | required; the sentence that makes a suppression accountable |
+| `CreatedByUserId` | uniqueidentifier | no | who silenced it (no FK: the trail outlives the account) |
+| `CreatedAt` | datetimeoffset(3) | no | |
+| `CancelledAt` | datetimeoffset(3) | yes | non-null means cancelled early; the row is never deleted |
+
+**Index** `IX_MetricSilence_TerrariumId_UntilUtc` `(TerrariumId, UntilUtc)` — "what is suppressing this terrarium
+right now", which the dashboard renders and the dispatcher asks before every notification.
+
+**Built 2026-10-10** by `20261010045253_AddMetricSilences` (roadmap 3.4). The catalogue has listed this table since
+the first draft; until now nothing wrote it, so a keeper had no way to tell the system that they already knew about
+a condition. Two of the three as-built differences from the sketch are recorded in `02-design/02` §3.15; the third is
+that `Metric` is nullable in the built schema although the sketch shows a plain `MetricId` — the route's
+`metricId?` is what the reading "every metric" comes from.
+
+---
+
+### 3.16 `Role`, `Permission`, `RolePermission` (the permission matrix)
+Added 2026-10-17 by migration `20261016161825_AddRolesAndPermissions`; `02-design/06` §3 is the design.
+
+`Role`: `(Id uniqueidentifier PK, Code nvarchar(40), Name nvarchar(80), Description nvarchar(300), IsSystem bit, Rank int, RowVersion rowversion, CreatedAt, UpdatedAt)`
+Unique: `IX_Role_Code` on `Code` (case-insensitive by the database's collation, so `Admin` and `admin` cannot be two
+roles).
+
+`Permission`: `(Code nvarchar(60) PK, Group nvarchar(40), Name nvarchar(80), Description nvarchar(300), CrossesAccounts bit, SortOrder int)`
+
+`RolePermission`: `(RoleId uniqueidentifier FK, PermissionCode nvarchar(60) FK)` — the pair *is* the primary key,
+because a grant either exists or does not: removing one is deleting its row and the audit entry records who did.
+Index: `IX_RolePermission_PermissionCode`, which is the index the last-administrator guard seeks (it counts holders
+of `user.manage`).
+
+Three design points are carried by these definitions rather than by code:
+
+- **The ids of the four system roles are literals** (`SystemRoles`: `a0e00000-…-{1,2,3,4}`). Registration assigns
+  `Owner` and the start-up seeder creates the administrator, and both would otherwise need a lookup whose answer can
+  be absent — an unseeded database, or a deployment with `Startup:SeedReferenceDataOnStartup=false`.
+- **`Role.RowVersion`** makes two administrators editing one role's permission set a conflict instead of a silent
+  overwrite (the terrarium's own rule, UC-03 A3).
+- **`Permission` is written by the seeder and never by a user.** A code the build does not implement cannot be
+  granted by inserting a row, which is why the catalogue stays in `Permissions.cs` and only the *mapping* is data.
+
+### 3.17 `Alert.Family`
+`Alert` gained `Family int NOT NULL DEFAULT 0` in migration `20261016162814_AddAlertFamily`, back-filled from the
+metric the row is about (1, 4 and 5 → `Species`; everything else, including every metric-less alert → `Enclosure`).
+Denormalised on purpose, like `BandMin`/`BandMax`: it is a fact about the episode, it is what the alert list filters
+and groups by, and a device-level alert has no metric to derive it from.
+
+### 3.18 Seed data for the matrix
+The migration inserts it, so a fresh database is complete before the application has run once; `IdentitySeeder`
+then reconciles on every start-up and writes nothing unless something is missing. Sixteen `Permission` rows, four
+`Role` rows and thirty-nine `RolePermission` rows:
+
+| Role | Rank | Grants |
+|---|---|---|
+| `Admin` | 0 | all 16 |
+| `Owner` | 1 | 11 |
+| `Technician` | 2 | 7 |
+| `Viewer` | 3 | 5 |
+
+The seeder's asymmetry is the part worth remembering: a missing role is created **with** its shipped grants, and an
+existing grant is never re-applied — an administrator who removed a grant has made a decision.
 
 ---
 
@@ -357,8 +485,47 @@ CREATE TABLE [EvaluationState] (
   CONSTRAINT [FK_EvaluationState_Terrarium_TerrariumId] FOREIGN KEY ([TerrariumId]) REFERENCES [Terrarium]([Id]) ON DELETE CASCADE);
 ```
 
-Why these live in the database rather than in application code:
-an alert could be opened by a worker while a user acknowledges another (race), and a claim endpoint could be
+From `20261016161825_AddRolesAndPermissions` and `20261016162814_AddAlertFamily` (the role/permission and
+alert-family re-framing, 2026-10-17). The names are the ones EF derived; read them back to be sure with
+`SELECT name FROM sys.foreign_keys WHERE parent_object_id = OBJECT_ID('User');`.
+
+```sql
+CREATE TABLE [Role] (
+  [Id] uniqueidentifier NOT NULL, [Code] nvarchar(40) NOT NULL, [Name] nvarchar(80) NOT NULL,
+  [Description] nvarchar(300) NOT NULL, [IsSystem] bit NOT NULL, [Rank] int NOT NULL,
+  [RowVersion] rowversion NULL, [CreatedAt] datetimeoffset NOT NULL, [UpdatedAt] datetimeoffset NOT NULL,
+  CONSTRAINT [PK_Role] PRIMARY KEY ([Id]));
+CREATE UNIQUE INDEX [IX_Role_Code] ON [Role]([Code]);
+
+CREATE TABLE [Permission] (
+  [Code] nvarchar(60) NOT NULL, [Group] nvarchar(40) NOT NULL, [Name] nvarchar(80) NOT NULL,
+  [Description] nvarchar(300) NOT NULL, [CrossesAccounts] bit NOT NULL, [SortOrder] int NOT NULL,
+  CONSTRAINT [PK_Permission] PRIMARY KEY ([Code]));
+
+CREATE TABLE [RolePermission] (
+  [RoleId] uniqueidentifier NOT NULL, [PermissionCode] nvarchar(60) NOT NULL,
+  CONSTRAINT [PK_RolePermission] PRIMARY KEY ([RoleId], [PermissionCode]),
+  CONSTRAINT [FK_RolePermission_Role_RoleId] FOREIGN KEY ([RoleId]) REFERENCES [Role]([Id]) ON DELETE CASCADE,
+  CONSTRAINT [FK_RolePermission_Permission_PermissionCode]
+    FOREIGN KEY ([PermissionCode]) REFERENCES [Permission]([Code]) ON DELETE CASCADE);
+CREATE INDEX [IX_RolePermission_PermissionCode] ON [RolePermission]([PermissionCode]);
+
+ALTER TABLE [User] ADD [RoleId] uniqueidentifier NULL;   -- added nullable, back-filled, then tightened
+ALTER TABLE [User] ALTER COLUMN [RoleId] uniqueidentifier NOT NULL;
+CREATE INDEX [IX_User_RoleId] ON [User]([RoleId]);
+ALTER TABLE [User] ADD CONSTRAINT [FK_User_Role_RoleId]
+  FOREIGN KEY ([RoleId]) REFERENCES [Role]([Id]) ON DELETE NO ACTION;   -- RESTRICT: never delete accounts with a role
+ALTER TABLE [User] DROP COLUMN [Role];
+
+ALTER TABLE [Alert] ADD [Family] int NOT NULL DEFAULT 0;
+```
+
+The `RoleId` column is added nullable, back-filled from the old enum, then tightened — a `NOT NULL` column with a
+default would have pointed every existing account at the same role, which is the kind of upgrade that looks like it
+worked. The same migration inserts the sixteen permissions, the four roles and their thirty-nine grants (§3.18), and
+`Alert.Family` is back-filled from the metric by a `CASE` over the raw codes.
+
+Why these live in the database rather than in application code: an alert could be opened by a worker while a user acknowledges another (race), and a claim endpoint could be
 called twice concurrently. Application-level checks would pass a single-threaded test and fail in production;
 the filtered unique indexes make the invariant impossible to violate. The API maps the resulting
 `DbUpdateException` to `alert_duplicate` / `terrarium_already_bound` instead of returning a 500 — done for
@@ -432,10 +599,14 @@ above is the design prediction, and any difference is reported rather than quiet
 
 ## 7. Seed data
 
-Seeded idempotently at start-up (`ReferenceDataSeeder`, keyed on `Code`/`Name`):
+Seeded idempotently at start-up (`ReferenceDataSeeder`, keyed on `Code`/`Name`), except the matrix rows of §3.18,
+which the migration inserts and `IdentitySeeder` reconciles:
 
 | Seeded | Rows | Notes |
 |---|---|---|
+| `Permission` | 16 | §3.18; written by the migration, reconciled by `IdentitySeeder` on start-up |
+| `Role` | 4 | §3.18; ids fixed in `SystemRoles` |
+| `RolePermission` | 39 | §3.18; written only when the role row is created, so an administrator's edits survive a restart |
 | `Metric` | 7 | §3.7 |
 | `SpeciesProfile` | 3 | Tropical, SemiArid, Arid — with photoperiod + light thresholds |
 | `Threshold` | ~3–5 per profile | each row carries `SourceRef` (required for built-ins) |

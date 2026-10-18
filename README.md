@@ -25,7 +25,21 @@ curl -s http://localhost:8080/health/ready | jq
 
 The `api` service applies EF migrations and seeds reference data on startup
 (`Startup__ApplyMigrationsOnStartup`, `Startup__SeedReferenceDataOnStartup`), so there is no separate migration
-step. To apply the migration *explicitly* from the host instead — which is how M1 was verified:
+step.
+
+It also creates the **system administrator** when `ADMIN_USERNAME`/`ADMIN_EMAIL`/`ADMIN_PASSWORD` are set in `.env`
+(`Admin__*` in the container). That account holds the seeded `Admin` role — every one of the sixteen permission
+codes — which is what lets it author the species-profile catalogue
+(`POST`/`PATCH`/`DELETE /api/v1/species-profiles`, where the built-in bands and any custom profile come from), manage
+accounts at `/api/v1/users`, edit the role matrix at `/api/v1/admin/roles`, and read every account's data through
+`/api/v1/admin/*`. Registration always produces an `Owner` and can never produce an `Admin`, so the two codes that
+reach past an account (`data.read.any`, `data.write.any`) are held by the seeded account alone
+(`docs/02-design/06` §3). Leaving `ADMIN_USERNAME` empty is the default and means nobody can author the catalogue or
+manage accounts; readings and the per-terrarium threshold overrides are unaffected either way. Running the API
+outside Docker instead, the development placeholder account is `admin` / `Admin#2026`
+(`appsettings.Development.json`), and the password belongs to the configuration, so changing it there and restarting
+rotates it. To apply the migration
+*explicitly* from the host instead — which is how M1 was verified:
 
 ```bash
 cd backend
@@ -69,9 +83,14 @@ pio device monitor -b 115200
 cd app
 flutter pub get
 flutter gen-l10n
-flutter run -d android     # or: flutter run -d emulator-5554
+flutter run -d android --dart-define=API_BASE=http://10.0.2.2:8080   # emulator reaches the host's API this way
 flutter test
 ```
+
+`flutter run` opens the app's own VIVARIUMGUARD shell. Add `--dart-define=PROTOTYPE=true` to run the clickable
+prototype instead — fake data with the real rule kernel, the Rule Lab and the scenario walkthroughs
+(`app/PROTOTYPE.md`); the two are one binary with a compile-time switch, and the release build passes neither
+define, so the artifact a keeper installs is the app.
 
 ### 5. Web (`web/` — one surface since 2026-10-07: the VIVARIUMGUARD client, see `ADR-019`)
 
@@ -102,10 +121,10 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Gate | Command / method | Result |
 |---|---|---|
 | Backend builds, warnings as errors | `dotnet build backend/SmartReptile.sln -c Release` | ✅ Build succeeded, 0 warnings |
-| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **545 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery, 453 after the disclosed-conflict change, 455 after the password-policy change, 497 after the M2 close-out and the M3 scaffolding, 513 after 3.1's read half, **545 after the threshold engine (3.2)**) |
+| Backend unit tests | `dotnet test backend/SmartReptile.sln -c Release` | ✅ **947 passed**, 0 failed (54 at M1, 121 after FR-01, 186 after device provisioning, 226 after broker auth/ACL, 325 after the ingest pipeline, 386 after the terrarium read surface, 422 after password recovery, 453 after the disclosed-conflict change, 455 after the password-policy change, 497 after the M2 close-out and the M3 scaffolding, 513 after 3.1's read half, 545 after the threshold engine (3.2), 655 after 3.1's write half, 700 after the administrator role that now owns the species-profile catalogue, 717 after the profile picture, 845 after the 2026-10-13 review's remaining items — ownership's three answers, the administrator's reach, the status column, the MAC pairing, the account and board surfaces, and the time-zone catalogue — both 2026-10-14), 882 after the notification layer (3.5, 2026-10-16), **947 after the role/permission and alert-family re-framing (2026-10-17)** |
 | Formatting gate (CI parity) | `dotnet format SmartReptile.sln --verify-no-changes --severity error` | ✅ clean (generated migrations excluded via `.editorconfig`) |
-| Web client type-checks and builds | `npm run typecheck && npm run build` in `web/` | ✅ **clean** — `tsc --noEmit` exit 0, `vite build` produced `index-DX1qiJCO.js` (793 kB / 226 kB gzip) + `index-BLifHLg9.css` (39.6 kB), refreshed 2026-10-09 |
-| Web i18n key parity (`TC-I-15`) | `npm run check:strings` in `web/` | ✅ **164 keys**, identical in vi and en, every key referenced by `src/` defined — and the check was verified to *fail* on a deliberate typo before it was trusted |
+| Web client type-checks and builds | `npm run typecheck && npm run build` in `web/` | ✅ **clean** — `tsc --noEmit` exit 0, `vite build` produced `index-CGs5KiNg.js` (932 kB / 253 kB gzip) + `index-HAqBhTgA.css` (42.1 kB), refreshed **2026-10-17** with the administrator's three pages |
+| Web i18n key parity (`TC-I-15`) | `npm run check:strings` in `web/` | ✅ **509 keys**, identical in vi and en, every key referenced by `src/` defined — and the check was verified to *fail* on a deliberate typo before it was trusted. The count grew from 164 because the web client now reads the Flutter **app's** deck (`app/lib/l10n/app_{en,vi}.arb`) through `strings.ts` instead of keeping a second catalogue of its own, so one deck is the vocabulary for both clients |
 | Schema created by migrations only | `dotnet ef migrations add InitialSchema` | ✅ one migration; `(DeviceId, Sequence)` unique, filtered open-alert unique, one-device-per-terrarium unique, band CHECK constraints all present |
 | Docker image builds | `docker compose build api` | ✅ builds from a clean context (needed `backend/.dockerignore` — defect 8 below) |
 | Compose stack comes up | `docker compose up -d` | ✅ `db`, `api`, `web` all Up; `db` + `api` report `healthy`, 0 container restarts |
@@ -124,18 +143,22 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | MQTT topic ACL | `paho-mqtt` subscribe/publish attempts outside the device's own prefix | ✅ **2.3**: own `cmd` granted; `sr/v1/d/+/telemetry` and another device's `cmd` refused; counters `mqtt_refused_subscriptions_total` / `mqtt_refused_publications_total` on `/metrics` |
 | MQTT plaintext is loopback-only | `netstat -ano` with TLS on, then again with `Mqtt:DisablePlaintextEndpoint=true` | ✅ **2.3**: `127.0.0.1:1883` **and** `[::1]:1883` only (no wildcard bind — binding the IPv4 address alone leaves the IPv6 socket open); in the release shape nothing listens on `1883` at all and TLS kept authenticating devices |
 | Ingest: broker → bus → worker → SQL Server | `paho-mqtt` publish over a real MQTT listener against a live API + SQL Server, then `curl /metrics` and read the rows back | ✅ **2.4 done 2026-10-04**: a two-sample batch published twice stored **2** `TelemetrySample` rows (sequences `1, 2`), **8** `MetricReading` rows with `Value = 28.750` / `RawValue = 28.900` intact, set `LastSeenAt` / `FirmwareVersion` / `SignalStrengthDbm` / `FreeHeapKb` and wrote a `DeviceHealthSample`; `/metrics` read `ingest_samples_total=2`, `ingest_duplicates_total=2`, `ingest_rejected_total=0`. A `tf = 85` sample was stored with `QualityFlags = 2`; a 121-sample batch was `payload_too_large` and a malformed body `schema_invalid`, taking `ingest_rejected_total` to **2** |
-| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **19 passed** — migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium |
+| The alert lifecycle over HTTP (M3 task 3.4) | the API started headlessly with **no** SQL Server — which is what makes a *route* check possible without a database: `curl` with a minted Viewer token, a Technician token and no token at all (14 assertions, all green) | ✅ **2026-10-10**: no token → `401 unauthenticated`; **Viewer** → `403 insufficient_role` on `POST /alerts/1/ack`, `POST /alerts/1/resolve`, `POST /terrariums/{id}/silences` and `DELETE …/silences/{id}` (the RBAC half of `TC-U-36`, measured); `?state=Nonsense`, `?cursor=not-a-cursor` and an unknown resolve reason → `400` (`validation_failed`, `invalid_cursor`, `validation_failed`) **before** any database call; with a Technician token every handler ran and failed only on the absent SQL Server (`500 internal_error`, not the `404` a missing route would give); and `swagger.json` carried **35 operations, 22 requiring the bearer scheme** — the 14 that already did plus all eight new ones. The three silence routes and five alert routes are also what `GET /` advertises. The *data* half (`TC-I-07` over HTTP: ack → resolve → second ack refused, read back through the API) still needs SQL Server |
+| Integration tests against a **real SQL Server** | `dotnet test backend/tests/SmartReptile.Tests.Integration` (CI: the `integration` job with a SQL Server 2022 service container) | ✅ **55 cases, all green** — 19 green as of 2026-10-09: migrations applied, 4 profiles + 19 bands seeded, re-seeding duplicates nothing, the SQL-level invariants reject what they should, and the ingest pipeline stores, dedupes and flags against the real database (`TC-I-01…03`). The three added 2026-10-09 assert what only SQL Server can: a stale `rowversion` refuses an update, `PK_EvaluationState` refuses a second state row for one key, and a `DeviceEvent` stores with a null terrarium. The five added 2026-10-10 (task 3.4) assert what a fake cannot answer: an alert of another account is invisible to both the list and the lookup, the soft-delete filter on `Terrarium` reaches an alert through its foreign key, the cursor predicate translates and pages without repeating a row, one transaction leaves the resolved row + the re-armed `EvaluationState` + the audit entry together, and a silence window round-trips through create, list and cancel. The two added 2026-10-13 (3.1's write half) assert what the schema and the adapter have to answer: an override change and its `ThresholdSnapshot` commit together, the evaluator's own band source then resolves the new band while an alert already open keeps its denormalised `BandMin`/`BandMax`, and a revert deletes the override row rather than disabling it. The five added 2026-10-16 (3.5) cover the notification store's joins, window and writes; the **thirteen added 2026-10-17** cover the identity seed (`IdentitySeederTests`: the migration left the catalogue complete, a second pass is a no-op, a grant an administrator removed is *not* restored, a missing system role returns with its defaults), the account reads (`AccountReadTests`: the list and the single-account reads load the role's grants, and the last-administrator count goes through the join) and the administrator's cross-account store (`AdminStoreTests`: the enclosure with its owner and open-alert count, the owner search, a board no account has claimed still appearing, the `?family=` filter returning only that family, the overview's counts moving by exactly what was seeded, and the per-account rollup). **All 55 are green**: `AlertLifecycleTests.The_cursor_pages…` used to be the one red case — it expected one alert fewer than its own fixture creates (four alerts, not three) — and on 2026-10-17 it was corrected to assert the invariant directly rather than patched to pass |
 | Terrarium update and delete over HTTP | `curl` a live API + SQL Server: create, `PATCH` with the current `ETag`, then a stale one, then none, then `DELETE` with and without the flag (26 assertions, all green) | ✅ **2.8's update/delete halves done 2026-10-09**: `201` + `ETag` on create, `200` and a **new** `ETag` on a matching `If-Match`, `412 precondition_failed` on a stale one with the row provably not overwritten, `428 precondition_required` with no header, `If-Match: *` accepted, `400 validation_failed` on a bad body, `409 conflict_device_bound` while a live device is bound, `204` with `?allowUnboundDevice=true` (the board returns to `Provisioning` with its credentials intact), and `404 not_found` after |
+| The version an update needs is readable from the body, and Swagger shows the `If-Match` box | `curl` a live API + SQL Server on a fresh database: create, read, `PATCH` with the body's `rowVersion` (plain and quoted), then a stale one, then none, then `*` — 19 assertions, all green | ✅ **2026-10-14, closing the 2026-10-13 review's item 4**: the create answer's `ETag` equals the `rowVersion` in its body, `GET /terrariums/{id}` repeats the pair, a **list** item carries no `rowVersion` at all, `PATCH` answers `200` with a **new** token in both forms, the same token afterwards is `412 precondition_failed` (name unchanged) and no header is `428 precondition_required`, with both messages naming `GET /api/v1/terrariums/{id}` and the two places it carries the value; `If-Match: *` accepted; an empty `name` still `400 validation_failed` with `errors[0].field = "name"` and nothing written. `swagger.json` carries the `If-Match` header parameter on `PATCH /api/v1/terrariums/{terrariumId}` — `in: header`, `required: true`, with the description naming where the value comes from — which is what Swagger UI renders as an input box. The parameter is bound as nullable, because a non-nullable one would make the framework answer a missing header with its own `400` before the handler could answer the documented `428`; `RequiredIfMatchOperationFilter` corrects the document so the two agree. Verified against a scratch database — `SmartReptileVerify` — so no dev data was touched |
+| A species profile's picture (FR-10, `BR-10.6`) | `curl` a live API + SQL Server + a real file on disk: create a profile, upload a PNG, read it back, replace it with a JPEG, then remove it (27 assertions, all green) — then the same flow driven in a real browser | ✅ **built 2026-10-14**: `POST`/`GET`/`DELETE /api/v1/species-profiles/{id}/image` with the bytes under `Storage:RootPath`, the first byte storage in the repository. The read-back is byte-identical with `Content-Type: image/png` and `Cache-Control: private, max-age=300`; a second account's read is `404`, an anonymous one `401`, a non-admin write `403`; a text file labelled `image/png` is `400 image_invalid`, a PNG labelled `text/html` is `400 image_type_unsupported`, 2 MB + 10 bytes is `400 image_too_large` and a body with no `file` part is `400 image_required`, with the stored picture surviving all four; a built-in is `403 builtin_immutable`; a replacement is served as `image/jpeg` and leaves **one** file — the old one discarded; `DELETE` clears the row and the file and a second `DELETE` is still `200`; the audit trail holds exactly two `profile.updated` rows for a set-and-replace; and `swagger.json` documents the upload as `multipart/form-data`. Driven in a browser against that API: create with a picture (the new card fetched and showed it), replace it, a refused `.txt` rendered at the picker with the field edits still saved, and *Xoá hình* cleared both the stored picture and one chosen but not yet saved. Verified on a scratch database — `SmartReptileVerify` — so no dev data was touched |
 | MQTT device channels are consumed, not dropped | `paho-mqtt` publishing `status`, `health`, `events` and `telemetry` over loopback from a **scripted** node (no hardware), then reading the rows back | ✅ **2026-10-09**: `flags=1.2.0`, `rssi=-64`, `heap=140`, `bat=87.00` on the `Device` row; **2** `DeviceHealthSample` rows (one from the `health` topic, one from a batch's health block); **1** `DeviceEvent` (a `sensor_fault` on `humidityPct`) with an unknown event type refused as `schema_invalid`; **2** `TelemetrySample` rows; and **2** `EvaluationState` rows written by the evaluator worker **for the keys the profile actually bands** (`TempC`/Night and `HumidityPct`/Any, watermark 20) |
 | The threshold engine raises and closes an alert (M3 task 3.2) | `paho-mqtt` publishing a scripted excursion over a real broker against a live API + SQL Server, then reading `Alert` and `EvaluationState` back — 48 assertions, all green | ✅ **2026-10-09**: a faulted out-of-band reading opened nothing and created no state row; an out-of-band reading opened nothing while the dwell window was open; when it elapsed **exactly one Warning opened, back-dated to the first out-of-band reading**, with `TriggeringValue` = that reading and `PeakValue` = the window's worst reading (`32.6 °C` opened it, `33.0 °C` was the peak — a value only the stored readings know); a critical reading short of its own dwell touched the row without escalating; when that dwell elapsed the **same** alert escalated once (`Severity` and `DedupeKey` → Critical, id and `TriggeredAt` unchanged); three readings inside the band by the margin resolved it (`Recovered`, pointer and excursion cleared, three ticks counted); a later excursion opened a **second** row while the first stayed resolved; and `/metrics` moved by exactly the two openings and the ten published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard gecko band asks for five) because FR-10's write route is 3.1's remainder |
 | Effective thresholds over HTTP (M3 task 3.1's read half) | `curl` a live API + SQL Server: terrariums on the seeded Tropical profile in a zone inside the photoperiod and one outside it, with an override inserted per phase (`sqlcmd`, because the write half of 3.1 does not exist yet) — 34 assertions, all green | ✅ **2026-10-09**: an anonymous read `401`; **both phases observed**, the phase computed from each terrarium's own zone — `Europe/London` (local 15:00) listed four metrics with the day band `24–28 °C`, `Pacific/Auckland` (local 03:00) listed two with the night band `20–24 °C`; `humidityPct` reported `phase: "any"` / `source: "profile"` with the profile's `60–80` and critical `40–95` in both; a **day-only** override correctly *silent* at night (the profile's night band came back); an override for the night phase reported `source: "override"` with its own bounds while the other metrics kept `source: "profile"` and the metric list was unchanged; a foreign/missing id `404 not_found`; `readings/latest` still `200` beside the new route. The same run is what pins the two readings of `03-implementation/06` §1 that the document left ambiguous |
-| Device provisioning over HTTP | `curl` against a live API + SQL Server (50 assertions) | ✅ **2.2 done 2026-10-03**: self-register `201`/`429`/`400`, claim `200`/`404 claim_code_invalid`/`404 not_found`/`409 terrarium_already_bound`, rotate `200` with a 10-minute grace, revoke `204` and idempotent — with `Owner`-only gating (`Technician` → `403 insufficient_role`) |
+| The role matrix, the two alert families and the administrator's dashboard (2026-10-14 review items 1, 12 and 13) | `curl` a live API + SQL Server Express, database created by the run itself (14 migrations applied from scratch); 4 accounts, 1 enclosure, 1 board and 3 alerts seeded through the API and `sqlcmd` | ✅ **2026-10-17**: `/auth/register` produced an `Owner` whose token carried **11** `perm` claims against the administrator's **16**; `/auth/me` returned `roleId` + the same list; `/admin/overview` answered `accounts 3, terrariums 1 (1 with a board), devices 1 online, alertsOpen 2 (1 enclosure + 1 species), 1 critical, speciesProfiles 4` with each account's holdings and both families' metric keys; `/admin/terrariums`, `/admin/devices` and `/admin/alerts?family=` answered the owner, the board's health and the split rows (`?family=habitat` → `400 family_invalid`); a keeper's token got **`403` on all five administrative routes**; the account surface round-tripped — create `201` with the role's permission set, `PATCH role` → the set changed, an unknown code `400 role_invalid`, disable → login `401`, enable → login `200`, reset-password → the new password worked, soft delete `200`, `?purge=true` `200` and a later read `404`, self-edit `409 self_change_refused`; the role surface: create `201`, edit `200` with the grant set replaced, a system role `409`, a custom role `200` then `404`. A restored pre-change database proved the back-fill (`0→Owner … 3→Admin`) and a `Down`/`Up` round trip left the accounts identical. **Two defects found and fixed:** the account list reported zero permissions for every row (the read loaded `Role` but not its grants) and the role list reported 0 holders for every role |
+| Device provisioning over HTTP | `curl` against a live API + SQL Server (50 assertions) | ✅ **2.2 done 2026-10-03**: self-register `201`/`429`/`400`, claim `200`/`404 claim_code_invalid`/`404 not_found`/`409 terrarium_already_bound`, rotate `200` with a 10-minute grace, revoke `204` and idempotent — gated `Owner`-only at the time (`Technician` → `403 insufficient_role`), which is the `device.provision` permission since 2026-10-17 |
 | Firmware builds for the target | `pio run -e esp32dev` | ✅ RAM 13.6% (44 536 B), Flash 20.7% (270 673 B) |
 | Firmware host unit tests | `docker run --rm -v "$PWD/firmware:/firmware" smartreptile-fw-test` (image from `firmware/Dockerfile.host-tests`; plain `pio test -e native` wherever a host compiler exists) | ✅ **22/22 passed** — 8 filters + 8 payload + 6 ring buffer, ~18 s. First ever execution, and it caught defect 11 |
-| App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **19 tests passed** |
+| App analyzes + tests | `flutter analyze && flutter test` | ✅ `No issues found!`, **182 tests passed** (19 at M1; the suite grew with the client's own screens, and the 2026-10-17 re-framing added the permission-gating widget cases — the administration tab is absent without the administrative codes, present with them, and each of the two groups appears only with its own permission) |
 | App release APK | `flutter build apk --release` | ⬜ M6 (release milestone) |
 | No committed secrets or build output | `git ls-files` audit | ✅ at M1: 164 files tracked; only `.env.example`; no `bin/`, `obj/`, `.dart_tool/`, `.pio/`, keystores. **Re-audited 2026-10-03:** 247 files and still no secrets — the increase is the TERRAGUARD prototype, including the three `web/dist/` build artefacts that `ADR-017` accepts deliberately |
-| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI |
+| **CI runs, and passes** | push to `master` → `gh run watch` | ✅ **all five jobs green** (`backend`, `integration`, `app`, `firmware`, `secret-scan`) in run `35602903951`, ~2 min wall clock. The firmware job is where the 22 host tests execute in CI. **The pipeline has since grown to six jobs** — `web` (typecheck, key parity, build) was added with the web client in `5dd9c6a` — and all six are green on run `38949606361` (2026-10-17, `main`) |
 
 ### What M1 still does *not* verify (stated, not hidden)
 
@@ -153,13 +176,24 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   degrading to its empty state; the empty state now means an account with no terrarium, and one can be created,
   renamed and removed over HTTP. `GET .../thresholds` reports the effective band per metric with the layer it came
   from, so the threshold editor (M4's 4.20) can be built against it and show *why* a limit is what it is.
-  **Thresholds are read-only over HTTP**: writing an override (`PUT`/`DELETE`) is 3.1's other half and is not
-  built. Alerts exist and a scripted excursion proves the whole lifecycle, but **there is no `/api/v1/alerts`
-  route yet** — reading, acknowledging and resolving an alert is 3.4, and silences, summaries and exports are 3.4
-  and 3.6.
-- **The engine raises alerts without telling anyone.** A new alert is a row and a counter: delivery is the
-  notification dispatcher's (3.5) and the `alertChanged` push arrives with the lifecycle API (3.4), so a keeper
-  learns about an alert by reading the table until then. The per-device **reorder window** of
+  **Thresholds are writable since 2026-10-13** (3.1's write half), so the editor can author and not only preview:
+  `PUT /terrariums/{id}/thresholds` upserts the bands the body names and
+  `DELETE /terrariums/{id}/thresholds/{metric}` reverts one metric to its profile — both requiring
+  `terrarium.write` (they were `Owner`-gated until the 2026-10-17 re-framing), both
+  answering with the resulting effective set, and every change recording a `ThresholdSnapshot` so an alert already
+  open keeps the band it was judged against.
+  Alerts have a full API since 2026-10-10 (task 3.4): `/api/v1/alerts` lists them newest-first with
+  `?cursor=&pageSize=` and, since 2026-10-17, `?family=enclosure|species`, and `GET /api/v1/alerts/{id}` carries the
+  band in force with an excerpt of the values the episode was judged on; `POST /alerts/{id}/ack` and
+  `POST /alerts/{id}/resolve` close the response loop for any account holding `alert.write` (Owner, Technician and
+  Admin; not Viewer), `GET /alerts/{id}/timeline` shows what happened to one alert and who did it, and
+  `/api/v1/terrariums/{id}/silences` silences a metric — or the whole box — for at most 24 hours with a reason on
+  record. Summaries and exports remain 3.6 and the export task.
+- **Alerts are pushed but not delivered.** An alert that opens, escalates, is acknowledged or is resolved is pushed
+  to the terrarium's group as `alertChanged`, and every lifecycle action writes its audit row in the same
+  transaction — so a dashboard badge can update live. What is still absent is *delivery*: no FCM push, no email, no
+  inbox row, because the notification dispatcher is 3.5, and a silence today suppresses what 3.5 will send rather
+  than anything the system does now. The per-device **reorder window** of
   `docs/02-design/03` §7 is also unbuilt: samples are evaluated in ingest order, which for one node *is*
   `RecordedAt` order, but a second publisher or a broker redelivery could arrive out of order and the
   `EvaluationState` watermark is an id watermark, so it cannot detect that.
@@ -261,8 +295,8 @@ a real HTTP surface.
 its chip id and receives an 8-character claim code from a 31-symbol alphabet (15-minute TTL, single use, one code
 live at a time); an `Owner` claims it for a terrarium and receives a 256-bit secret in base32 **once**, stored as
 `SHA-256(secret ‖ 16-byte salt)`; rotating puts the previous secret on a 10-minute grace window; revoking
-invalidates every credential. All of it is gated by the role policies — `Owner` for claim, rotate and revoke, so a
-`Technician` gets `403 insufficient_role`. Run end to end against the same live stack, 50 assertions green;
+invalidates every credential. All of it is gated by `device.provision` (the `Owner` policy until 2026-10-17), so an
+account without it gets `403`. Run end to end against the same live stack, 50 assertions green;
 **186 backend unit tests pass** (was 121).
 
 ```bash
@@ -387,11 +421,12 @@ settled in the process and are recorded in the documents rather than only in the
 evaluation instant; a reading back inside the band ends the excursion; escalation once per episode using the
 severity the alert already carries; a consecutive critical window; and the alert's triggering value and peak read
 back from the stored readings of its dwell window). **What is deliberately absent**: delivery — an alert is a row
-and a counter, because the dispatcher is 3.5 and `alertChanged` arrives with the lifecycle API in 3.4 — and the
-per-device reorder window of §7. Verified live by a **scripted node** driving one excursion through a real broker,
-the ingest pipeline, the evaluator and SQL Server (48 assertions, listed in the gates above): one back-dated
-Warning, no escalation under the critical dwell, one escalation of that same alert, `Recovered` after three ticks,
-and a second episode as a separate row.
+and a counter, because the dispatcher is 3.5 — and the per-device reorder window of §7. The lifecycle API that
+makes alerts readable, acknowledgeable, resolvable and silenceable landed as task 3.4 on 2026-10-10 and pushes
+`alertChanged` to the clients watching the terrarium. Verified live by a **scripted node** driving one excursion
+through a real broker, the ingest pipeline, the evaluator and SQL Server (48 assertions, listed in the gates above):
+one back-dated Warning, no escalation under the critical dwell, one escalation of that same alert, `Recovered` after
+three ticks, and a second episode as a separate row.
 
 ```bash
 # The password below is a throwaway value for a local demo account, and the recovery codes are alphabet
@@ -421,14 +456,128 @@ curl -s -X POST http://localhost:8080/api/v1/auth/reset-password \
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings/latest"
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/readings?metric=tempC&from=2026-10-06T00:00:00Z&to=2026-10-07T00:00:00Z"
 
-# The effective band per metric, with the layer each one came from (no route writes an override yet):
+# The effective band per metric, with the layer each one came from:
 curl -s "http://localhost:8080/api/v1/terrariums/$ID/thresholds"
 # -> {"terrariumId":"…","capturedAtUtc":"…","timeZoneId":"Asia/Ho_Chi_Minh",
 #     "effectiveThresholds":[{"metric":"tempC","unit":"°C","phase":"night","source":"profile", …}]}
 
-# The engine's output is a table today: alerts are raised, escalated and resolved, and the dispatcher that would
-# tell anyone about them is M3 task 3.5. Read them back with:
-sqlcmd -S "localhost\SQLEXPRESS" -d SmartReptile -E -Q "SET NOCOUNT ON; SELECT TOP 5 Id, Severity, State, Metric, TriggeredAt, PeakValue FROM Alert ORDER BY Id DESC;"
+# Writing one records a snapshot of the new set, so an alert already open keeps the band it was judged against while
+# the next sample is judged against this one; reverting a metric gives the profile's band back (needs terrarium.write):
+curl -s -X PUT -H "Authorization: ******" -H 'Content-Type: application/json' \
+     -d '{"overrides":[{"metric":"tempC","phase":"any","targetMin":28,"targetMax":30,"note":"summer"}]}' \
+     "http://localhost:8080/api/v1/terrariums/$ID/thresholds"
+# -> 200 …{"metric":"tempC","unit":"°C","phase":"any","source":"override","targetMin":28,"targetMax":30,…}
+curl -s -X DELETE -H "Authorization: ******" "http://localhost:8080/api/v1/terrariums/$ID/thresholds/tempC"
+# -> 200 with source "profile" again; a metric with no override answers 200 too (idempotent)
+
+# The engine's output: alerts are raised, escalated, acknowledged, resolved and pushed to the clients watching the
+# terrarium. Delivery (M3 task 3.5, built 2026-10-16) is the dispatcher's, and the alert is read back over the API:
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts?state=Open&pageSize=5&family=species"
+# -> {"items":[{"id":812,"family":"species","severity":"Warning","state":"Open","metric":"tempC","bandMin":26.0,"bandMax":32.0, …}],"nextCursor":null}
+#    ?family= takes enclosure|species; leave it out for both, and an unknown key is 400 family_invalid
+
+# What was delivered for one of them, with its channel, its escalation step and its read state:
+curl -s "http://localhost:8080/api/v1/notifications?unreadOnly=true"
+# -> {"items":[{"id":1,"channel":"InApp","title":"Linh's gecko box · Nhiệt độ quá cao",
+#              "body":"34,20 °C (ngưỡng 28,00–32,00 °C), vượt ngưỡng 10 phút","deepLink":"smartreptile://alerts/1",
+#              "step":0,"isRead":false, …}],"unread":1}
+curl -s -X POST "http://localhost:8080/api/v1/notifications/1/read"    # -> 204, and 204 again on a second call
+curl -s -X POST "http://localhost:8080/api/v1/notifications/read-all"  # -> {"markedRead":0} once nothing is unread
+
+# What happened to one of them, who did it, and what the dispatcher did about it:
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts/812/timeline"
+
+# Closing the loop, and telling the system you already know about a condition (needs alert.write — Owner,
+# Technician or Admin; a Viewer gets 403):
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/alerts/812/resolve" \
+     -H "Content-Type: application/json" -d '{"reason":"Accepted","note":"lamp on purpose"}'
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/v1/terrariums/$ID/silences" \
+     -H "Content-Type: application/json" -d '{"metric":"tempC","untilUtc":"2026-10-11T09:00:00Z","reason":"lamp replacement"}'
 # The counters behind it (alerts_opened_total counts openings, not escalations):
 curl -s http://localhost:8080/metrics
 ```
+
+**Added 2026-10-13 (backend, M3 task 3.1's write half — the override write path and `ThresholdSnapshot`).** 3.1 is
+complete, and the server side the threshold editor (M4's 4.20) was waiting for now exists.
+`PUT /api/v1/terrariums/{id}/thresholds` upserts the band for each `(metric, phase)` the body names, and
+`DELETE /api/v1/terrariums/{id}/thresholds/{metric}` reverts one metric to its profile — both `Owner`-gated, both
+answering with the resulting effective set in the same shape the read route returns. Every entry is validated
+against the band rules before anything is written, reported field by field and addressed by position
+(`overrides[1].targetMin`), so one incoherent band changes nothing at all; a band byte-for-byte identical to the
+stored one is a no-op; and a real change writes one `ThresholdSnapshot` of the set now in force, in the same unit of
+work — the table `docs/02-design/02` §3.13 promised and the change path 3.2/3.4 were waiting for. That is what makes
+`TC-U-26` hold: an alert already open keeps its denormalised band for the record while the next sample is judged
+against the new one, and the ordinary recovery path is what closes it if the reading is back in range. Recorded in
+the roadmap (the task's write-half block), `07-appendices/03` §4.2, `04-quality/02` B3 and the design's §3.13;
+**655 backend unit tests pass** (was 638, 17 new), and the suite is 26 integration cases of which 25 are green.
+
+Two things from this task are worth the ink rather than a line in a table. **The unit suite could not have caught the
+first cut's defect**: staging a new override by adding it to the loaded terrarium's collection made EF treat the
+client-assigned key as an existing row, so it emitted `UPDATE [ThresholdOverride] … WHERE [Id] = …`, affected zero
+rows and threw `DbUpdateConcurrencyException` — only a real database said so, which is why new rows now go through
+`AddThresholdOverride` and its fixture mirrors the adapter. And **`AlertLifecycleTests.The_cursor_pages…` fails
+independently of this change**, verified by reverting these edits and watching it fail the same way on pristine
+`main`: it expects one alert fewer than its own fixture creates, and it is recorded here rather than quietly fixed
+inside a task about thresholds. (**Corrected 2026-10-17:** it was the *expectation* that was wrong — the fixture
+seeds four alerts and the case asserted one row on the second page where two remain. The case now asserts the
+invariant directly (both pages together, strictly descending, no id twice, four rows in total), and the suite is
+green; see the integration row above.)
+
+**Added 2026-10-16 (backend, M3 task 3.5 — the notification layer, and M3's demo line).** M3's definition of done is
+one induced excursion producing "exactly one alert **and one notification**"; the alert half has been real since 3.2
+and nothing delivered, so the milestone could raise an alarm and tell nobody. That half is now built, and it was
+built as two pure functions plus one sweep, because "why was I not told" is a question about rules and the sweep is
+the only part that can be wrong in a way rules cannot see. `Domain/Notifications/NotificationPolicy.cs` holds
+§02-design/05 §4's whole matrix (`Judge` — recovery notice, silence, maintenance, severity floor, quiet hours with
+Critical bypassing them, the hourly cap) as one static function over a `NotificationRequest`, and
+`NotificationCadence` holds the arithmetic: the 60-minute repeat cooldown, the 10-per-hour cap, BR-13.5's
+5 s / 30 s / 2 min retry backoff and §6's 30 / 60 / 120 minute escalation ladder. `NotificationDispatcher` is the
+sweep: it asks the database which alert could owe somebody a message, decides, renders, delivers, records and stages
+— all through the two seams (`INotificationStore`, `INotificationChannel`) that keep SQL Server and the network away
+from the policy. The inbox is `GET /api/v1/notifications`, `POST /api/v1/notifications/{id}/read` and
+`POST /api/v1/notifications/read-all`, and `GET /alerts/{id}/timeline` gained the `notified` entry §02-design/05 §6
+was written for. Recorded in `02-design/05` §3/§4/§5/§6 (as built), `07-appendices/02` §3.10 (as built),
+`07-appendices/03` §4.5, `03-implementation/03` §6.2/§8, the roadmap's 3.5 row and block, `04-quality/02` B6,
+`05-release/03` §5, `docs/README.md` and the schema reference's summary table; **882 backend unit tests pass**
+(was 845, 37 new), 5 new integration cases run against real SQL Server (41 of the suite's 42 green at the time — the
+red one was the pre-existing cursor-paging case this file already records, **corrected 2026-10-17**), and migration
+`20261016143949_AddNotificationLog`
+was applied to a scratch database by the application's own `DatabaseInitializer`.
+
+Six readings of the design are worth the ink. **The dispatcher sweeps rather than subscribing**: four writers move an
+alert — the evaluator, the silence watchdog, the signal recorder and the lifecycle API — and they live in three
+layers, so an event bus would mean all four learning about notifications; the database is the one place that sees
+them, and a sweep is idempotent where an event is not (whatever a crash lost, the next pass re-derives). **The table
+is one row per attempt**, which is what makes BR-13.5 visible as three rows five and thirty seconds apart rather than
+a counter that says the retries happened somewhere. **`NotificationLog.Step` is a column the design sketch lacked**
+and it is deliberate: without it a 30-minute escalation and an hourly repeat are both "a second `Sent` row", so
+neither §6's timeline nor the ladder itself could be built out of them. **The hourly cap rations the noise, not the
+record** — the eleventh notification of an hour loses its push and its email and keeps its inbox entry, because §5
+says the alert stays visible and a budget spent by rows nobody can hear is not a budget. **Quiet hours are judged in
+the recipient's zone** and a window whose two ends are equal is no window at all: the profile route already refuses
+half a pair, so `22:00–22:00` can only be a typo, and reading a typo as "never notify" would silence a keeper's
+alarm system. And **the digest's identity is the instant it records** (the top of the hour it covers), so "already
+digested" is an equality test rather than a second table.
+
+**It also closes the decision that was left open on 2026-10-07.** With Telegram dropped by `ADR-021`, 3.5's note
+deliberately deferred the choice between adding a local SMTP sink and accepting the inbox as the demo's only proof.
+`docker-compose.yml` now runs **Mailpit** beside the API (UI on `127.0.0.1:8025`, SMTP on `mailpit:1025`), which is
+what `TC-I-12` means by "a local SMTP sink" and what makes §6's 120-minute escalation demonstrable offline; FCM is
+real code and stays off until a service-account file is mounted read-only at `/secrets`.
+
+**The live run found a defect, which is the reason to run it.** The API came up headless against SQL Server Express,
+applied all twelve pending migrations and started four workers — including `Notification dispatcher started;
+sweeping every 15s` — and a seeded excursion (33.4 °C triggering, 34.2 °C peak, band 28–32 °C) produced exactly one
+Vietnamese inbox entry within one sweep: `"Linh's gecko box · Nhiệt độ quá cao"` /
+`"34,20 °C (ngưỡng 28,00–32,00 °C), vượt ngưỡng 10 phút"` / `smartreptile://alerts/1`, which is §7's contract
+measured rather than asserted. `GET /alerts/1/timeline` carried the `notified` entry beside `opened`, `/metrics`
+reported `notifications_sent_total: 1`, a second full sweep left the table at **one row**, `POST
+/notifications/1/read` answered `204` twice, and an id that is not the caller's answered `404 not_found`. The first
+attempt of that run also logged a failed query against a `Alert` table that did not exist yet: the worker's *first*
+sweep ran before `DatabaseInitializer` had applied its migrations, so the first tick now waits one interval — the
+shape the silence watchdog already used, and the reason its own sweep has never shown that error.
+**Still open, stated rather than implied:** a real FCM push (no Google service-account file and no device
+registration token exist on this machine) and therefore `TC-E2E-03`; escalation steps 2 and 3 reach the owner only,
+because the product holds one account per enclosure and §6's Technician joins at the 30-minute step; and a recovery
+notice is always withheld with `preference`, because v1 has no opt-in column for one — the record says a notice was
+withheld rather than pretending it was attempted.

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Domain.Metrics;
+using SmartReptile.Domain.Reference;
 using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Thresholds;
 
@@ -46,6 +47,235 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
     /// row 13).</summary>
     private const string EngineParametersProvenance =
         "dwell/recovery are team design choices, not literature (docs/07-appendices/05 §5 row 13)";
+
+    /// <summary>One curated catalogue row: the id, the label, the country and the standard offset.</summary>
+    /// <param name="IanaId">IANA zone id, stored as the key.</param>
+    /// <param name="DisplayName">Label a picker shows.</param>
+    /// <param name="CountryCode">ISO-3166 alpha-2 code, empty for a zone belonging to no country.</param>
+    /// <param name="StandardUtcOffsetMinutes">Standard-time offset in minutes.</param>
+    public sealed record TimeZoneSeed(
+        string IanaId,
+        string DisplayName,
+        string CountryCode,
+        int StandardUtcOffsetMinutes);
+
+    /// <summary>
+    /// The time-zone catalogue: the IANA zones a terrarium or an account may name, in the order a picker shows them
+    /// — west to east, ties broken by the zone id (TASKS 2026-10-14, item 11).
+    /// </summary>
+    /// <remarks>
+    /// <b>Why a curated list rather than every IANA zone.</b> The catalogue is what both clients render as a
+    /// dropdown and what the create and update paths validate against, so it has to be a list a human can read,
+    /// review and correct — the 600-odd ids of the full database, most of which name an uninhabited island or a
+    /// historical alias, are neither. Every offset in it is the zone's <i>standard</i> offset, listed west to east;
+    /// the label names the places the zone is used in, the way a keeper would recognise them.
+    /// <para>
+    /// <b>Offsets are metadata, not arithmetic.</b> Which offset applies at a given instant — including daylight
+    /// saving, which this table deliberately does not model — stays the platform database's answer through
+    /// <c>SystemClock.ResolveZone</c> (ADR-015). A stale number here mislabels a picker row; it cannot misjudge a
+    /// reading.
+    /// </para>
+    /// <para>
+    /// <b>The seeder owns the table.</b> Re-running it inserts what is missing and rewrites any row whose label,
+    /// country, offset or position has changed, so editing this list is how the catalogue changes. Rows a
+    /// deployment added by hand are left alone — this list only ever speaks for the ids it names.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<TimeZoneSeed> Catalogue { get; } =
+        [
+            new("Pacific/Honolulu", "Honolulu", "US", -600),
+            new("America/Anchorage", "Anchorage", "US", -540),
+            new("America/Los_Angeles", "Los Angeles, San Francisco, Seattle", "US", -480),
+            new("America/Vancouver", "Vancouver", "CA", -480),
+            new("America/Denver", "Denver, Salt Lake City", "US", -420),
+            new("America/Edmonton", "Edmonton, Calgary", "CA", -420),
+            new("America/Phoenix", "Phoenix, Tucson", "US", -420),
+            new("America/Chicago", "Chicago, Dallas, Houston", "US", -360),
+            new("America/Mexico_City", "Mexico City, Monterrey", "MX", -360),
+            new("America/Bogota", "Bogotá, Quito", "CO", -300),
+            new("America/Lima", "Lima", "PE", -300),
+            new("America/New_York", "New York, Miami, Washington", "US", -300),
+            new("America/Panama", "Panama City", "PA", -300),
+            new("America/Toronto", "Toronto, Montreal", "CA", -300),
+            new("America/Caracas", "Caracas", "VE", -240),
+            new("America/Halifax", "Halifax", "CA", -240),
+            new("America/Santiago", "Santiago", "CL", -240),
+            new("America/St_Johns", "St. John's", "CA", -210),
+            new("America/Argentina/Buenos_Aires", "Buenos Aires", "AR", -180),
+            new("America/Sao_Paulo", "São Paulo, Rio de Janeiro", "BR", -180),
+            new("Atlantic/Azores", "Azores", "PT", -60),
+            new("Africa/Accra", "Accra", "GH", 0),
+            new("Africa/Casablanca", "Casablanca", "MA", 0),
+            new("Atlantic/Reykjavik", "Reykjavík", "IS", 0),
+            new("Europe/Dublin", "Dublin", "IE", 0),
+            new("Europe/Lisbon", "Lisbon", "PT", 0),
+            new("Europe/London", "London", "GB", 0),
+            new("UTC", "UTC", "", 0),
+            new("Africa/Algiers", "Algiers", "DZ", 60),
+            new("Africa/Lagos", "Lagos", "NG", 60),
+            new("Africa/Tunis", "Tunis", "TN", 60),
+            new("Europe/Amsterdam", "Amsterdam", "NL", 60),
+            new("Europe/Belgrade", "Belgrade, Zagreb", "RS", 60),
+            new("Europe/Berlin", "Berlin, Vienna, Prague", "DE", 60),
+            new("Europe/Brussels", "Brussels", "BE", 60),
+            new("Europe/Budapest", "Budapest", "HU", 60),
+            new("Europe/Copenhagen", "Copenhagen", "DK", 60),
+            new("Europe/Madrid", "Madrid, Barcelona", "ES", 60),
+            new("Europe/Oslo", "Oslo", "NO", 60),
+            new("Europe/Paris", "Paris", "FR", 60),
+            new("Europe/Prague", "Prague", "CZ", 60),
+            new("Europe/Rome", "Rome, Milan", "IT", 60),
+            new("Europe/Stockholm", "Stockholm", "SE", 60),
+            new("Europe/Vienna", "Vienna", "AT", 60),
+            new("Europe/Warsaw", "Warsaw", "PL", 60),
+            new("Europe/Zurich", "Zurich", "CH", 60),
+            new("Africa/Cairo", "Cairo", "EG", 120),
+            new("Africa/Johannesburg", "Johannesburg, Cape Town", "ZA", 120),
+            new("Asia/Beirut", "Beirut", "LB", 120),
+            new("Asia/Jerusalem", "Jerusalem, Tel Aviv", "IL", 120),
+            new("Europe/Athens", "Athens", "GR", 120),
+            new("Europe/Bucharest", "Bucharest, Sofia", "RO", 120),
+            new("Europe/Helsinki", "Helsinki, Tallinn, Riga", "FI", 120),
+            new("Europe/Kyiv", "Kyiv", "UA", 120),
+            new("Africa/Addis_Ababa", "Addis Ababa", "ET", 180),
+            new("Africa/Nairobi", "Nairobi", "KE", 180),
+            new("Asia/Amman", "Amman", "JO", 180),
+            new("Asia/Baghdad", "Baghdad", "IQ", 180),
+            new("Asia/Damascus", "Damascus", "SY", 180),
+            new("Asia/Kuwait", "Kuwait City", "KW", 180),
+            new("Asia/Riyadh", "Riyadh", "SA", 180),
+            new("Europe/Istanbul", "Istanbul", "TR", 180),
+            new("Europe/Minsk", "Minsk", "BY", 180),
+            new("Europe/Moscow", "Moscow, Saint Petersburg", "RU", 180),
+            new("Asia/Tehran", "Tehran", "IR", 210),
+            new("Asia/Baku", "Baku", "AZ", 240),
+            new("Asia/Dubai", "Dubai, Abu Dhabi", "AE", 240),
+            new("Asia/Muscat", "Muscat", "OM", 240),
+            new("Asia/Tbilisi", "Tbilisi", "GE", 240),
+            new("Asia/Yerevan", "Yerevan", "AM", 240),
+            new("Indian/Mauritius", "Port Louis", "MU", 240),
+            new("Indian/Reunion", "Saint-Denis", "RE", 240),
+            new("Asia/Kabul", "Kabul", "AF", 270),
+            new("Asia/Almaty", "Almaty, Astana", "KZ", 300),
+            new("Asia/Ashgabat", "Ashgabat", "TM", 300),
+            new("Asia/Karachi", "Karachi, Islamabad", "PK", 300),
+            new("Asia/Tashkent", "Tashkent", "UZ", 300),
+            new("Indian/Maldives", "Malé", "MV", 300),
+            new("Asia/Colombo", "Colombo", "LK", 330),
+            new("Asia/Kolkata", "New Delhi, Mumbai", "IN", 330),
+            new("Asia/Kathmandu", "Kathmandu", "NP", 345),
+            new("Asia/Dhaka", "Dhaka", "BD", 360),
+            new("Asia/Yangon", "Yangon", "MM", 390),
+            new("Asia/Bangkok", "Bangkok", "TH", 420),
+            new("Asia/Ho_Chi_Minh", "Hanoi, Ho Chi Minh City", "VN", 420),
+            new("Asia/Jakarta", "Jakarta", "ID", 420),
+            new("Asia/Krasnoyarsk", "Krasnoyarsk", "RU", 420),
+            new("Asia/Novosibirsk", "Novosibirsk", "RU", 420),
+            new("Asia/Phnom_Penh", "Phnom Penh", "KH", 420),
+            new("Asia/Vientiane", "Vientiane", "LA", 420),
+            new("Asia/Brunei", "Bandar Seri Begawan", "BN", 480),
+            new("Asia/Hong_Kong", "Hong Kong", "HK", 480),
+            new("Asia/Irkutsk", "Irkutsk", "RU", 480),
+            new("Asia/Kuala_Lumpur", "Kuala Lumpur", "MY", 480),
+            new("Asia/Manila", "Manila", "PH", 480),
+            new("Asia/Shanghai", "Beijing, Shanghai", "CN", 480),
+            new("Asia/Singapore", "Singapore", "SG", 480),
+            new("Asia/Taipei", "Taipei", "TW", 480),
+            new("Asia/Ulaanbaatar", "Ulaanbaatar", "MN", 480),
+            new("Australia/Perth", "Perth", "AU", 480),
+            new("Asia/Pyongyang", "Pyongyang", "KP", 540),
+            new("Asia/Seoul", "Seoul", "KR", 540),
+            new("Asia/Tokyo", "Tokyo, Osaka", "JP", 540),
+            new("Asia/Yakutsk", "Yakutsk", "RU", 540),
+            new("Australia/Adelaide", "Adelaide", "AU", 570),
+            new("Australia/Darwin", "Darwin", "AU", 570),
+            new("Asia/Vladivostok", "Vladivostok", "RU", 600),
+            new("Australia/Brisbane", "Brisbane", "AU", 600),
+            new("Australia/Hobart", "Hobart", "AU", 600),
+            new("Australia/Melbourne", "Melbourne", "AU", 600),
+            new("Australia/Sydney", "Sydney, Canberra", "AU", 600),
+            new("Pacific/Guam", "Guam", "GU", 600),
+            new("Pacific/Port_Moresby", "Port Moresby", "PG", 600),
+            new("Asia/Magadan", "Magadan", "RU", 660),
+            new("Pacific/Norfolk", "Norfolk Island", "NF", 660),
+            new("Pacific/Noumea", "Nouméa", "NC", 660),
+            new("Asia/Kamchatka", "Petropavlovsk-Kamchatsky", "RU", 720),
+            new("Pacific/Auckland", "Auckland, Wellington", "NZ", 720),
+            new("Pacific/Fiji", "Suva", "FJ", 720),
+            new("Pacific/Apia", "Apia", "WS", 780),
+            new("Pacific/Tongatapu", "Nuku'alofa", "TO", 780),
+            new("Pacific/Kiritimati", "Kiritimati", "KI", 840),
+        ];
+
+    /// <summary>How many rows the catalogue holds — asserted by a test so a truncated list is caught.</summary>
+    public static int TimeZoneCount => Catalogue.Count;
+
+    /// <summary>
+    /// Seeds the time-zone catalogue, and brings it back in step with <see cref="Catalogue"/> when a label, country,
+    /// offset or position changed.
+    /// </summary>
+    /// <remarks>
+    /// Update-in-place rather than insert-if-missing, unlike the species profiles: a profile is authored data a
+    /// keeper may have edited, so the seeder must not overwrite one, whereas this table is reference data the code
+    /// owns outright — leaving a stale offset or label behind would mean the picker and the validation disagree with
+    /// the release that shipped them. Rows whose id is not in the list are untouched.
+    /// </remarks>
+    public async Task<int> SeedTimeZonesAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await db.TimeZones
+            .ToDictionaryAsync(zone => zone.IanaId, StringComparer.OrdinalIgnoreCase, cancellationToken)
+            .ConfigureAwait(false);
+
+        var created = 0;
+        var updated = 0;
+
+        for (var index = 0; index < Catalogue.Count; index++)
+        {
+            var seed = Catalogue[index];
+
+            if (!existing.TryGetValue(seed.IanaId, out var row))
+            {
+                db.TimeZones.Add(new TimeZoneReference
+                {
+                    IanaId = seed.IanaId,
+                    DisplayName = seed.DisplayName,
+                    CountryCode = seed.CountryCode,
+                    StandardUtcOffsetMinutes = seed.StandardUtcOffsetMinutes,
+                    SortOrder = index,
+                });
+
+                created++;
+                continue;
+            }
+
+            if (row.DisplayName == seed.DisplayName
+                && row.CountryCode == seed.CountryCode
+                && row.StandardUtcOffsetMinutes == seed.StandardUtcOffsetMinutes
+                && row.SortOrder == index)
+            {
+                continue;
+            }
+
+            row.DisplayName = seed.DisplayName;
+            row.CountryCode = seed.CountryCode;
+            row.StandardUtcOffsetMinutes = seed.StandardUtcOffsetMinutes;
+            row.SortOrder = index;
+            updated++;
+        }
+
+        if (created > 0 || updated > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Time-zone catalogue: {Created} created, {Updated} brought back in step, {Total} in the list",
+                created,
+                updated,
+                Catalogue.Count);
+        }
+
+        return created;
+    }
 
     /// <summary>Seeds the built-in profiles if they are missing.</summary>
     public async Task<int> SeedAsync(CancellationToken cancellationToken = default)

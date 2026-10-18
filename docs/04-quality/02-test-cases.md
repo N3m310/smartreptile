@@ -46,7 +46,7 @@ void test_median_rejects_single_glitch(void) {
 
 ---
 
-## B. Backend unit tests (TC-U-01…58)
+## B. Backend unit tests (TC-U-01…68)
 
 ### B1. Ingest: validation, plausibility, calibration
 
@@ -140,7 +140,7 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-25 | Phase + local-day bucketing | photoperiod 12 h from 07:00 in `Asia/Ho_Chi_Minh` (UTC+7) | 07:00 local = Day, 19:30 local = Night; a day summary uses local midnight boundaries, not UTC midnight | 1 | FR-10, NFR-10 |
 | TC-U-26 | Snapshot on change; open alert keeps its band | change target while an alert is open | new `ThresholdSnapshot` row; alert `BandMin/Max` unchanged; next sample evaluated against the new band | 1 | FR-10, FR-12 |
 
-> **Partly built 2026-10-09 — `TC-U-21…25` are green, `TC-U-26` is not.** `TC-U-21…23` were already covered by
+> **Built 2026-10-09 (read half) and 2026-10-13 (write half) — `TC-U-21…26` are green.** `TC-U-21…23` were already covered by
 > `ThresholdBandTests`; `TC-U-24` now has an author. `ThresholdResolver` (Domain) is the resolution order as one
 > pure function, `ThresholdResolverTests` pins it against hand-built rows, and
 > `TerrariumService.EffectiveThresholdsAsync` + `GET /terrariums/{id}/thresholds` expose it with `source` per
@@ -152,7 +152,11 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 > `03-implementation/06` §1 (precedence applied per instant, and `Any` winning inside a layer).
 > **`TC-U-24`'s "→ default" half is not testable and is not claimed:** no `SystemDefault` values exist anywhere in
 > the doc set, so the resolver's third tier is unbuilt rather than invented, and an unresolvable metric is reported
-> as *absent* instead. `TC-U-26` needs the `ThresholdSnapshot` table and the write path (3.2/3.4); `TC-U-25`'s
+> as *absent* instead. `TC-U-26` now has both halves: the write path and the `ThresholdSnapshot` table landed
+> 2026-10-13 as 3.1's write half, `TerrariumServiceTests` pins the arrangement (a change snapshots the set now in
+> force and not the old one, an identical re-put records nothing, a revert deletes the row), and a live run measured
+> the rest over HTTP — an open alert carrying `BandMin/BandMax` `24/32` still read `24.000/32.000` after the band
+> moved to `29–31`, with the effective set then reporting `source: override` at `29–31`. `TC-U-25`'s
 > phase half is green (`ThresholdPhaseResolverTests`), its local-day-summary half is 3.6.
 
 ### B4. Derived signals and device health
@@ -165,15 +169,37 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-30 | Gradient warning boundary | surface 44.0, air 31.9 (12.1) vs 43.9/32.0 (11.9) | raises at 12.1, silent at 11.9 | 3 | FR-11 |
 | TC-U-31 | Light deficit accumulating | 6 h above 1 000 lx with a required 8 h, evaluated at 21:00 local | deficit 2.0 h, one `LightDeficit` signal; no per-sample light alert | 2 | FR-11, FR-14 |
 
+> **Built 2026-10-10 — `TC-U-27`, `TC-U-28` and `TC-U-29` are green, 42 cases across three rules
+> (`DeviceSilencePolicyTests` 9, `DeviceSilenceMonitorTests` 9, `SensorFaultPolicyTests` 9,
+> `DeviceClockSkewPolicyTests` 4, `DeviceSignalRecorderTests` 15, minus two rewritten pipeline constructors).**
+> `DeviceSilencePolicy` is the rule and nothing else — `3 × samplingInterval` → Warning, 30 min → Critical, the
+> comparison strictly greater so that `TerrariumService.DeriveStatus` and the watchdog cannot disagree at the
+> boundary, both going through one `SilenceThreshold` — and `DeviceSilenceMonitor` is the sweep that applies it to
+> the fleet: the device moves `Online → Offline`, one alert opens back-dated to the instant the device *should* have
+> been heard from, it escalates in place when half an hour passes, and it closes at the instant the device speaks
+> again. `SensorFaultPolicy` is BR-07.1's three consecutive failures with the reading that a payload carrying no
+> count is the device's own word, and `DeviceSignalRecorder` turns it into one Warning per **metric** — two dead
+> probes are two entries — which `sensor_recovered` closes as `Recovered`. `DeviceClockSkewPolicy` reads V-09's
+> flag (which is also where V-08's exclusion of a long back-fill lives, so an honest back-fill is never a clock
+> fault) and the recorder opens one **Info** entry per episode, refreshed while the clock stays wrong and closed by
+> the first trusted sample. `TC-U-30` and `TC-U-31` are the two SHOULD signals of §4.3 and belong with 3.6, where
+> the accumulated light-hours of `TC-U-31` come from.
+>
+> **`TC-I-09`'s "no metric alerts from missing data" holds by construction rather than by a guard**: a silent node
+> publishes no readings, so the band engine has nothing to judge — and a *faulted* metric is excluded from it by
+> `QualityRules.IsEvaluable`, so "no alerts raised while faulted" is that same rule rather than a second one. The
+> live halves — stop a node for five minutes; publish a `sensor_fault`; publish a batch whose `ts` is ten minutes
+> behind — need the broker and SQL Server and are recorded in the roadmap block.
+
 ### B5. Auth, tokens and RBAC
 
 | Id | Case | Input | Expected | P | FR |
 |---|---|---|---|---|---|
 | TC-U-32 | Password hashing parameters and rehash-on-login | register, then log in with `PasswordIterations` lower than the current target | hash verifies; after login the hash is upgraded and the plaintext is never stored | 1 | FR-01 |
-| TC-U-33 | Access token claims and lifetime | issue, then decode | `sub`, `role`, `exp = iat + 15 min`; a token beyond `exp` is rejected | 1 | FR-01 |
+| TC-U-33 | Access token claims and lifetime | issue, then decode | `sub`, one `perm` claim per permission code of the account's role, `role` (a display code — nothing authorises on it), `ver = 2`, `exp = iat + 15 min`; a token beyond `exp` is rejected | 1 | FR-01 |
 | TC-U-34 | Refresh rotation is single-use and families are revoked on reuse | refresh twice with the same token | first succeeds and invalidates; second → `401 token_reused`, whole family revoked, audit entry | 1 | FR-01 |
 | TC-U-35 | Login throttling is per-username and generic | 11 failures within 15 min | lock at the 11th, identical error body in every failure, audit entries written | 1 | FR-01 |
-| TC-U-36 | RBAC matrix | Owner/Technician/Viewer × 10 actions | exactly the permission matrix in `02-design/06` §3; foreign terrarium → `404`, insufficient role → `403` | 1 | FR-02 |
+| TC-U-36 | Permission matrix | `Admin`/`Owner`/`Technician`/`Viewer` × the sixteen catalogue codes, plus a custom role an administrator created | exactly the matrix in `02-design/06` §3, one policy per code: a code the role does not hold → `403 insufficient_role`, a foreign terrarium → `404`. **Built 2026-10-10 (3.4)** for the four actions that exist over alerts and silences: ack, resolve, silence create and silence cancel name `alert.write`/`silence.write`, so a Viewer is refused by the authorisation layer before any handler runs — measured live (`403 insufficient_role` on all four, the blockquote at the end of §B5). The rows that were waiting on a feature now have one (the matrix itself at `/api/v1/admin/roles`, account management under `/users/*`, claiming a board under `device.provision`); a case over them is still owed | 1 | FR-02 |
 | TC-U-51 | Backup recovery code shape and storage | register | 20 characters from the 31-symbol claim-code alphabet (no `0`/`O`/`1`/`I`/`L`), stored as `SHA-256(code ‖ 16-byte salt)`, plaintext absent from the row | 1 | FR-01 |
 | TC-U-52 | Recovery with the backup code rotates everything | register, sign in, then recover with the code and a new password | code consumed and replaced, every refresh token revoked, the old password and the spent code both refused | 1 | FR-01 |
 | TC-U-53 | Server-issued reset code is single-use and time-boxed | `forgot-password`, then `reset-password` | the row holds only the SHA-256 and expires `PasswordReset:CodeMinutes` ahead; the code works once (case and separators ignored) and a replayed or expired one → `401 invalid_reset_code` | 1 | FR-01 |
@@ -183,6 +209,46 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-58 | Password policy shape (`BR-01.2`) | `PasswordPolicy.Validate` over the boundary cases: exactly 8 characters, 7 characters, a lower-case-only password, one with no special character, one with only a space as its "symbol", a 129-character one, a deny-listed one | each refusal names the rule it broke (`password_too_short`, `password_uppercase_required`, `password_special_required`, …) and every rule that fails is reported at once; the deny-list and the ≤ 128 cap still apply | 1 | FR-01 |
 | TC-U-56 | Issuing a second code closes the first | two `forgot-password` requests, then reset with the first code | the first code → `401 invalid_reset_code`; at most one code is ever live for an account | 1 | FR-01 |
 | TC-U-59 | A password change keeps its own session and ends the others (`ADR-022`) | two signed-in sessions, then a change that names one of them (and, separately, one that names none) | the named session still rotates and the other answers `401 refresh_token_invalid`; a caller that names no session — or names another account's token — has every token revoked | 1 | FR-01, ADR-022 |
+
+> **Built 2026-10-10 — the alert lifecycle and the silence windows (roadmap 3.4), which is where `TC-U-36`'s
+> alert-facing rows and the transition half of `TC-I-07` became testable.** 50 new unit cases and five new
+> integration cases:
+>
+> - **`AlertLifecycleTests` (9)** — one open alert acknowledges to exactly one owner; a second acknowledgement is
+>   refused **without touching the first**; a resolved alert cannot be acknowledged; a resolve straight from `Open`
+>   does not fabricate an acknowledgement; a resolve keeps an existing acknowledgement and measures `Duration` from
+>   the trigger; resolution is terminal and keeps the first reason; and the re-arm predicate is true for threshold
+>   alerts and false for the device-level families (`ADR-023`).
+> - **`MetricSilencePolicyTests` (10)** — the reason is required (and checked first, because it is the field a
+>   client always sends), the window must end in the future, exactly 24 hours is inside the cap and one second
+>   more is not, a reason longer than the column is refused, and the two questions the dispatcher will ask:
+>   `IsActiveAt` (the end instant is not inside the window, a cancelled window is never active) and `Covers` (a
+>   window with no metric covers every metric).
+> - **`AlertServiceTests` (18)** — paging asks for one row more than the page and returns a cursor only when there
+>   is more; a cursor this API did not issue and an inverted range are refusals, not empty pages; the detail's
+>   excerpt truncates at 240 points and says so, and a device-level alert carries none; **a foreign alert is
+>   `not_found` and writes nothing**; acknowledging stages exactly one audit row with the caller's address and
+>   broadcasts one `acknowledged` move; **resolving re-arms the dwell key and leaves the watermark alone**, while a
+>   device-level alert performs no dwell lookup at all; the reason and the note survive into the audit row, with the
+>   note trimmed; an unknown reason, an over-long note and a second resolve are refusals with the alert untouched;
+>   and a failing push leaves a stored change stored.
+> - **`MetricSilenceServiceTests` (13)** — create/list/cancel round trips with their audit rows, the whole-terrarium
+>   case, the three field refusals, a foreign terrarium or silence id answering `not_found`, only still-active
+>   windows listed, and a second `DELETE` changing nothing and writing no second audit row.
+> - **`AlertLifecycleTests` (integration, 5, real SQL Server)** — the EF scoping that makes a foreign account's
+>   alerts invisible to both the list and the lookup; the soft-delete filter on `Terrarium` reaching an alert
+>   through its foreign key; the cursor predicate the provider has to translate; **one transaction that leaves the
+>   resolved row, the re-armed `EvaluationState` and the audit entry together**; and the silence round trip.
+> - **Live, against a running API with no database** (which is what makes these route checks rather than data
+>   checks): `GET /api/v1/alerts` without a token → `401`; a Viewer token on ack, resolve, silence-create and
+>   silence-cancel → `403 insufficient_role` on all four; a bad `state`, a made-up cursor and an unknown resolve
+>   reason → `400` (`validation_failed`, `invalid_cursor`, `validation_failed`) *before* any database call; and with
+>   a Technician token every handler runs and fails only on the absent SQL Server (`500`, not the `404` a missing
+>   route would give). `swagger.json`: 35 operations, 22 requiring the bearer scheme — the 14 that already did plus
+>   all eight new ones.
+>
+> The *data* half of `TC-I-07` over HTTP (ack → resolve → second ack refused, read back through the API) still needs
+> SQL Server; the roadmap block records it as the next live run, alongside 3.3's `TC-I-09`.
 
 ### B6. Notification policy, retries and content
 
@@ -198,7 +264,26 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 | TC-U-44 | Invalid FCM token disables the channel | send returns `UNREGISTERED` | `ChannelsFcm` set false, notification logged, user informed on next app open | 3 | FR-13 |
 | TC-U-45 | Digest aggregation correctness | 7 warnings + 1 critical, peak 34.2 | digest states 8 alerts, worst metric and peak value | 3 | FR-13 |
 
+> **As built (2026-10-16, roadmap 3.5).** `TC-U-37…45` are covered as 24 `NotificationPolicyTests` cases (the matrix,
+> quiet hours across midnight, the retry instants, the ladder, the digest) and 12 `NotificationDispatcherTests` cases
+> that drive the real dispatcher through fake channels: the localisation half of `TC-U-42` is asserted against the
+> Vietnamese satellite deck, `TC-U-41` walks `t`, `t+5`, `t+35` and stops at `t+155`, `TC-U-43` stops the ladder at
+> an acknowledgement, `TC-U-44` switches the push channel off on `UNREGISTERED`, and `TC-U-40`/`TC-U-45` prove the
+> cap coalesces the push while the inbox entry and one digest still appear. `TC-I-12`'s "fake FCM client + a local
+> SMTP sink" is satisfied in halves: the fake client is the channel seam the dispatcher tests use, and the sink is
+> the Mailpit service the development stack now runs (see `02-design/05` §3).
+> **One line of the acceptance is not measured:** a real FCM push, which needs a Google service-account file and a
+> device registration token. The live run of 2026-10-16 recorded the inbox half end to end instead — one Vietnamese
+> entry, one `notified` timeline entry, `notifications_sent_total = 1` — and `TC-E2E-03` stays open with it.
+
 ### B7. Summaries, exposure index, coverage
+
+> **As built (2026-10-16).** The maths of this block has been in `Domain/Summaries/` since 3.6's first half
+> (`ExposureCalculator`, `CoverageMath`, `MinuteGrid`) and `TC-U-46…50` have been green since then — 18
+> `ExposureCalculatorTests` and 10 `MinuteGridTests` cases. What roadmap 3.6 still owes is not these numbers but
+> their **persistence and schedule**: the `TelemetryHourlyRollup` and `DailyEnvironmentalSummary` tables, the two
+> workers that write them, and `TC-I-06`'s recomputation after a back-fill. `GET /terrariums/{id}/summaries` is
+> therefore still unbuilt and says so in `07-appendices/03` §4.2.
 
 Reference dataset: target 26–32 °C, 40 min at 34.0 °C then 20 min at 33.0 °C, otherwise in range, no gaps.
 
@@ -223,6 +308,26 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 }
 ```
 
+### B8. Species-profile pictures (`BR-10.6`, added 2026-10-14)
+
+| Id | Case | Input | Expected | P | FR |
+|---|---|---|---|---|---|
+| TC-U-61 | An accepted picture is stored as what the bytes are | a PNG with a correct extension, declared `image/png` | the row records `image/png` and a key ending `.png`, the bytes are unchanged in the store, and the item carries `imageUrl` | 1 | FR-10 |
+| TC-U-62 | The declaration is checked but never trusted | a text file labelled `image/png`; a PNG labelled `text/html` | `image_invalid`, then `image_type_unsupported`; **no file, no row change, no audit entry** | 1 | FR-10 |
+| TC-U-63 | `application/octet-stream` counts as no claim | a real PNG declared `application/octet-stream` | accepted, stored as `image/png` | 2 | FR-10 |
+| TC-U-64 | The limit is enforced by a bounded read | 2 MB + 1 byte | `image_too_large`, nothing written | 1 | FR-10 |
+| TC-U-65 | Replacing discards the file it replaced | set PNG, then set JPEG | the key changes, the first key is deleted, one file remains | 1 | FR-10 |
+| TC-U-66 | Removal is idempotent and silent when there is nothing to do | remove twice, the second on a pictureless profile | both answer the profile; the second commits nothing and writes no audit row | 1 | FR-10 |
+| TC-U-67 | A built-in and a foreign profile are refused differently | set on a built-in; set/read on another account's profile | `builtin_immutable` for the first (the answer that offers *duplicate*), `not_found` for the second | 1 | FR-10, FR-02 |
+| TC-U-68 | A row whose file went missing answers "no picture" | delete the key behind the store's back, then read | `image_not_set`, and the row keeps its key so the inconsistency stays visible | 2 | FR-10 |
+
+> **Built 2026-10-14 — 17 cases in `SpeciesProfileImageTests`, all green.** The file store is faked in memory, so a
+> case can assert what was written *and* what was deleted; the row-level contract (`imageUrl` present exactly when a
+> picture is, `imageUpdatedAt` moving on every change) is asserted against the view, and
+> `TerrariumSummarySerialisationTests` in the same project covers the sibling rule for the terrarium's `rowVersion`.
+> The HTTP-level half — 27 assertions over `curl` against a live API and SQL Server, and the same flows driven in a
+> real browser — is recorded in `03-implementation/07`; the walkthrough a person can follow is `04-quality/03` 3.19.
+
 ---
 
 ## C. Backend integration tests (Testcontainers SQL Server + in-process MQTT)
@@ -235,7 +340,7 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-I-04 | Device health + fault events update state | health + `sensor_fault` event | health denorms updated (task 2.4); humidity `Unavailable` and no humidity alert (the `SensorFault` signal, task 3.3 — the event arrives on `events`, which ingest does not consume yet) | 1 | FR-07 |
 | TC-I-05 | Provisioning end to end | self-register → claim → connect with secret → publish | device bound, status `online`, first sample stored; a second claim of the same code → `404 claim_code_invalid`; a claim for an already-bound terrarium → `409` | 1 | FR-04, FR-05 |
 | TC-I-06 | Evaluation through the pipeline | `daily` fixture played back with a fake clock | exactly one alert, correct `TriggeredAt`, correct `PeakValue`; rollups and the daily summary agree with the fixture's hand-computed values | 1 | FR-11, FR-14 |
-| TC-I-07 | Alert lifecycle through the API | open → ack (Technician) → resolve (`FalsePositive`) | states and actors stored; a Viewer ack → `403`; a second ack → `409 alert_not_open` | 1 | FR-12, FR-02 |
+| TC-I-07 | Alert lifecycle through the API | open → ack (Technician) → resolve (`FalsePositive`) | states and actors stored; a Viewer ack → `403`; a second ack → `409 alert_not_open`. **Built 2026-10-10 (3.4)** in the two halves the project can run: the RBAC and refusal half is measured live against a running API (Viewer → `403 insufficient_role` on ack, resolve and both silence writes; an unknown reason → `400` before any database call), and the data half — states, actors, one audit row per action, the re-armed `EvaluationState` and the cursor-paged list — is asserted against real SQL Server in `tests/SmartReptile.Tests.Integration/AlertLifecycleTests.cs`. The whole scenario over HTTP, end to end, still needs a running database and is recorded as an outstanding live run | 1 | FR-12, FR-02 |
 | TC-I-08 | 30-minute broker outage then back-fill | stop broker, node buffers, restart | every buffered sample stored with quality bit 8, in `RecordedAt` order, zero duplicates, coverage for the window ≥ 98% | 1 | FR-06, FR-07, NFR-03 |
 | TC-I-09 | Silence watchdog raises and auto-resolves | stop publishing for 5 min, then resume | `DeviceSilent` Warning then auto-resolve; no metric alerts from missing data | 1 | FR-07 |
 | TC-I-10 | Range query bucketing | `daily` + `monthly` fixtures | 1 h → raw; 24 h → 5-min; 30 d → hourly with ≤ 720 points and `bucket` echoed in the response | 1 | FR-09 |
@@ -319,7 +424,7 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 | TC-W-09 | History range selection requests the right bucket | tap 30 d | API called with `from/to` for 30 days; bucket label "hourly" shown | 2 | FR-09 |
 | TC-W-10 | Chart keeps gaps and caps points | series with a 4 h gap and 900 points | nulls preserved (no interpolation), ≤ 720 points rendered | 1 | FR-09 |
 | TC-W-11 | Alerts inbox filters and shows the badge | 3 alerts, mixed severity/state | filter chips work; badge = open count | 1 | FR-12 |
-| TC-W-12 | Role gating on alert actions | `Viewer` session | Acknowledge/Resolve absent; for `Technician` present and wired | 1 | FR-02, FR-12 |
+| TC-W-12 | Permission gating on alert actions | a session whose role lacks `alert.write` | Acknowledge/Resolve absent; present and wired once the session's `perm` claims carry `alert.write` | 1 | FR-02, FR-12 |
 | TC-W-13 | Threshold editor validation | `min 40 / max 30` | field error shown, Save disabled, no API call | 1 | FR-10 |
 | TC-W-14 | Claim flow: invalid then valid code | fake API `404` then success | error state with guidance, then success state showing the bound terrarium | 1 | FR-04 |
 | TC-W-15 | Summary screen always shows coverage | summary with 69% coverage | low-confidence badge visible next to compliance; export button enabled and job status rendered | 2 | FR-14, FR-15 |
@@ -367,8 +472,8 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | Suite | Cases | Target |
 |---|---|---|
 | Firmware native (TC-U-FW-*) | 12 | all green before flashing a release build |
-| Backend unit (TC-U-*) | 56 | ≥ 70% line coverage on Domain + Application |
+| Backend unit (TC-U-*) | 64 | ≥ 70% line coverage on Domain + Application |
 | Backend integration | 19 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
 | E2E | 6 | executed per milestone, results recorded |
-| **Total** | **107** | |
+| **Total** | **115** | |

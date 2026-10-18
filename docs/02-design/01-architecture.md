@@ -134,11 +134,11 @@ flowchart LR
 |---|---|---|
 | Sensor values | Device (authoritative) → IngestWorker (persisted) | Evaluator, API, hub |
 | Device status / last seen | IngestWorker (from traffic + LWT) | API, hub, fleet view |
-| Effective thresholds | ThresholdService via API (Owner-authored) | Evaluator (cached), dashboard |
+| Effective thresholds | ThresholdService via API (authored under `terrarium.write`) | Evaluator (cached), dashboard |
 | Alert lifecycle | Evaluator (open/escalate/auto-resolve) + API (ack/manual resolve) | All clients |
 | Notification preferences | API (user-authored) | Dispatcher |
 | Rollups + daily summaries | RollupWorker (derived, recomputable) | API, reports, v2 dataset |
-| Terrarium/device binding | API (Owner-authored) | Everything |
+| Terrarium/device binding | API (authored under `terrarium.write`, bound under `device.provision`) | Everything |
 
 Rule of thumb visible throughout the design: **derived data is recomputable; authored data is audited.**
 

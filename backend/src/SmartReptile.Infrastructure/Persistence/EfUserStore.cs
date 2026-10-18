@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Infrastructure.Persistence;
@@ -13,13 +14,15 @@ public sealed class EfUserStore(SmartReptileDbContext db) : IUserStore
 {
     /// <inheritdoc />
     public Task<User?> FindUserAsync(string usernameOrEmail, CancellationToken cancellationToken) =>
-        db.Users.FirstOrDefaultAsync(
-            user => user.Username == usernameOrEmail || user.Email == usernameOrEmail,
-            cancellationToken);
+        Accounts(db.Users)
+            .FirstOrDefaultAsync(
+                user => user.Username == usernameOrEmail || user.Email == usernameOrEmail,
+                cancellationToken);
 
     /// <inheritdoc />
     public Task<User?> FindUserByIdAsync(Guid userId, CancellationToken cancellationToken) =>
-        db.Users.FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
+        Accounts(db.Users)
+            .FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 
     /// <inheritdoc />
     public async Task<TakenIdentifiers> FindTakenIdentifiersAsync(
@@ -41,6 +44,175 @@ public sealed class EfUserStore(SmartReptileDbContext db) : IUserStore
 
     /// <inheritdoc />
     public void AddUser(User user) => db.Users.Add(user);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<User>> ListAsync(
+        string? search,
+        int skip,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var query = Filtered(search);
+
+        return await query
+            .OrderBy(user => user.Username)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task<int> CountAsync(string? search, CancellationToken cancellationToken) =>
+        Filtered(search).CountAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<int> CountUsersWithPermissionAsync(
+        string permissionCode,
+        Guid? excludingUserId,
+        CancellationToken cancellationToken)
+    {
+        // Counted through the join rather than by role name: what protects the deployment is "somebody can still
+        // manage accounts", and a deployment whose administrator role was renamed or split must still be safe.
+        var query = db.Users.Where(user =>
+            user.DisabledAt == null
+            && user.Role!.Permissions.Any(grant => grant.PermissionCode == permissionCode));
+
+        if (excludingUserId is { } excluded)
+        {
+            query = query.Where(user => user.Id != excluded);
+        }
+
+        return query.CountAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListPermissionsAsync(Guid roleId, CancellationToken cancellationToken)
+    {
+        var codes = await db.RolePermissions
+            .Where(grant => grant.RoleId == roleId)
+            .Select(grant => grant.PermissionCode)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // Ordered here rather than in SQL: the catalogue's order lives in code, and a role holding a code this build
+        // no longer defines would otherwise sort unpredictably.
+        return [.. codes.OrderBy(Permissions.SortOrderOf)];
+    }
+
+    /// <inheritdoc />
+    public Task<Role?> FindRoleAsync(Guid roleId, CancellationToken cancellationToken) =>
+        db.Roles
+            .Include(role => role.Permissions)
+            .FirstOrDefaultAsync(role => role.Id == roleId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Role?> FindRoleByCodeAsync(string code, CancellationToken cancellationToken) =>
+        db.Roles
+            .Include(role => role.Permissions)
+            .FirstOrDefaultAsync(role => role.Code == code, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Role>> ListRolesAsync(CancellationToken cancellationToken) =>
+        await db.Roles
+            .Include(role => role.Permissions)
+            .OrderBy(role => role.Rank)
+            .ThenBy(role => role.Name)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public Task<int> CountUsersInRoleAsync(Guid roleId, CancellationToken cancellationToken) =>
+        db.Users.CountAsync(user => user.RoleId == roleId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, int>> CountUsersByRoleAsync(CancellationToken cancellationToken)
+    {
+        // Grouped in the database, then folded into a dictionary: a role nobody holds produces no group, and the
+        // caller's lookup treats a missing key as zero.
+        var counts = await db.Users
+            .GroupBy(user => user.RoleId)
+            .Select(group => new { RoleId = group.Key, Holders = group.Count() })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return counts.ToDictionary(row => row.RoleId, row => row.Holders);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Permission>> ListPermissionCatalogAsync(CancellationToken cancellationToken) =>
+        await db.PermissionCatalog
+            .OrderBy(permission => permission.SortOrder)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddRole(Role role) => db.Roles.Add(role);
+
+    /// <inheritdoc />
+    public void RemoveRole(Role role) => db.Roles.Remove(role);
+
+    /// <inheritdoc />
+    public async Task<AccountFootprint> FindFootprintAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        // Four counts rather than one join: each is an index seek, and an aggregate over a join would report a
+        // multiplied number the moment an account owns two enclosures with two boards.
+        //
+        // The terrarium count ignores the soft-delete filter on purpose: a removed enclosure still names its owner,
+        // and `Terrarium.UserId` is RESTRICT, so a delete that did not count it would fail at the database instead
+        // of answering with a reason.
+        var terrariums = await db.Terrariums
+            .IgnoreQueryFilters()
+            .CountAsync(terrarium => terrarium.UserId == userId, cancellationToken)
+            .ConfigureAwait(false);
+
+        var devices = await db.Devices
+            .CountAsync(device => device.UserId == userId, cancellationToken)
+            .ConfigureAwait(false);
+
+        var profiles = await db.SpeciesProfiles
+            .CountAsync(profile => profile.CreatedByUserId == userId, cancellationToken)
+            .ConfigureAwait(false);
+
+        var notifications = await db.NotificationLogs
+            .CountAsync(row => row.UserId == userId, cancellationToken)
+            .ConfigureAwait(false);
+
+        var sessions = await db.RefreshTokens
+            .CountAsync(token => token.UserId == userId && token.RevokedAt == null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return new AccountFootprint(terrariums, devices, profiles, notifications, sessions);
+    }
+
+    /// <inheritdoc />
+    public void RemoveUser(User user) => db.Users.Remove(user);
+
+    /// <inheritdoc />
+    public void AddAuditEntry(AuditLog entry) => db.AuditLogs.Add(entry);
+
+    /// <summary>
+    /// The list's filter, so paging and its count cannot disagree about which accounts are in the set. The search is
+    /// a <c>LIKE</c> on the two identifiers an administrator would search by; SQL Server's default collation makes it
+    /// case-insensitive, which is what BR-01.1 requires of the identifiers themselves.
+    /// </summary>
+    /// <remarks>
+    /// The role and its grants are loaded here as well as by the single-account reads, because the account summary
+    /// answers "what can this account do" from the navigation: without the second include the list would report an
+    /// empty permission set for every row, which reads as "this account can do nothing" rather than as a query that
+    /// forgot a join.
+    /// </remarks>
+    private IQueryable<User> Filtered(string? search) =>
+        Accounts(
+            string.IsNullOrWhiteSpace(search)
+                ? db.Users
+                : db.Users.Where(user =>
+                    user.Username.Contains(search.Trim()) || user.Email.Contains(search.Trim())));
+
+    /// <summary>An account query with the role and its grants, which every describe path reads.</summary>
+    /// <param name="query">Query to load the navigation for.</param>
+    private static IQueryable<User> Accounts(IQueryable<User> query) =>
+        query.Include(user => user.Role).ThenInclude(role => role!.Permissions);
 
     /// <inheritdoc />
     public Task<RefreshToken?> FindRefreshTokenAsync(byte[] tokenHash, CancellationToken cancellationToken) =>

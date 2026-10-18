@@ -15,7 +15,7 @@ Broker (dev): `mqtts://localhost:8883` · plaintext `1883` bound to loopback onl
 | User (app/dashboard) | `Authorization: Bearer <jwt>` (15 min) + refresh token via `POST /auth/refresh` |
 | Device (HTTPS fallback) | `Authorization: Device <deviceId>.<secret>` |
 | Device (MQTT) | `username = deviceId`, `password = secret`, TLS required |
-| Device (self-register / claim) | self-register is anonymous + rate limited; claim requires a user JWT with role `Owner` |
+| Device (self-register / claim) | self-register is anonymous + rate limited; claim requires a user JWT holding `device.provision` (§4.4) |
 
 ---
 
@@ -43,7 +43,7 @@ Errors: `400 registration_invalid` (a missing or malformed `chipId`/`macAddress`
 (returns the existing `deviceId` and a fresh code only if the device is still unclaimed), `429 rate_limited`.
 
 ### 2.3 `POST /api/v1/devices/claim`
-Requires `Owner`.
+Requires the `device.provision` permission (§4.4).
 
 ```http
 POST /api/v1/devices/claim
@@ -62,6 +62,29 @@ probed — `BR-02.2`), `409 terrarium_already_bound`.
 
 A revoked device stops occupying its terrarium — `IX_Device_TerrariumId` is filtered to `Status <> 3` — so its
 replacement is claimed into the same terrarium without a rebind step.
+
+### 2.4 `POST /api/v1/devices/claim-by-mac` (2026-10-14, TASKS item 8)
+
+Requires the `device.provision` permission (§4.4). The **lower-trust** pairing path: a claim code proves the caller has the board in front of them —
+it is shown on its screen and lives for minutes — while a MAC is printed on the case, broadcast on every network the
+board joins and guessable in bulk. It exists so a keeper holding a board whose screen has failed is not stuck, and it
+is confined to a board that has already self-registered and has no owner yet.
+
+```http
+POST /api/v1/devices/claim-by-mac
+Authorization: ******
+
+{ "macAddress": "A0-B1-C2-D3-E4-F5", "terrariumId": "6f1c…" }
+```
+
+The address is normalised before it is looked up — `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff`, `AABB.CCDD.EEFF` and
+bare hex all name the same board — and the comparison against the stored form is case-insensitive. The reply is
+`claim`'s body, because the act is the same: `{deviceId, secret, terrariumId, boundAtUtc}` with the secret returned
+once. Errors: `400 registration_invalid` with `errors[0].code = mac_invalid` (not twelve hex digits, optionally
+separated), `404 device_not_found` — **one** answer for an unknown address, a board already bound elsewhere and a
+revoked board, so the route cannot be used to test whether an address belongs to this fleet — `404 not_found` for an
+unknown or foreign terrarium, `409 terrarium_already_bound`. The audit row is `device.claimed` with
+`"method":"mac_address"`; a code claim carries `"method":"claim_code"`, so the trail can tell the two apart.
 
 ---
 
@@ -135,7 +158,8 @@ and counted in `ingest_rejected_total`, so a firmware typo is visible rather tha
 | `fw` | string | ✓ | ≤ 16 chars |
 | `ts` | string | ✓ | ISO-8601 UTC (`Z`); the instant of `t = 0` |
 | `samples[]` | array | ✓ | 1…120 items |
-| `samples[].t` | int32 | ✓ | seconds offset from `ts`, strictly increasing, ≤ 86 400 || `samples[].tf` | float | ✓ | filtered air temperature, °C |
+| `samples[].t` | int32 | ✓ | seconds offset from `ts`, strictly increasing, ≤ 86 400 |
+| `samples[].tf` | float | ✓ | filtered air temperature, °C |
 | `samples[].rh` | float | ✓ | relative humidity, % |
 | `samples[].lux` | float | ○ | illuminance, lx |
 | `samples[].uvi` | float | ○ | UV index |
@@ -220,20 +244,29 @@ budgets, and a device coming back from an outage is the one that needs to back-f
 
 ## 4. REST API reference
 
-Legend: `A` = anonymous, `U` = any authenticated role, `T` = Technician or Owner, `O` = Owner only.
+Legend: `A` = anonymous, `U` = an authenticated account with no permission beyond its token (the
+`AuthorizationPolicies.Authenticated` policy, §4.1), and every other cell names the **permission code** the route
+requires — `terrarium.read`, `terrarium.write`, `device.read`, `device.write`, `device.provision`, `alert.read`,
+`alert.write`, `notification.read`, `audit.read`, `species.read`, `species.write`, `user.read`, `user.manage`, plus the
+two **cross-account** codes `data.read.any` and `data.write.any` (§4.8). A code is a row of the permission catalogue,
+not a role: the product ships four roles — `Admin`, `Owner`, `Technician`, `Viewer` — each a named set of these codes,
+and a deployment may re-band them through the console, so this file names the capability the route needs and
+`02-design/06` §3 is the catalogue (its §3.1, the matrix).
 All timestamps are ISO-8601 UTC. All list endpoints support `?cursor=&pageSize=` (default 50, max 200) and
-return `nextCursor`.
+return `nextCursor` — as built, `GET /alerts` is the one endpoint that does; `GET /terrariums` says why it does not
+(§4.2).
 
 ### 4.1 Auth
 
 | Method | Path | Role | Body / params | Success | Errors |
 |---|---|---|---|---|---|
 | POST | `/auth/register` | A | `{username, email, password}` | `202 {status, recoveryCode}` | `400 registration_invalid`, `409 registration_conflict` |
-| POST | `/auth/login` | A | `{username, password}` | `200 {accessToken, refreshToken, expiresIn, user}` | `401 invalid_credentials`, `423 account_locked` |
+| POST | `/auth/login` | A | `{usernameOrEmail, password}` | `200 {accessToken, refreshToken, expiresIn, user}` | `401 invalid_credentials`, `423 account_locked` |
 | POST | `/auth/refresh` | A | `{refreshToken}` | `200 {accessToken, refreshToken}` | `401 token_invalid`, `401 token_reused` |
 | POST | `/auth/logout` | U | `{refreshToken}` | `204` | — |
 | GET | `/auth/me` | U | — | `200 {user, preferences}` | `401` |
 | PATCH | `/auth/me` | U | preferences, timezone, language | `200` | `400 validation_failed` |
+| DELETE | `/auth/me` | U | — | `204` (account disabled, every session ended) | `401` |
 | POST | `/auth/change-password` | U | `{currentPassword, newPassword, refreshToken}` | `204` (every **other** session's refresh tokens revoked; the one named by `refreshToken` survives — `ADR-022`) | `400 password_policy_violation`, `401 invalid_credentials`, `429 account_locked` |
 | POST | `/auth/recover` | A | `{usernameOrEmail, recoveryCode, newPassword}` | `200 {recoveryCode}` | `400 password_policy_violation`, `401 invalid_recovery_code`, `429 account_locked` |
 | POST | `/auth/forgot-password` | A | `{usernameOrEmail}` | `202` (empty body) | `404 identifier_unknown`, `429 rate_limited` |
@@ -269,25 +302,49 @@ registration errors are a `400 registration_invalid` that carries `errors[]` per
 `409 registration_conflict` the table always asked for (`ADR-020`, built 2026-10-07). `03-implementation/03` §6 is
 the as-built table.
 
+**Profile read and edit (2026-10-14, TASKS item 9a).** `PATCH /auth/me` and `DELETE /auth/me` are built; the profile
+the two `GET`/`PATCH` answers carry is `{id, username, email, role, roleId, permissions, preferredLanguage, timeZoneId,
+quietHoursStart, quietHoursEnd, minNotifySeverity, channelFcmEnabled, channelEmailEnabled, hasFcmToken}`. `PATCH` is a patch: an
+omitted member keeps its value. `preferredLanguage` is `vi` or `en` (ADR-013), `timeZoneId` must come from
+`GET /api/v1/time-zones` and is stored in that catalogue's spelling, and quiet hours are a **pair** of `HH:mm` values
+that may cross midnight — one end alone is `400 profile_invalid` with `errors[0].code = quiet_hours_incomplete`,
+because half a window says nothing about when notifications are suppressed; an empty pair clears it. `fcmToken` is
+accepted and cleared with an empty string, and is never echoed back: the response carries `hasFcmToken` instead,
+since the value is a delivery address the client already owns. Username, email and password are deliberately absent
+— the first two are the account's identifiers, with their own uniqueness and recovery consequences, and the password
+has its own route because it re-proves the old one. `DELETE /auth/me` **disables** the account and ends every session
+it holds, so a later sign-in attempt is refused; the row stays, because the terrariums, alerts, readings and audit
+rows that name it do — a purge is a retention decision with a policy attached, and item 12 keeps it out of v1.
+
+**Roles became permissions (2026-10-17).** `POST /auth/login` is unchanged in what it asks for — the password — and the
+session body, `GET /auth/me` and `PATCH /auth/me` now answer `roleId` and `permissions` alongside `role`: the codes the
+account's role currently grants, in catalogue order. The access token carries one `perm` claim per code, plus `role`
+**for display only** — nothing authorises on it — and `ver` = `2`. A client gates its screens on the codes
+(`hasPermission('terrarium.write')`), never on a role name, because a deployment may re-band a role without a release
+(`02-design/06` §3). **A role change, a password reset and a delete end the account's refresh tokens**, so the next
+refresh fails rather than silently keeping the old rights; an edit to a role's *permission set* does not end them, and
+takes effect within one 15-minute access-token lifetime.
+
 ### 4.2 Terrariums, thresholds, readings
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/terrariums` | U | list with device status summary |
-| POST | `/terrariums` | O | `{name, speciesProfileId, location?, description?, timeZoneId?}` |
-| GET | `/terrariums/{id}` | U (member) | includes `device`, `openAlertCount`, `latestSampleAt` |
-| PATCH | `/terrariums/{id}` | O | `If-Match: <rowversion>` for optimistic concurrency |
-| DELETE | `/terrariums/{id}` | O | soft delete; requires `?allowUnboundDevice=true` when a device is bound → else `409 conflict_device_bound` |
-| GET | `/terrariums/{id}/thresholds` | U | returns `effectiveThresholds[]` with `source` |
-| PUT | `/terrariums/{id}/thresholds` | O | upsert overrides; validates band ordering |
-| DELETE | `/terrariums/{id}/thresholds/{metricId}` | O | revert one metric to the profile |
-| GET | `/terrariums/{id}/readings/latest` | U | one row per metric + `deviceStatus`, `lastSeenAt` |
-| GET | `/terrariums/{id}/readings?metric=&from=&to=` | U | bucketed; response echoes `bucket` |
-| GET | `/terrariums/{id}/coverage?from=&to=` | U | expected vs received samples |
-| GET | `/terrariums/{id}/summaries?from=&to=` | U | daily summaries with coverage |
-| POST | `/terrariums/{id}/silences` | T | `{metricId?, untilUtc, reason}` (≤ 24 h) |
-| DELETE | `/terrariums/{id}/silences/{silenceId}` | T | cancel early |
-| POST | `/terrariums/{id}/exports` | U | `{format, from, to, metricIds?}` → job |
+| GET | `/terrariums` | `terrarium.read` | list with device status summary |
+| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound |
+| GET | `/terrariums/{id}` | `terrarium.read` (member) | includes `device`, `openAlertCount`, `latestSampleAt`, `rowVersion` |
+| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion` |
+| DELETE | `/terrariums/{id}` | `terrarium.write` | soft delete; requires `?allowUnboundDevice=true` when a device is bound → else `409 conflict_device_bound` |
+| GET | `/terrariums/{id}/thresholds` | `terrarium.read` | returns `effectiveThresholds[]` with `source` |
+| PUT | `/terrariums/{id}/thresholds` | `terrarium.write` | upsert overrides; validates band ordering |
+| DELETE | `/terrariums/{id}/thresholds/{metricId}` | `terrarium.write` | revert one metric to the profile |
+| GET | `/terrariums/{id}/readings/latest` | `terrarium.read` | one row per metric + `deviceStatus`, `lastSeenAt` |
+| GET | `/terrariums/{id}/readings?metric=&from=&to=` | `terrarium.read` | bucketed; response echoes `bucket` |
+| GET | `/terrariums/{id}/coverage?from=&to=` | `terrarium.read` | expected vs received samples |
+| GET | `/terrariums/{id}/summaries?from=&to=` | `terrarium.read` | daily summaries with coverage — **not built (roadmap 3.6)** |
+| POST | `/terrariums/{id}/silences` | `silence.write` | `{metricId?, untilUtc, reason}` (≤ 24 h) |
+| GET | `/terrariums/{id}/silences` | `alert.read` | windows still in force — an addition, §4.5 |
+| DELETE | `/terrariums/{id}/silences/{silenceId}` | `silence.write` | cancel early |
+| POST | `/terrariums/{id}/exports` | `terrarium.read` | `{format, from, to, metricIds?}` → job |
 
 `readings` response shape:
 
@@ -303,15 +360,19 @@ Gaps are `null` values with `count: 0` — never interpolated (FR-09 BR-09.5). A
 every bucket in the window, empty ones included. A `raw` series carries one point per sample instead: a sample's own
 timestamp is its bucket, so a gap shows up as absent points rather than as nulls.
 
-**Built so far (roadmap 2.8).** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
+**Built so far (roadmap 2.8, 3.1, 3.4).** `GET /terrariums`, `POST /terrariums`, `GET /terrariums/{id}`,
 `GET /terrariums/{id}/readings/latest`, `GET /terrariums/{id}/readings` and `GET /terrariums/{id}/coverage`; plus,
 since 2026-10-09, `PATCH /terrariums/{id}` and `DELETE /terrariums/{id}` — FR-03's update and delete halves — and
-`GET /terrariums/{id}/thresholds` — 3.1's read half. The rest of this table — threshold write, silences,
-summaries, exports — is specified and not built; the threshold write half is 3.1's remainder, silences 3.4 and
-summaries 3.6.
+`GET /terrariums/{id}/thresholds` — 3.1's read half. Since 2026-10-10 the three silence routes are built too (3.4;
+see §4.5), including one this table did not have: `GET /terrariums/{id}/silences`, because the contract asks for a
+silence to be "visible on the dashboard" and the client has no other way to learn the id it must cancel. And since
+2026-10-13 the threshold write half is built — `PUT /terrariums/{id}/thresholds` and
+`DELETE /terrariums/{id}/thresholds/{metric}`, described below — which closes 3.1. The rest of this table —
+`GET /terrariums/{id}/summaries` and `POST /terrariums/{id}/exports` — is specified and not built; the summaries are
+3.6 and the export task is M4's.
 
-**`GET /terrariums/{id}/thresholds` as built.** Authenticated, not role-gated (`U`), scoped to the caller like
-every other route here, and read-only:
+**`GET /terrariums/{id}/thresholds` as built.** `terrarium.read` only, scoped to the caller like
+every other route here:
 
 ```json
 {
@@ -334,12 +395,48 @@ response is a statement about now rather than about configuration. **`capturedAt
 the answer** so a phase-dependent result can be reproduced instead of argued about. Entries are ordered by metric
 key (`humidityPct` before `tempC`), matching `readings/latest`, so rows keep their places between reloads.
 
+**`PUT`/`DELETE` overrides as built (3.1's write half, 2026-10-13).** Both require `terrarium.write` — the policy `POST`,
+`PATCH` and `DELETE` on the terrarium already use — and both answer with the **resulting effective set**, in exactly
+the shape `GET` returns, so an editor re-renders from one payload rather than two:
+
+```json
+PUT /terrariums/{id}/thresholds
+{ "overrides": [ { "metric": "tempC", "phase": "any", "targetMin": 28, "targetMax": 30,
+                   "criticalMin": 22, "criticalMax": 34.5, "dwellWarnMinutes": 5, "dwellCritMinutes": 2,
+                   "recoveryMargin": 0.5, "note": "summer", "enabled": true } ] }
+```
+
+`metric` and both target bounds are required; `phase` defaults to `any`, `criticalMin`/`criticalMax` to the derived
+margin, and the three engine parameters to the engine's own defaults. The body is a **patch over the override set**:
+a metric it does not mention keeps its override, so `{"overrides":[]}` is a valid no-op. Every entry is validated
+before anything is written, so one incoherent band changes nothing at all, and the answer is `400 validation_failed`
+with one entry per problem addressed by position (`overrides[1].targetMin`) carrying the stable codes
+`metric_invalid`, `threshold_phase_invalid`, `threshold_target_required`, `threshold_note_too_long`,
+`threshold_duplicate`, or the band rules' own (`threshold_ordering_invalid`, `threshold_critical_invalid`,
+`threshold_dwell_invalid`, `threshold_recovery_margin_invalid`, `threshold_implausible_band`). A band identical to
+the stored one writes nothing and records no history.
+
+`DELETE /terrariums/{id}/thresholds/{metric}` removes **every** override the terrarium holds for the metric,
+whichever phase — "revert this metric" is the metric, not the phase the caller happened to be looking at. It is
+idempotent (a metric carrying no override is not an error) and refuses only an unknown key, which is a client
+mistake rather than a no-op.
+
+Both write a `ThresholdSnapshot` of the set now in force, in the same unit of work as the change. That is what makes
+`TC-U-26` hold: an alert **already open** keeps its denormalised `BandMin`/`BandMax` for the record while the next
+sample is judged against the new band, and the normal recovery path — never a special "threshold changed" outcome —
+is what closes it if the new band puts the reading back in range (UC-03 A4). Neither route takes an `If-Match`:
+§4.2 lists the precondition for `PATCH /terrariums/{id}` alone.
+
 **`PATCH /terrariums/{id}` requires `If-Match`.** `GET`/`POST`/`PATCH` return the row's SQL Server `rowversion` as
-a strong `ETag`, and the update must send it back:
+a strong `ETag` **and, base64, as the item's `rowVersion` field**, and the update must send one of the two back —
+they are the same value, so a client uses whichever it can read. The field exists for clients that cannot read
+response headers at all: Swagger UI shows no response headers and, before the parameter was declared, no `If-Match`
+box either, which left the route readable but not updatable from the one surface the demo is driven from. List items
+have no `rowVersion`: a list is a read, and a token there would invite an update from a stale copy.
 
 | Situation | Answer |
 |---|---|
-| `If-Match` matches the stored `rowversion` | `200` with the updated item and the **new** `ETag` |
+| `If-Match` matches the stored `rowversion` | `200` with the updated item, the **new** `ETag` and the new `rowVersion` |
 | `If-Match` is stale, or the row moved between the read and the write | `412 precondition_failed` |
 | `If-Match` is absent or unparseable | `428 precondition_required` |
 | `If-Match: *` | accepted — existence is enough, and the token is not compared |
@@ -350,7 +447,10 @@ string clear the field — the one way a JSON body can say "clear it" once it ha
 validation codes are `POST`'s (`terrarium_name_required`, `terrarium_name_too_long`, `terrarium_location_too_long`,
 `terrarium_description_too_long`, `terrarium_timezone_invalid`, `species_profile_not_found`). The precondition is
 checked before the body because a stale client should be told to reload, not handed a validation report about a
-version of the terrarium it is not looking at.
+version of the terrarium it is not looking at. Both refusals say where the replacement comes from — `GET
+/terrariums/{id}`, naming the `ETag` header and the `rowVersion` field — because a caller who has already sent a
+token has done the read once and "reload it" alone is not a next step it can take from a surface that shows no
+headers (2026-10-14).
 
 **`DELETE /terrariums/{id}` is a soft delete** — readings, alerts and summaries survive — and it refuses to remove
 an enclosure a live device is still reporting into: `409 conflict_device_bound` unless the request carries
@@ -363,6 +463,40 @@ closed vocabulary has no `terrarium.*` verb.
 
 `GET /terrariums` answers `{ "items": [ … ] }` and is **not paginated**: the per-account count is small and the
 `?cursor=&pageSize=` convention in the legend above is not implemented yet, so no `nextCursor` is returned.
+
+**Ownership, deletion and the administrator (2026-10-14, TASKS items 3, 5 and 6).** Three readings that changed on
+this date, stated here because they are contract rather than implementation:
+
+- **A foreign terrarium is `403 forbidden_terrarium`**, not `404`. A keeper who mistyped an id and a keeper looking
+  at somebody else's enclosure need different next steps, and the row is not disclosed either way. **This is a
+  deliberate narrowing of `BR-02.2` to the terrarium routes**: alerts, silences, species profiles and devices still
+  answer `404 not_found` for another account's resource, which is what keeps their ids unprobeable. The
+  inconsistency is recorded in `05-release/03` §5 rather than left to be discovered.
+- **A soft-deleted terrarium is `410 terrarium_deleted`**, not `404`. Its readings, alerts and summaries are still
+  stored, so answering "no such thing" would say the opposite of the truth.
+- **The case is decided by a `Status` column, not by a null timestamp.** `Terrarium.Status` (`Active`/`Deleted`) is
+  what the model's query filter reads; `DeletedAt` remains as the detail of *when*, and the migration back-fills the
+  new column from it, so an enclosure deleted before this change does not come back to life.
+- **An administrator sees and acts on any account's terrariums**, on every route in this table including the reads
+  and both threshold writes. Since 2026-10-17 that is expressed as permissions rather than a composite policy: the
+  routes name `terrarium.read`/`terrarium.write` like every other caller's, and the *service* widens the answer for
+  an account holding `data.read.any`/`data.write.any`
+  (`TerrariumService.IsMemberAsync(..., mayReachAnyAccount)`). An administrator's list and detail answers carry `ownerUserId`
+  so the client can say whose enclosure it is; an ordinary caller's never do. A cross-account `PATCH` or `DELETE`
+  writes an audit row (`terrarium.updated`, `terrarium.deleted`) with the administrator as the actor and the owner in
+  the payload — the ordinary owner edit stays unaudited, as it was.
+
+**Creating an enclosure with a board in one request (2026-10-14, TASKS item 2).** `POST /terrariums` accepts
+`deviceId` (the board's public id) or `macAddress` (item 8's spellings), and leaving both out is exactly the
+behaviour that existed before. Naming one **is a claim**: the board has to be claimable (registered, unbound, not
+revoked) and the response carries the one-time `deviceSecret`, exactly as `POST /devices/claim` does — the
+alternative would be a board that can neither publish nor be claimed again, because the enclosure it now belongs to
+already holds a device. Both selectors at once is refused rather than resolved by precedence. The board is resolved
+**before** anything is written, so a request naming a board that cannot be used creates no enclosure at all, and the
+enclosure, the binding, the credential and the audit row commit in one unit of work. The field errors are
+`400 validation_failed` with `device_not_found`, `device_already_bound`, `device_selector_ambiguous` or
+`mac_invalid`, each naming `deviceId` or `macAddress` — a 400 rather than a 404 because the board is a field of the
+body the caller sent, exactly as an unknown `speciesProfileId` already is.
 
 Bucket selection follows BR-09.1, with the width capped so the point budget (NFR-02) cannot be broken by a wide
 window or by an unaligned `from`:
@@ -416,7 +550,7 @@ required ISO-8601 instants with `from < to`, otherwise `400 invalid_range`.
 about a device, and there is nothing honest to say about `null`.
 
 `POST /terrariums` takes `{name, speciesProfileId, location?, description?, timeZoneId?}` and answers `201` with the
-item shape below. It is `Owner`-gated and exists ahead of the rest of FR-03 because every other route needs a
+item shape below. It requires `terrarium.write` and exists ahead of the rest of FR-03 because every other route needs a
 terrarium to point at — `POST /devices/claim` has nothing to bind a board to until one exists. Validation is
 `400 validation_failed` with field-level `errors[]` (`terrarium_name_required`, `terrarium_location_too_long`,
 `terrarium_description_too_long`, `terrarium_timezone_invalid`, `species_profile_not_found`); `timeZoneId` falls back
@@ -442,42 +576,328 @@ be probed (BR-02.2).
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/species-profiles` | U | built-ins + the user's own |
-| POST | `/species-profiles` | O | custom profile; bands validated |
-| POST | `/species-profiles/{id}/duplicate` | O | copy a built-in into an editable custom profile |
-| PATCH | `/species-profiles/{id}` | O | built-ins return `403 builtin_immutable` |
-| DELETE | `/species-profiles/{id}` | O | `409 profile_in_use` if assigned to a terrarium |
+| GET | `/species-profiles` | `species.read` | built-ins + the user's own |
+| POST | `/species-profiles` | `species.write` | custom profile; bands validated |
+| POST | `/species-profiles/{id}/duplicate` | `species.write` | copy a built-in into an editable custom profile |
+| PATCH | `/species-profiles/{id}` | `species.write` | built-ins return `403 builtin_immutable` |
+| DELETE | `/species-profiles/{id}` | `species.write` | `409 profile_in_use` if assigned to a terrarium |
+| POST | `/species-profiles/{id}/image` | `species.write` | `multipart/form-data`, one part named `file`; PNG/JPEG/WebP ≤ 2 MB; replaces any picture already there |
+| GET | `/species-profiles/{id}/image` | `species.read` | the picture's bytes; needs the bearer token, so a client fetches it rather than linking it |
+| DELETE | `/species-profiles/{id}/image` | `species.write` | idempotent; answers the profile, not `204` |
+
+**As built (roadmap 3.9, 2026-10-13; the picture added 2026-10-14).** All eight routes are implemented. What follows is contract rather than
+implementation, because a client written against either reading would break:
+
+- **Reads name `species.read` and the writes `species.write`** — the catalogue is shared data, so it is the
+  administrator's role, which is seeded with `species.write`, that authors it, and a keeper is refused
+  (`403 insufficient_role`) rather than rewriting what every terrarium is judged against. This is the one place a
+  keeper's write code does not reach the catalogue: it was `Owner`-gated when the routes were first built, and
+  `02-design/06` §3 records the change.
+
+- **The list carries the bands**, and is unpaged. It is four built-ins plus whatever the account authored, and the
+  picker in `POST /terrariums` needs all of them at once.
+- **Create and duplicate answer `200` with the profile, not `201` with a `Location`** — the contract has no
+  read-by-id route to point one at, the reading the silence routes took. The profile comes back whole, so a client
+  can render what it just made. A duplicate is named `"<source> (copy)"` when the body names nothing, and carries
+  its source's `sourceRef`, because a copy whose numbers lost their citation would be a second, quieter way of
+  shipping an unsourced range.
+- **`PATCH` replaces the band set when `bands` is sent.** An omitted member is left alone and an empty string clears
+  a text field; a sent `bands` is the complete set afterwards, never a merge — half a band cannot be validated.
+- **The three refusals are distinguished**: `403 builtin_immutable` (the row is visible and immutable — the client
+  can offer to duplicate it), `404 not_found` (a foreign profile, indistinguishable from a made-up id, BR-02.2), and
+  `409 profile_in_use`. Soft-deleted terrariums count towards "in use": their rows still hold the foreign key, so
+  ignoring them would turn a documented `409` into a constraint violation.
+- **`sourceUrl` stays reserved** for a verified citation: a custom band may carry `sourceRef`, and nothing this build
+  writes sets a URL.
+- **`BR-10.5`'s climate-zone warning is the client's**, not this API's: `climateZone` travels on every profile so a
+  client can judge a band against the zone's ranges in `07-appendices/05` §4. The server refuses only what BR-10.2
+  and the metric dictionary's plausible range make impossible.
+
+**The picture, as built 2026-10-14.** A profile may carry one picture, and it is the only part of a profile that is
+not JSON, so it has routes of its own. Four readings are contract:
+
+- **What is stored is what the bytes turned out to be.** The part's own `Content-Type` is checked and then
+  discarded: the file is stored under the media type sniffed from its signature (PNG, JPEG or WebP), because a
+  caller's claim about its own file cannot be the reason a browser later treats it as an image. A *specific*
+  declared type outside the three is refused as `400 image_type_unsupported`; `application/octet-stream` counts as
+  no claim at all, since that is what a client sends when it does not know its own file's type. Bytes that are not
+  one of the three are `400 image_invalid`, whatever they were labelled. The limit is 2 MB, enforced by a bounded
+  read — `400 image_too_large` costs 2 MB of buffering, not the size of what was sent.
+- **Both writes answer the whole profile** in the shape the reads return — `200` with the item, no `201` and no
+  `204` — so a client re-renders from the payload it was just handed. `DELETE` on a profile with no picture is not
+  an error and writes no audit row, because nothing changed.
+- **The item carries `imageUrl` and `imageUpdatedAt`**, not the storage key: `imageUrl` is the relative path of the
+  route above and is `null` when there is no picture, which is the ordinary state of a built-in. `imageUpdatedAt`
+  is the cache-busting value — replacing a picture does not change its URL — and it is a timestamp of the picture
+  being set, replaced *or removed*, so a client must read it as "when this changed last" rather than as "when the
+  current picture was taken".
+- **The image route needs the caller's token**, like every other read, and the set of profiles it will serve is the
+  set the list returns: a built-in (everyone) or the account's own. That is why a client *fetches* the bytes and
+  hands the browser an object URL instead of pointing an `img` tag at it — the alternative was a second place a
+  bearer token is accepted from a query string, which `/hubs` holds alone (`02-design/06` §2). The route answers
+  `404 image_not_set` for a profile with no picture and `404 not_found` for one the caller may not see, so the two
+  are distinguishable without disclosing anything a foreign id would.
 
 ### 4.4 Devices
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/devices` | U | fleet list with status, firmware, RSSI, last seen, uptime |
-| PATCH | `/devices/{id}` | O | rename, set sampling/publish interval (queues `set_config`) |
-| POST | `/devices/{id}/rebind` | O | `{terrariumId}` — unbind + rebind, audited |
-| POST | `/devices/{id}/rotate-secret` | O | returns a new secret once; old one valid for the 10-min grace window |
-| POST | `/devices/{id}/revoke` | O | immediate disconnect + credential invalidation |
-| POST | `/devices/{id}/calibration` | O | `{tempOffsetC?, rhOffsetPct?, luxGain?}` |
-| POST | `/devices/{id}/commands` | O | `{type, parameters}` → queued, ack-tracked |
-| GET | `/devices/{id}/commands/{cmdId}` | U | `queued` \| `sent` \| `acked` \| `failed` |
+| GET | `/devices` | `device.read` | fleet list with status, firmware, RSSI, last seen, uptime — **as built**, see below |
+| GET | `/devices/{id}` | `device.read` | one board, by public id — **as built** |
+| PATCH | `/devices/{id}` | `device.write` | rename, set sampling/publish interval — **as built**, stored rather than queued |
+| DELETE | `/devices/{id}` | `device.write` | revoke + detach; the row survives — **as built** |
+| POST | `/devices/claim-by-mac` | `device.provision` | bind a self-registered board by the MAC printed on it — **as built**, §2.4 |
+| POST | `/devices/{id}/rebind` | `device.provision` | `{terrariumId}` — unbind + rebind, audited |
+| POST | `/devices/{id}/rotate-secret` | `device.provision` | returns a new secret once; old one valid for the 10-min grace window |
+| POST | `/devices/{id}/revoke` | `device.provision` | immediate disconnect + credential invalidation |
+| POST | `/devices/{id}/calibration` | `device.write` | `{tempOffsetC?, rhOffsetPct?, luxGain?}` |
+| POST | `/devices/{id}/commands` | `device.write` | `{type, parameters}` → queued, ack-tracked |
+| GET | `/devices/{id}/commands/{cmdId}` | `device.read` | `queued` \| `sent` \| `acked` \| `failed` |
 | POST | `/devices/{id}/snapshots` | Device | multipart JPEG ≤ 512 KB, ≤ 1 per 30 s (FR-17) |
-| GET | `/devices/{id}/snapshots/latest` | U | metadata + short-lived URL |
+| GET | `/devices/{id}/snapshots/latest` | `device.read` | metadata + short-lived URL |
+
+**As built (2026-10-14, TASKS item 9b).** The five routes marked above are implemented; `rebind`, `calibration`,
+`commands` and the two `snapshots` routes are not, and stay listed so the gap is visible rather than implied. What
+the built ones settle:
+
+- **`GET /devices` and `GET /devices/{id}` are scoped by the caller's `UserId`**, which claiming sets. A board that
+  self-registered but was never claimed has no owner and therefore appears in nobody's fleet — and answers
+  `404 not_found` to everyone, which is also how a foreign board is refused, so the routes cannot be used to
+  enumerate boards in provisioning mode.
+- **Both the stored state and the derived badge are sent.** `status` is the lifecycle column (`provisioning`,
+  `online`, `offline`, `revoked`, `maintenance`); `runtime` is the online/offline badge derived through the same
+  `DeviceSilencePolicy` call the terrarium header uses (BR-07.2), so the two screens cannot disagree about one board.
+  They answer different questions — "is it misconfigured?" versus "is it reporting?".
+- **`PATCH` is a patch**, and it stores the desired values rather than reaching into the node: `deviceName` (≤ 60
+  characters; an empty string restores the default label), `samplingIntervalSec` and `publishIntervalSec` (10–300 s
+  each, `errors[0].code = interval_out_of_range` otherwise). A per-device calibration write and a queued
+  `set_config` remain unbuilt, so a board picks the new interval up on its next connection. `PATCH` is **not
+  audited**: `BR-18.4` names the credential operations, and renaming a node is the ordinary use of a settings screen.
+- **`DELETE` is not a row delete.** It revokes every credential, closes the live session and detaches the board from
+  its enclosure — the same credential effect as `/revoke`, plus the unbinding that frees the enclosure's DI-04 slot
+  for a replacement. The readings, health reports, events and audit rows that name the board survive, and the answer
+  describes the revoked board rather than being empty. Recorded as `device.revoked` with `"detached":true`; unlike
+  `revoke`, it also finishes the job for a board that was revoked while still bound.
 
 ### 4.5 Alerts, notifications, ops
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/alerts?state=&severity=&metric=&from=&to=` | U | paged, newest first |
-| GET | `/alerts/{id}` | U | includes band, snapshot reference, value series excerpt |
-| POST | `/alerts/{id}/ack` | T | `409 alert_not_open` if already resolved |
-| POST | `/alerts/{id}/resolve` | T | `{reason: Recovered\|FalsePositive\|SensorFault\|Accepted, note?}` |
-| GET | `/alerts/{id}/timeline` | U | trigger → escalation → ack → resolve with actors |
-| GET | `/notifications?unreadOnly=true` | U | in-app inbox |
-| POST | `/notifications/{id}/read`, `/notifications/read-all` | U | |
-| GET | `/exports/{jobId}`, `/exports/{jobId}/download?token=` | U | token valid 24 h |
-| GET | `/audit?entity=&entityId=&from=&to=` | O | own terrariums only |
+| GET | `/alerts?family=&state=&severity=&metric=&from=&to=` | `alert.read` | paged, newest first; every row carries its own `family` |
+| GET | `/alerts/{id}` | `alert.read` | includes band, snapshot reference, value series excerpt |
+| POST | `/alerts/{id}/ack` | `alert.write` | `409 alert_not_open` if already resolved |
+| POST | `/alerts/{id}/resolve` | `alert.write` | `{reason: Recovered\|FalsePositive\|SensorFault\|Accepted, note?}` |
+| GET | `/alerts/{id}/timeline` | `alert.read` | trigger → escalation → ack → resolve with actors |
+| GET | `/notifications?unreadOnly=true` | `notification.read` | in-app inbox |
+| POST | `/notifications/{id}/read`, `/notifications/read-all` | `notification.read` | |
+| GET | `/exports/{jobId}`, `/exports/{jobId}/download?token=` | `terrarium.read` | token valid 24 h |
+| GET | `/audit?entity=&entityId=&from=&to=` | `audit.read` | own terrariums only |
 | GET | `/health`, `/ready`, `/metrics` | A | no secrets; `/ready` → `503` when a dependency is down |
 | GET | `/version` | A | `{api, schema, minFirmware}` |
+
+**As built (roadmap 3.4, 2026-10-10).** Every alert route above and all three silence routes are implemented;
+notifications, exports and `/audit` are 3.5, 3.7 and the export task. **Updated 2026-10-16:** notifications are built
+(3.5) and `/audit` is built (3.7); the export task is still M4's. Eight readings this build settles, stated here
+because they are contract rather than implementation:
+
+- **`GET /alerts` is the first endpoint to implement the documented paging convention** (`?cursor=&pageSize=`,
+  default 50, max 200, `nextCursor`). The cursor is opaque — base64 of `triggeredAt|id` — and the order is
+  `TriggeredAt DESC, Id DESC`: newest first by *when the excursion started*, so a back-filled alert appears where it
+  happened, not where the system learned of it. The pair is what makes the order total; an identity alone would not
+  say which of two alerts that share an instant came first.
+- **Filters are the contract's five**, and their vocabulary is the response's: `state` is `Open`, `Acknowledged` or
+  `Resolved`, `severity` is `Info`, `Warning` or `Critical` (case-insensitive), `metric` is the REST key (`tempC`),
+  `family` is `enclosure` or `species` — the row's own `family`, carried even by the device-level alerts that have no
+  metric to derive it from (2026-10-17) — and `from`/`to` filter on `TriggeredAt`. An unknown value is a
+  `400` naming the alternatives rather than an empty page, and an unknown `family` is `400 family_invalid`.
+- **The detail carries no snapshot reference**, although the table above lists one: `Alert.ThresholdSnapshotId`
+  exists in `07-appendices/02` §3.8's sketch and in no built table, so a field named after it would promise
+  something the database cannot keep. The band the alert denormalises is what explains it today, and the reference
+  arrives with 3.1's remaining half.
+- **The series excerpt is capped at the newest 240 readings** of the episode, oldest first, with `seriesTruncated`
+  when the episode was longer — an hour at the default 15-second interval, which is what "excerpt" can mean without
+  a cap that depends on the deployment. A device-level alert (silence, sensor fault, clock skew) is not about a
+  value and carries an empty series.
+- **The resolution note lives on the audit entry, not on the alert.** The contract has `{reason, note?}` while the
+  alert row has five fields that would have to grow a sixth; `Alert.Message` is reserved for render-time text
+  (`07-appendices/02` §3.8), so the note is written into the `alert.resolved` audit row and read back by the
+  timeline. The reason stays a column, because it is machine-readable and the report groups by it.
+- **A second acknowledgement is `409 alert_not_open`**, the same answer a resolved alert gives: in both cases the
+  request changed nothing, and one code is one thing for a client to handle. Resolution is allowed straight from
+  `Open` and deliberately does not fabricate an acknowledgement — the timeline should say what happened.
+- **Resolving a threshold alert re-arms its dwell key.** The alert is closed, the `EvaluationState` window for
+  `(terrarium, metric, phase)` is cleared, and the alert may only return after the band has been left for the dwell
+  again. Without that, a value that never came back into band would re-open the very next sample, and a keeper who
+  chose `Accepted` would be told the same thing one interval later. A longer quiet period is what a **silence** is
+  for; the two features are deliberately different mechanisms (`02-design/05` §5).
+- **The timeline's vocabulary is the hub event's** — `opened`, `acknowledged`, `resolved` — with the actor, the
+  reason and the note. Escalation entries are absent until 3.5, exactly as the design arranges them: §02-design/05
+  §6 records escalations as `NotificationLog` rows carrying the alert id, and the alert row keeps no escalation
+  instant because escalation edits it in place (one row per episode is what DI-01's unique index is for).
+
+**Silences as built.** `POST` answers `200` with the created window rather than `201` with a `Location`, because
+there is no read-by-id route to point at; `GET` returns only the windows that are still in force, since an expired
+one is history and history is the audit trail's job. `metric` may be omitted, and `null` means **every metric of the
+terrarium including its device-level alerts** — a keeper going away for the weekend silences the box, not five
+metrics one at a time. The cap is 24 hours and the reason is mandatory, both from §02-design/05 §5, and
+`DELETE` is idempotent: a second cancel changes nothing, writes no second audit row and still answers `204`, because
+a `DELETE` that failed on a retry would leave a keeper believing a suppression was still in force. A silence
+suppresses **notification and not detection** — alerts are still raised, counted, touched and resolved during one,
+and the dispatcher of 3.5 reads the same `IsActiveAt`/`Covers` rule that the list endpoint renders.
+
+The two writes name **`silence.write`** rather than `alert.write` (changed 2026-10-17 with the permission matrix):
+going quiet is a decision about being told, not about an alert's lifecycle, so a deployment that wants a technician
+who may acknowledge but not silence can express it with that one grant. All four shipped roles that may acknowledge
+already hold both, so nothing about the seeded behaviour changed.
+
+**Notifications as built (roadmap 3.5, 2026-10-16).** The three inbox routes above exist, plus the timeline entry
+they feed. Five readings of the contract, stated here because a client depends on each:
+
+- **`GET /notifications` answers `{items, unread}`** where `unread` is the account's whole unread count rather than
+  the page's, so a badge can be rendered from the same response as the list. An item is
+  `{id, channel, title, body, deepLink, alertId, terrariumId, step, isRead, sentAt, readAt}`; `step` is `0` for a
+  first delivery and `1`–`3` for §02-design/05 §6's ladder, which is what lets a client label a repeat rather than
+  showing the same sentence twice with no explanation.
+- **Only delivered rows appear in the inbox.** A suppressed row is the report's material, not the keeper's: the
+  screen answers "what was I told", and an entry that says "you were told nothing about this" would be a second
+  inbox of things that did not happen. The suppression table is read from the database, not from this route.
+- **`POST /notifications/{id}/read` is idempotent** and answers `204`; a second call on a read entry answers `204`
+  again, because the request changed nothing and that is not an error. An id that belongs to somebody else answers
+  `404 not_found`, the same answer a nonexistent id gets (BR-02.2).
+- **`POST /notifications/read-all` answers `{markedRead: n}`**, so a client can prove the badge cleared without a
+  second read; `n` is `0` once nothing is unread.
+- **`GET /alerts/{id}/timeline` gained a `notified` entry**, carrying the channel and the step or the suppression in
+  `reason` and the delivered text in `note`. This is the sentence §02-design/05 §6 was written for — "the full
+  response timeline of one incident" — assembled from the delivery rows rather than from a second set of escalation
+  columns on the alert, and `notified` joins `opened`/`escalated`/`acknowledged`/`resolved` in one vocabulary.
+
+### 4.6 Reference data
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/time-zones` | `terrarium.read` | the time-zone catalogue: `{items: [{ianaId, displayName, countryCode, utcOffsetMinutes, utcOffset}]}`, ordered west to east |
+
+**Built 2026-10-14 (TASKS item 11).** The catalogue is a `TimeZone` table keyed by the **IANA id**, seeded from
+`ReferenceDataSeeder.Catalogue` — a curated list covering every offset the world uses and every populated region,
+rather than the ~600 ids of the full database, most of which name an uninhabited island or a historical alias. It is
+readable by every authenticated account, because a picker is not privileged data and both clients need it before they
+can create anything.
+
+- **The value to send back is `ianaId`**, which is exactly the string `Terrarium.TimeZoneId` and `User.TimeZoneId`
+  store (ADR-015). `POST /terrariums` and `PATCH /auth/me` validate against this table and store the catalogue's
+  spelling, so `asia/ho_chi_minh` lands as `Asia/Ho_Chi_Minh` and an id the picker could not have offered is
+  `400 terrarium_timezone_invalid` / `timezone_invalid`. This replaced a bare `TimeZoneInfo` lookup.
+- **The offset is standard time, never arithmetic.** Which offset applies at a given instant — including daylight
+  saving, which the table deliberately does not model — stays the platform time-zone database's answer through
+  `SystemClock.ResolveZone`, which degrades to UTC for an id it cannot resolve. `utcOffset` is pre-formatted
+  (`UTC+07:00`) so neither client has to agree on a spelling; `utcOffsetMinutes` is the same number for a client that
+  wants to group by it.
+- **This is a time-zone table, not a province table.** Vietnam is one zone (`Asia/Ho_Chi_Minh`, `+07:00`), so a list
+  of its provinces could only have repeated that row; the earlier reading of item 11 was replaced at the requester's
+  direction on 2026-10-14 (`05-release/03` §5).
+
+### 4.7 Accounts (administrator)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/users?search=&skip=&take=` | `user.read` | paged accounts with `total`, `skip`, `take`; `search` matches username or email, case-insensitively |
+| POST | `/users` | `user.manage` | `{username, email, password, role?, preferredLanguage?}`; `role` defaults to `Owner`, and a taken identifier is `400 account_invalid` with the field to fix |
+| GET | `/users/{id}` | `user.read` | one account, or `404 user_not_found` |
+| PATCH | `/users/{id}` | `user.manage` | `{username?, email?, preferredLanguage?, minNotifySeverity?, quietHoursStart?, quietHoursEnd?}` — a patch; the time zone is not one of its members |
+| POST | `/users/{id}/reset-password` | `user.manage` | `{newPassword}`; ends every session the account holds |
+| PATCH | `/users/{id}/role` | `user.manage` | `{role}` — a role **code**; an unknown code is `400 role_invalid`. It is a `PATCH`, not a `PUT` |
+| POST | `/users/{id}/disable` | `user.manage` | ends every session the account holds; audited `account.disabled` |
+| POST | `/users/{id}/enable` | `user.manage` | reverses the disable; audited `account.enabled` |
+| DELETE | `/users/{id}?purge=` | `user.manage` | soft delete (= disable) by default; `?purge=true` erases the row instead |
+
+**Built 2026-10-14 (TASKS item 12); creation, edit, password reset and deletion added 2026-10-17.** Every entry carries
+`{id, username, email, role, roleId, permissions, preferredLanguage, timeZoneId, quietHoursStart, quietHoursEnd,
+minNotifySeverity, createdAt, lastLoginAt, disabledAt, isActive}`, so a screen renders a row without a second call:
+`role` is the role's code for display, `roleId` its identity, and `permissions` the codes it currently grants — which is
+what a client gates on. Reads name `user.read` and every write `user.manage`, so a deployment that wants an auditor
+account can grant the first without the second. **A role change, a password reset and a delete all end the account's
+refresh tokens** (§4.1). The guards sit in the service rather than on the route, because both depend on the target
+rather than on the caller: `409 self_change_refused` for a role change, a disable or a delete aimed at the caller's
+**own** account — the route that would undo it is behind the permission just given up — and
+`409 last_administrator_refused` when the change would leave no enabled account holding `user.manage`.
+`404 user_not_found` names the failure rather than answering `not_found`, because this is the one caller entitled to
+enumerate.
+
+- **Creation answers `201` with the item and a `Location`**, stores the first password rather than generating one —
+  a generated password would have to be shown once and stored nowhere, and this deployment has no delivery channel for
+  it (`R-13`) — and is audited as `account.created`. `role` defaults to `Owner`; a taken username or email is
+  `400 account_invalid` with `errors[]` naming the field to fix, and an unknown `role` is field code `role_invalid`.
+- **`PATCH /users/{id}` is a patch**, and the account's **time zone is deliberately not one of its members**: an
+  administrator edits the identifiers, the language, the severity floor and the quiet hours, while the zone comes from
+  `PATCH /auth/me`, where it is validated against the seeded catalogue. Quiet hours are a pair — both empty clears the
+  window, one alone is `400 quiet_hours_incomplete`. Audited as `account.updated`, and a no-op writes nothing.
+- **`POST /users/{id}/reset-password`** validates the new password against the same policy registration uses and ends
+  **every** session of the account, so a stolen session cannot outlive the reset performed to kill it. Audited as
+  `account.password_reset`; a password the policy refuses is `400 password_invalid`.
+- **`PATCH /users/{id}/role`** takes a role **code** — the four the product ships or a custom one (§4.8), matched
+  case-insensitively; an unknown code is `400 role_invalid`. Audited as `account.role_changed` with the code before and
+  after, and a change to the code the account already holds writes nothing.
+- **`POST /users/{id}/disable` and `/enable` are idempotent** (`account.disabled` / `account.enabled`). Disabling ends
+  every session the account holds; re-enabling does not restore them, so the account signs in again.
+- **`DELETE /users/{id}` is a soft delete — a disable — by default**, and `?purge=true` erases the row instead. The
+  purge is refused with `409 account_in_use` when enclosures, boards or alerts still name the account, because a board
+  whose owner no longer exists is worse than an account that is merely disabled. Audited as `account.deleted` with the
+  mode used, and the answer describes the account as it was.
+
+### 4.8 Administrative dashboard and permission matrix
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/admin/overview` | `data.read.any` | the header's counts, every account with its holdings, and both alert families with their metric keys and open counts |
+| GET | `/admin/terrariums?search=&skip=&take=` | `data.read.any` | every account's enclosures, newest first, paged with `total`; `search` matches the enclosure's name or its owner's username |
+| GET | `/admin/devices?search=&skip=&take=` | `data.read.any` | every board, bound or not, last seen first with the never-published last; `search` matches the public id, the name or the owner's username |
+| GET | `/admin/alerts?family=&state=&skip=&take=` | `data.read.any` | every account's alerts, both families, newest first; `400 family_invalid` / `state_invalid` on an unknown key |
+| GET | `/admin/roles`, `/admin/roles/{id}` | `user.read` | the matrix: each role with its codes, whether the product ships it, how many accounts hold it, and which of its codes cross accounts |
+| POST | `/admin/roles` | `user.manage` | `{code, name, description?, permissions?, rank?}` → `201` with the role |
+| PATCH | `/admin/roles/{id}` | `user.manage` | `{name?, description?, permissions?, rank?}`; `permissions` **replaces** the set |
+| DELETE | `/admin/roles/{id}` | `user.manage` | a custom role nothing holds; answers the role |
+| GET | `/admin/permissions` | `user.read` | the catalogue: every code with its group, its label, what granting it allows and whether it crosses accounts |
+
+**Added 2026-10-17 (the role/permission re-framing).** The group exists because of the rule that follows; the four
+dashboard routes and the matrix's own routes are described together here because they are the two halves of the
+console.
+
+- **The cross-account rule.** Every keeper-facing query is scoped to `Terrarium.UserId` in the store, so this group is
+  the only surface that *lists* another account's data: its store has no owner parameter at all, which is why a
+  dashboard could not have been assembled out of the routes a keeper calls. The catalogue's two **cross-account** codes
+  also widen a keeper-facing route *by id* — `GET /terrariums/{id}` and its writes answer for somebody else's enclosure
+  when the caller holds `data.read.any`/`data.write.any`, checked by the service that scopes its own query
+  (`02-design/06` §3.2) — but one id at a time is not a get-all page. That is why the matrix can say "Admin = toàn bộ
+  dữ liệu": it is a fact about this group plus those two codes, not a branch inside the keeper's queries.
+- **`GET /admin/overview` is one answer for the first screen**: `counts` (accounts, accounts that may sign in,
+  enclosures, enclosures with a board, boards, boards online, open alerts — total, per family and critical — and
+  species profiles), `accounts` (every account with its `role` code, `isActive`, its enclosures, boards, open alerts,
+  `createdAt` and `lastLoginAt`) and `families` (`key`, the `metrics` belonging to it and its open-alert count), so a
+  client labels its two tabs without carrying a list of metric keys of its own. The three lists page with `skip`/`take`
+  (default 50, max 200) and answer `{items, total, skip, take}`; `/admin/alerts` speaks the keeper's own
+  `family`/`state` vocabulary, refusal included, so one client parses one thing — an unknown `family` is
+  `400 family_invalid` and a `state` outside `Open`/`Acknowledged`/`Resolved` is `400 state_invalid`. Enclosures whose
+  owner deleted them are not listed, the same rule every other read follows.
+- **The matrix is editable data, and these are the routes that edit it.** Reads name `user.read` — an auditor may see
+  which role grants what — and every write `user.manage`. `POST` and `PATCH` are refused with `400 role_invalid` when
+  the code is not identifier-shaped (`errors[0].code = role_code_invalid`), is already taken (`role_code_taken`), names
+  no code (`role_name_invalid`) or names a permission the catalogue does not define (`permission_unknown`) — a typo
+  that silently granted nothing is the failure that check exists to prevent. `permissions` on a `PATCH` **replaces**
+  the set, because a merge would make a permission impossible to take away; the guard is
+  `409 last_administrator_refused` when the edit would remove the last grant of `user.manage`, checked by *counting
+  holders of the permission* rather than by comparing codes, so a re-banded or split administrator role is still
+  protected. A missing role is `404 role_not_found`; deleting one the product ships is `409 system_role_immutable`
+  (the next start-up would recreate it with the shipped defaults, silently undoing whatever was tuned) and deleting one
+  accounts still hold is `409 role_in_use` with the count. Every write is audited — `role.created`, `role.updated` with
+  the set before and after, `role.deleted` — and a no-op writes nothing. **None of them ends a session**: accounts
+  holding the role keep their tokens until they expire, so a revocation takes effect within one 15-minute access-token
+  lifetime, which the console warns about rather than hiding.
+- **`GET /admin/permissions` is the catalogue** — `{items: [{code, group, name, description, crossesAccounts}]}` — and
+  it is code rather than data: a permission the software does not implement cannot be granted by inserting a row. The
+  four roles it grants over are rows, with their ids fixed in `SystemRoles` (a deterministic id is what lets
+  registration assign `Owner` without a lookup that can fail on an unseeded database), and `IdentitySeeder` reconciles
+  them on every start-up asymmetrically: a missing row is created with its shipped grants, an existing grant is never
+  re-applied, and a permission added to the catalogue appears granted to nobody.
 
 ---
 
@@ -509,16 +929,36 @@ be probed (BR-02.2).
 | 401 | `invalid_recovery_code` | Wrong, spent, malformed or account-less backup recovery code — one answer for all of them |
 | 401 | `invalid_reset_code` | Wrong, spent, expired, foreign or account-less reset code — one answer for all of them |
 | 401 | `token_invalid` / `token_reused` | Expired, consumed, or replayed refresh token (family revoked) |
-| 403 | `insufficient_role` | Role not permitted for the action |
+| 403 | `insufficient_role` | The caller's token does not carry the permission the route names (2026-10-17) |
 | 403 | `builtin_immutable` | Attempt to edit a built-in species profile |
+| 400 | `image_required` / `image_too_large` / `image_type_unsupported` / `image_invalid` | The profile picture was missing, over 2 MB, not one of PNG/JPEG/WebP, or not an image at all. All four carry `errors[0].field = "file"`, so a form marks the picker |
+| 404 | `image_not_set` | The profile is visible to the caller but has no picture — distinct from `not_found`, which is about the profile |
 | 404 | `not_found` | Unknown id **or a foreign resource** (deliberate: no id probing) |
 | 404 | `identifier_unknown` | No account uses that username or email — `/auth/forgot-password` only, a deliberate disclosure (`ADR-020`) |
 | 404 | `claim_code_invalid` | Unknown, expired or consumed claim code |
+| 404 | `device_not_found` | `/devices/claim-by-mac`, and the create-with-a-device body: no board matches, already bound, or revoked — one answer for all three |
+| 403 | `forbidden_terrarium` | The terrarium exists and belongs to another account. **Terrarium routes only**: the deliberate narrowing of the rule below (2026-10-14, TASKS item 3) |
+| 410 | `terrarium_deleted` | The terrarium was soft-deleted: its history survives, so it is not "gone without trace" (2026-10-14, TASKS item 6) |
+| 400 | `device_already_bound` / `device_selector_ambiguous` / `device_not_found` | Create-with-a-device field errors, inside `400 validation_failed`'s `errors[]`, because the board is named in the body |
 | 409 | `terrarium_already_bound` / `conflict_device_bound` | Binding conflicts |
 | 409 | `registration_conflict` | Username and/or email already has an account (see `errors` for which) |
 | 409 | `alert_not_open` | Ack/resolve on a resolved alert |
 | 409 | `version_conflict` | Optimistic concurrency (`rowversion` mismatch) |
-| 409 | `profile_in_use` | Deleting an assigned profile |
+| 409 | `profile_in_use` | Deleting an assigned profile — including a terrarium that was soft-deleted, whose row still holds the foreign key |
+| 409 | `profile_name_taken` | A custom species profile with that name already exists for this account (the unique index is `(createdByUserId, name)`) |
+| 400 | `profile_invalid` | `PATCH /auth/me`: the language is not `vi`/`en`, the zone is not in the catalogue, the quiet-hours pair is incomplete, or the severity is outside `info`/`warning`/`critical` (see `errors`) |
+| 400 | `device_invalid` | `PATCH /devices/{id}`: the name is longer than the column or an interval is outside 10–300 s (see `errors`) |
+| 400 | `family_invalid` | `GET /alerts` and `GET /admin/alerts`: the `family` filter is not `enclosure` or `species`; `/admin/alerts` answers `state_invalid` the same way (2026-10-17, the alert-family re-framing) |
+| 400 | `role_invalid` | `PATCH /users/{id}/role`: no role uses that code. `POST`/`PATCH /admin/roles` answer it too, with `errors[]` naming the field — `role_code_invalid`, `role_code_taken`, `role_name_invalid`, `permission_unknown` (2026-10-17, the role/permission re-framing) |
+| 400 | `account_invalid` | `POST`/`PATCH /users`: a creation or an edit was refused — a taken username or email, or a field the account rules reject (see `errors`, 2026-10-17) |
+| 400 | `password_invalid` | `POST /users/{id}/reset-password`: the new password failed the same policy registration applies (see `errors`, 2026-10-17) |
+| 404 | `role_not_found` | `/admin/roles/*`: no role holds that id (2026-10-17) |
+| 404 | `user_not_found` | `/users/*`: no account holds that id. Readable by the administrator, who is the one caller entitled to enumerate |
+| 409 | `self_change_refused` | `/users/*`: an administrator tried to change or disable **their own** account — the one change that cannot be undone from inside the API (2026-10-14, TASKS item 12) |
+| 409 | `last_administrator_refused` | `/users/*` and `/admin/roles/*`: the change would remove the last grant of `user.manage`, and no route could restore one. Counted by holders of the permission rather than by role code (2026-10-17, the role/permission re-framing) |
+| 409 | `system_role_immutable` | `DELETE /admin/roles/{id}`: the role is one of the four the product ships, and the next start-up would recreate it with the shipped defaults (2026-10-17) |
+| 409 | `role_in_use` | `DELETE /admin/roles/{id}`: accounts still hold the role; the refusal carries the count (2026-10-17) |
+| 409 | `account_in_use` | `DELETE /users/{id}?purge=true`: enclosures, boards or alerts still name the account (2026-10-17) |
 | 413 | `request_too_large` | The transport refused to read the body (an in-app limit such as `[RequestSizeLimit]`). Kestrel answers its own 30 MB default itself, before the application sees the request, so this row is defensive. **Not** the same as `400 payload_too_large`, which is the ingest endpoint's own batch limit |
 | 422 | `quality_rejected` | Sample accepted but excluded from evaluation (informational) |
 | 423 | `account_locked` | Login throttle active |
@@ -545,7 +985,7 @@ be probed (BR-02.2).
 |---|---|---|
 | `readingAdded` | `{terrariumId, sampleId, recordedAt, metrics:[{code,value,unit,qualityFlags}]}` | after a sample commits |
 | `statusChanged` | `{terrariumId, deviceId, status, lastSeenAt}` | online/offline/maintenance transitions |
-| `alertChanged` | `{terrariumId, alertId, state, severity, metric, triggeredAt, resolvedAt?}` | open/escalate/ack/resolve |
+| `alertChanged` | `{terrariumId, alertId, state, severity, metric, family, triggeredAt, resolvedAt?}` | open/escalate/ack/resolve |
 | `commandChanged` | `{deviceId, cmdId, status}` | command ack/failure |
 
 Client methods: `JoinTerrarium(terrariumId)`, `LeaveTerrarium(terrariumId)` — **membership is authorised on
@@ -553,11 +993,23 @@ join**, otherwise the hub would become a cross-tenant leak (`03-implementation/0
 `HubException` carrying one message for both "not yours" and "does not exist", so the hub cannot be used to find
 out whether an id exists (BR-02.2).
 
-**Emitted so far.** `readingAdded` (after a sample commits, since 2.9) and, since 2026-10-09, `statusChanged` —
-from the device's own `status` topic, so the transition is the device's declaration rather than an inference from
-silence. What is **not** pushed yet is the `Provisioning → Online` transition a sample or health message causes: the
-fan-out boundary for samples carries committed readings, which have no status in them. `alertChanged` arrives with
-3.4 and `commandChanged` with FR-14.
+**Emitted so far.** `readingAdded` (after a sample commits, since 2.9), `statusChanged` — from the device's own
+`status` topic, so the transition is the device's declaration rather than an inference from silence (2026-10-09) —
+and, since 2026-10-10, `alertChanged` (roadmap 3.4). What is **not** pushed yet is the `Provisioning → Online`
+transition a sample or health message causes: the fan-out boundary for samples carries committed readings, which have
+no status in them. `commandChanged` arrives with FR-14.
+
+**`alertChanged` as built.** One event per move, pushed to the terrarium's group **after the commit that wrote it**,
+by whichever layer owns that commit: the evaluator's worker, the silence watchdog's worker, the ingest outcome
+recorder (the clock-skew entry and the sensor fault) and the lifecycle API itself. `event` is one of `opened`,
+`escalated`, `acknowledged`, `resolved` — lower case, because it names a move — while `state`, `severity` and
+`metric` keep the REST surface's vocabulary (`Open`/`Acknowledged`/`Resolved`, `Info`/`Warning`/`Critical`, `tempC`),
+and `family` is the same REST key the alert row carries (`enclosure` or `species`, 2026-10-17), so a banner can be
+placed on the right tab and a badge counted on the right total without a second request, so one client parsing
+`GET /alerts` and one handling this event are reading the same words. A touch is deliberately
+**not** announced: the documented event reports lifecycle moves, and re-sending the same open alert once per sample
+would be noise rather than news. A push that fails is logged and dropped, never retried into a failed request — the
+row is committed, so a SignalR outage is a lost push.
 
 **Auth:** the JWT travels in the query string (`/hubs/telemetry?access_token=…`), because a browser cannot set a
 header on the WebSocket handshake. It is accepted on `/hubs` only — nowhere else does a token belong in a URL.
@@ -577,3 +1029,6 @@ so a reconnected socket never leaves pre-disconnect values on screen (UC-02, `03
    in the fleet view but still accepted in v1 (no OTA, limitation L-03).
 5. `Error.code` values are part of the contract: adding one is safe, changing one is a breaking change and the
    app's message map (`core/result.dart`) must be updated in the same PR.
+6. A **permission code** is part of the contract the way an error code is, and it widens the same way: adding one is
+   safe, and a deployment hands it out by adding the row to a role through the console, so a client that gates on
+   codes rather than on a role name needs no new release (`02-design/06` §3, 2026-10-17).

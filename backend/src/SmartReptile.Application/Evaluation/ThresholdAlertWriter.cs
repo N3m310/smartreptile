@@ -55,6 +55,7 @@ public static class ThresholdAlertWriter
             TerrariumId = context.TerrariumId,
             DeviceId = sample.DeviceId,
             Metric = key.Metric,
+            Family = Alert.FamilyFor(key.Metric),
             Phase = key.Phase,
             Severity = severity,
             DedupeKey = Alert.DedupeKeyFor(context.TerrariumId, key.Metric, severity, key.Phase),

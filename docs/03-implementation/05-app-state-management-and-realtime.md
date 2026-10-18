@@ -23,7 +23,8 @@ flowchart TD
 
 | Provider | Owns | Key API | Notifies on |
 |---|---|---|---|
-| `AuthProvider` | Session, access/refresh tokens (secure storage), current user, role | `login`, `register`, `logout`, `refreshIfNeeded` | Login/logout, token refresh, role change |
+| `AuthProvider` | Session, access/refresh tokens (secure storage), current user, `roleId` and the `permissions` list, plus `hasPermission(code)` | `login`, `register`, `logout`, `refreshIfNeeded` | Login/logout, token refresh, role change |
+| `AdminProvider` | The administrator's data: deployment counts, the account rollup, the cross-account lists, the role matrix and the permission catalogue | `loadOverview`, `loadAccounts`, `loadRoles`, `loadPermissions`, `saveRole` | Any administrative write |
 | `TerrariumProvider` | Terrarium list, selected id (persisted), CRUD | `load`, `select`, `create`, `update`, `delete` | List/selection change |
 | `TelemetryProvider` | Latest value per metric per terrarium, freshness, live subscription lifecycle | `loadLatest`, `subscribe`, `applyPush` | New sample, status change, staleness tick |
 | `AlertProvider` | Inbox (paged), filters, open count, ack/resolve/silence | `load`, `ack`, `resolve`, `silence`, `applyPush` | Any alert state change |
@@ -109,7 +110,7 @@ Rules:
 | No network on launch, cached values exist | Show cached values with explicit timestamps and an `offline` chip; do not pretend they are live |
 | Mutations while offline (claim, ack, threshold save) | Queued in `local_cache` with an `Idempotency-Key`, replayed on reconnect, with a visible "1 pending action" indicator; conflict → server wins + a message |
 | `401 unauthorized` on a data call | One silent refresh; if refresh fails → session expired → login screen with a preserved deep link |
-| `403 insufficient_role` | Action hidden or disabled for that role in the first place; if it still happens, show a plain explanation |
+| `403` | Action hidden or disabled when the account does not hold the permission in the first place — the client gates on `hasPermission(code)`, so a refusal here is a bug or a stale session; if it still happens, show a plain explanation |
 | `404` on a terrarium (deleted elsewhere) | Remove it from the list, show "this terrarium was removed", return to Home |
 | `409 version_conflict` on threshold save | Show the server's current values side by side and let the user re-apply |
 | `429` | Respect `Retry-After`; disable the action with a countdown |

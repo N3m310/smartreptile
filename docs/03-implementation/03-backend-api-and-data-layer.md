@@ -25,6 +25,9 @@ public sealed class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext
     public DbSet<DailyEnvironmentalSummary> DailySummaries => Set<DailyEnvironmentalSummary>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<MetricSilence> Silences => Set<MetricSilence>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<Permission> PermissionCatalog => Set<Permission>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<NotificationLog> Notifications => Set<NotificationLog>();
     public DbSet<EvaluationState> EvaluationStates => Set<EvaluationState>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -95,7 +98,41 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db)
         // Built-in profiles arrive with SourceRef on every threshold row (brief §6, FR-10).
     }
 }
+
+public sealed class SystemAdminAccountSeeder(                       // 2026-10-13
+    SmartReptileDbContext db, IPasswordHasher hasher, IOptions<AdminAccountOptions> options, ILogger<…> log)
+{
+    public async Task<bool> SeedAsync(CancellationToken ct) => …;    // Admin:Username/Email/Password, empty = off
+}
 ```
+
+`IdentitySeeder` runs first, and it is not an account: it makes the permission catalogue and the four system roles
+exist from the code that defines them (`Permissions.All`, `SystemRoles`), writing the shipped
+grants only when it has to create the role itself. It is deliberately asymmetric — a missing row is created, an
+existing grant is never re-applied, and a permission the catalogue gained is granted to nobody — because an
+administrator who removed `audit.read` from `Technician` has made a decision a restart must not undo
+(`02-design/06` §3). It runs outside the reference-data switch, since the catalogue and the roles are what
+authorisation reads rather than reference data a deployment may skip.
+
+`SystemAdminAccountSeeder` is the last start-up step — after the reference data, because the catalogue is what the
+account exists to author, and after `IdentitySeeder`, because the account needs a role to hold — and it exists
+because the catalogue's writes need `species.write`, which only `Admin` holds, while registration only ever
+produces an `Owner` (`02-design/06` §3): without it a deployment would have no account able to author the
+catalogue. It is idempotent by presence in the usual way — it creates the account when the username and email are
+both free and otherwise leaves the row alone — with one deliberate exception: an existing `Admin` row's password is
+replaced when `Admin:Password` no longer matches the stored hash, which makes editing the configuration and
+restarting the documented rotation and the only reset path
+(the account carries no recovery code, because a start-up path that printed one would be a live credential in a
+log). Nothing is inserted that `PasswordPolicy` or `AccountIdentifierPolicy` would refuse; a refusal is logged and
+skipped, and the section being empty is not an error — it is the switch.
+
+**The 2026-10-17 re-framing added two migrations.** `20261016161825_AddRolesAndPermissions` creates `Permission`,
+`Role` and `RolePermission`, seeds the matrix from the same catalogue the seeder reads, and replaces `User.Role`
+with the non-null `User.RoleId` — added nullable, back-filled from the old `int` column and only then tightened,
+so an existing deployment's accounts keep the role they had. `20261016162814_AddAlertFamily` adds
+`Alert.Family`, defaulted to `Enclosure` and back-filled from the metric, which is what makes a metric-less alert
+(device silence, sensor fault, clock skew) an enclosure alert by construction rather than by a default someone has
+to remember.
 
 Migration policy: auto-apply in `Development` only; in the release runbook it is an explicit step
 (`05-release/01` §3) so a failed migration cannot take the demo host down silently. Destructive
@@ -192,6 +229,14 @@ accepting one would acknowledge a command this build cannot issue.
 and advances an `EvaluationState` watermark per `(terrarium, metric, phase)`. Unlike `InProcessTelemetryBus` it does
 **not** back-pressure: ingest's acknowledgement may wait for the database, but it must never wait for a derived
 opinion, so a full queue drops the batch and logs an error as the defect it is.
+
+The silence watchdog (roadmap 3.3, `02-design/03` §4.3) is the one worker that is timer-driven rather than
+queue-driven, for the same reason in reverse: its input is the *absence* of messages, so there is nothing to
+subscribe to and nothing arrives to trigger a pass. The other two signals of that task are the opposite case and
+live in the pipelines that receive their evidence: the sensor fault is decided in the events channel from the
+parsed payload's failure count, and the clock-skew notice on the sample path from V-09's quality bit — each staged
+into the same unit of work as the row that evidenced it, so a stored fault is always a signalled one. None of them
+sends anything: delivery stays with the dispatcher.
 
 The stage classes below are the ones that exist; `TelemetryPayloadValidator` and `PlausibilityGuard` live in the
 Application layer and `TelemetryWriter`/`DeviceStateUpdater` are application stages over an `ITelemetryStore` port,
@@ -321,7 +366,9 @@ skipped and nothing is evaluated twice.
 
 | Group | Endpoints (abbreviated) | Notes |
 |---|---|---|
-| `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password`, `recover`, `forgot-password`, `reset-password` | Anonymous + `[Authorize]`; the three recovery routes are anonymous and share the credential throttle (`auth`, 10 / min / address), while `me`, `refresh` and `logout` carry the larger `authSession` budget because a signed-in client calls them as housekeeping. A password change ends every **other** session of the account (`ADR-022`) |
+| `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password`, `delete me`, `recover`, `forgot-password`, `reset-password` | Anonymous + `[Authorize]`; the three recovery routes are anonymous and share the credential throttle (`auth`, 10 / min / address), while `me`, `refresh` and `logout` carry the larger `authSession` budget because a signed-in client calls them as housekeeping. A password change ends every **other** session of the account (`ADR-022`). `PATCH /me` is the preference patch and `DELETE /me` disables the account (2026-10-14, TASKS item 9a — see below) |
+| `/api/v1/users` | **built:** `GET`, `POST`, `GET {id}`, `PATCH {id}`, `POST {id}/reset-password`, `PATCH {id}/role`, `POST {id}/disable`, `POST {id}/enable`, `DELETE {id}` | The group names `user.read` and every write adds `user.manage` on its own route, so a deployment can grant an auditor the first without the second. `UserAdminService` holds the three guards: no self-change, never the last account holding `user.manage`, and never a purge of an account something still references. `DELETE` without `?purge=true` is a disable; with it the row is erased only when nothing points at it (2026-10-14 TASKS item 12; the create/edit/reset/delete half and the permission codes, 2026-10-17) |
+| `/api/v1/time-zones` | `GET` | Reference data for every picker, read by any authenticated caller; the catalogue is the `TimeZone` table, seeded from `ReferenceDataSeeder.Catalogue` (2026-10-14, TASKS item 11) |
 
 Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of design, and one file owns it:
 
@@ -345,45 +392,141 @@ Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of de
 - **Delivery is a port with a log implementation.** `LogPasswordResetNotifier` writes the code when
   `PasswordReset:LogCode` is true (development only) and otherwise warns that it reached nobody — a production log
   holding a live credential is a leak, so the default is off and the release note says so (limitation L-02).
-| `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage` · **planned:** `PATCH/DELETE {id}`, `GET/PUT {id}/thresholds`, `POST {id}/silences`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` + `ITerrariumStore`), not a filter applied afterwards |
+| `/api/v1/terrariums` | **built:** `GET`, `POST`, `GET {id}`, `PATCH {id}`, `DELETE {id}`, `GET {id}/readings/latest`, `GET {id}/readings`, `GET {id}/coverage`, `GET {id}/thresholds`, `POST {id}/silences`, `GET {id}/silences`, `DELETE {id}/silences/{silenceId}` · **planned:** `PUT {id}/thresholds`, `GET {id}/summaries`, `POST {id}/exports` | Ownership is a query parameter (`TerrariumService` / `ITerrariumStore`), not a filter applied afterwards. The single-terrarium answers (`GET {id}`, `POST`, `PATCH`) repeat the rowversion as the item's `rowVersion` beside the `ETag` header, and `PATCH {id}` declares its `If-Match` header parameter, so the generated document shows the box Swagger UI was missing (2026-10-14) |
 | `/api/v1/devices` | `GET`, `GET {id}`, `POST self-register`, `POST claim`, `PATCH {id}`, `POST {id}/rebind`, `POST {id}/rotate-secret`, `POST {id}/revoke`, `POST {id}/calibration`, `POST {id}/commands`, `POST {id}/snapshots` | `self-register` anonymous + rate-limited |
 | `/api/v1/ingest` | **built:** `POST http` | Device-auth header (`Device {id}.{secret}`); the HTTP fallback path, 6 requests/min/device |
-| `/api/v1/alerts` | `GET`, `GET {id}`, `POST {id}/ack`, `POST {id}/resolve` | Role-gated ack/resolve |
-| `/api/v1/species-profiles` | `GET`, `POST`, `PATCH {id}`, `DELETE {id}`, `POST {id}/duplicate` | Built-ins immutable |
+| `/api/v1/alerts` | **built:** `GET`, `GET {id}`, `GET {id}/timeline`, `POST {id}/ack`, `POST {id}/resolve` | The group names `alert.read`; ack and resolve add `alert.write`, and the silence routes add `silence.write` — so a Viewer reads the same list and cannot change it. Every alert carries its `family` and the list filters on `?family=enclosure\|species`, refusing an unknown key with `family_invalid` rather than silently returning both; a foreign alert is a `404`, a closed one a `409 alert_not_open` |
+| `/api/v1/species-profiles` | **built 2026-10-13:** `GET`, `POST`, `POST {id}/duplicate`, `PATCH {id}`, `DELETE {id}` · **built 2026-10-14:** `POST {id}/image`, `GET {id}/image`, `DELETE {id}/image` | Reads name `species.read` and every write names `species.write`, which only `Admin` holds in the shipped matrix (the administrator seeded from `Admin:Username`/`Admin:Email`/`Admin:Password` — an `Owner` is refused `403 insufficient_role`, §3 of `02-design/06`); built-ins are immutable (`403 builtin_immutable`); a foreign profile is a `404` and a profile a terrarium is assigned to is `409 profile_in_use`; every write is audited (`profile.created`/`updated`/`deleted`/`duplicated`, BR-10.4) — the picture too, under `profile.updated`. The picture routes are the only ones here that are not JSON: the upload is `multipart/form-data` (one part, `file`), the read answers bytes, and the two writes answer the whole profile so a client re-renders from one payload |
 | `/api/v1/notifications` | `GET`, `POST {id}/read`, `POST read-all` | In-app inbox |
 | `/api/v1/exports` | `GET {jobId}`, `GET {jobId}/download` | Token-based download |
-| `/api/v1/audit` | `GET` | Owner-scoped |
+| `/api/v1/audit` | `GET` | Names `audit.read` and answers the caller's own account and enclosures: `Owner` and `Admin` hold it, a `Technician` does not (2026-10-17) |
+| `/api/v1/admin` | **built:** `GET overview`, `GET terrariums`, `GET devices`, `GET alerts` | Every route names `data.read.any`, and the store behind them (`EfAdminStore`) takes no owner parameter at all, so a keeper's scoped read cannot be widened by a mistake in a service. `overview` answers the deployment counts, every account with its holdings and a description of both alert families; `alerts` pages with `?family=&state=` and carries its owner and enclosure on every row (2026-10-17) |
+| `/api/v1/admin/roles`, `/api/v1/admin/permissions` | **built:** `GET`, `GET {id}`, `POST`, `PATCH {id}`, `DELETE {id}` · `GET permissions` | The matrix itself: reads name `user.read` and the three writes `user.manage`. A role answers its permission codes, whether the product ships it, how many accounts hold it and `crossAccountPermissions`; a shipped role cannot be deleted (`409 system_role_immutable`) and one accounts still hold cannot either (`409 role_in_use`); `permissions` lists the catalogue, which is code rather than data. Editing a role replaces its permission set and ends no session, so a revocation lands within one access-token lifetime — the console says so (2026-10-17) |
 | ops | `/health`, `/ready`, `/metrics` | Unauthenticated, non-sensitive |
 
 Implementation notes:
 - Minimal APIs grouped per file with `RequireAuthorization()` + `AddEndpointFilter<ValidationFilter>()`.
 - `ProblemDetails` (RFC 7807) with `code`, `title`, `detail`, `traceId` and optional `errors[]` per field.
-- Pagination: `?cursor=&pageSize=` (default 50, max 200); responses always include `nextCursor`.
+- Pagination: `?cursor=&pageSize=` (default 50, max 200); responses always include `nextCursor`. As built,
+  `GET /alerts` is the only endpoint that implements it — it is the first list in the product that grows without
+  bound — and the cursor is `triggeredAt|id` in base64, so paging over a table that keeps receiving rows neither
+  repeats nor skips one.
 - `Idempotency-Key` support on `POST` mutations (24 h cache table) — matters on flaky mobile networks.
 - CORS: allow-list of the dashboard origins; the Flutter app is not affected by CORS.
+- Stored files: `Application/Abstractions/IFileStore` is the port and `Infrastructure/Storage/FileSystemFileStore`
+  the adapter, writing under `Storage:RootPath` (default `uploads`, the volume `docker-compose.yml` mounts). The
+  store mints every key — a GUID and the extension it was handed — so nothing a request carried reaches a path, and
+  it validates a key's shape before joining it to the root, because the key is the one value that later comes back
+  out of the database. The species picture is its first user; FR-15's snapshots and FR-17's exports will share it.
+
+**The alert lifecycle as built (roadmap 3.4, 2026-10-10).** `Application/Alerts/` holds two services over two ports,
+and the split is by feature rather than by table: an alert can be acknowledged with no silence in sight, and a silence
+outlives every alert it suppresses.
+
+- **One class owns the rules, and it is pure.** `AlertLifecycle` (domain) decides whether a transition is allowed and
+  writes the four fields it touches; `AlertService` does the ordering around it — look the alert up *scoped to the
+  caller*, apply, stage one audit row, commit, then push. `Acknowledge` succeeds only from `Open`, and a refusal is
+  `alert_not_open` for the second acknowledgement and for a resolved alert alike: in both cases the request changed
+  nothing.
+- **Resolution re-arms the dwell key.** `IAlertStore.FindExcursionStateAsync` finds the `EvaluationState` row of
+  `(terrarium, metric, phase)` and `EvaluationState.Rearm()` clears the excursion window without touching the
+  watermark — samples before this instant have been judged and must not be judged twice. That is what stops a value
+  that never returned inside its band from re-opening the alert on the next sample; a longer quiet period is the
+  silence window's job (`ADR-023`).
+- **A device-level alert has no key to re-arm**, which is why the rule is a domain predicate
+  (`AlertLifecycle.RearmsItsKey`) rather than a branch in the service.
+- **The audit row is the note's home.** The alert row keeps `ResolvedReason` (machine-readable, grouped by the
+  report) and has no column for prose; the keeper's `note` is written into the `alert.resolved` entry and read back by
+  the timeline.
+- **Silences follow §02-design/05 §5, and the read side is what 3.5 needs.**
+  `MetricSilenceService.CreateAsync` validates through `MetricSilencePolicy` (reason required, window in the future,
+  at most 24 h) and stages the window with its audit row; `CancelAsync` is idempotent, because a `DELETE` that failed
+  on a retry would leave a keeper believing a suppression was still in force. The dispatcher of 3.5 reads the same
+  `IsActiveAt`/`Covers` pair the list endpoint renders — a window with no metric covers every metric of the
+  terrarium, device-level alerts included.
+- **Nothing in either service can reach another account's data.** Reads start from the terrarium's owner
+  (`EfAlertStore`'s joins, `IMetricSilenceStore.IsMemberAsync`), so a foreign id answers `404 not_found` exactly like
+  a missing one; the only `403` in the group is the policy refusing a Viewer before a handler runs.
+
+### 6.1 Ownership, deletion and the administrator (2026-10-14, TASKS items 3, 5, 6)
+
+The terrarium and device groups carry the review's largest changes, and the mechanism matters more than the routes:
+
+- **`Terrarium.Status` is the state; `DeletedAt` is only the timestamp.** The model's query filter reads
+  `Status != Deleted`, so a writer that stamped only the old column cannot leave a "deleted" row visible, and the
+  migration that introduces the column back-fills it (`UPDATE … SET Status = 1 WHERE DeletedAt IS NOT NULL`) so an
+  enclosure deleted before the change does not come back to life. The index moved from `(UserId)` to
+  `(UserId, Status)`, which is exactly the shape every list query has.
+- **`FindAnyAsync` is the one unscoped read in `ITerrariumStore`, and it exists to be answered with a refusal.**
+  When the owner-scoped lookup returns nothing, the service asks that query once to tell the three cases apart:
+  nothing at all is `404`, `Status = Deleted` is `410`, and anything else is `403`. A row it returns is either served
+  to the administrator or turned into a problem — never handed to an ordinary caller. This narrows `BR-02.2` to the
+  terrarium resource on purpose; the alert, silence, species and device services keep the uniform answer, and the
+  hub does too, because a socket that names ids would become the probing surface the REST routes no longer are.
+- **The administrator's access is two permission codes, not a branch in the service.** The writes name
+  `terrarium.write`, and `data.write.any` is what carries them across accounts; the owner-scoped reads answer a
+  keeper's own rows, and the one place a role widens them is the service's ownership check, whose trailing optional
+  flag the caller's `data.read.any` sets — so every call site that omits it keeps the owner-only reading. The
+  administrator's answers carry `ownerUserId`, and a cross-account `PATCH`/`DELETE` stages an audit row into the same
+  unit of work as the change. The get-all surface that does not squeeze through a keeper's query at all is
+  `/api/v1/admin/*`, answered by `EfAdminStore`, which has no owner parameter to get wrong (2026-10-17).
+- **A binding exists once.** `DeviceProvisioningService.StageBinding` stages the credential, the device's binding
+  fields and the audit row and hands back the secret without committing; `claim`, `claim-by-mac` and the
+  create-with-a-device path all reach it, and only the create path commits it together with the enclosure. Three
+  entry points, one definition of what a binding is — which matters because the alternative is a security-relevant
+  rule that exists three times and eventually disagrees with itself.
+
+### 6.2 The notification surface (2026-10-16, roadmap 3.5)
+
+Three routes plus a timeline entry, all in `Api/Endpoints/NotificationEndpoints.cs` and `AlertEndpoints.cs`:
+`GET /api/v1/notifications?unreadOnly=&pageSize=`, `POST /api/v1/notifications/{id}/read`,
+`POST /api/v1/notifications/read-all`, and `notified` entries on `GET /api/v1/alerts/{id}/timeline`. The contract is
+in `07-appendices/03` §4.5.
+
+Behind them, the layering the rest of this document uses:
+
+| Layer | Type | What it owns |
+|---|---|---|
+| Domain | `NotificationPolicy.Judge` | §02-design/05 §4's whole matrix, as one static function over a `NotificationRequest` |
+| Domain | `NotificationCadence` | the repeat cooldown, the hourly cap, BR-13.5's backoff and §6's ladder — arithmetic, no clock |
+| Domain | `NotificationDigest.Summarise` | §5's "8 alerts (7 warnings, 1 critical), worst 34.2 °C" |
+| Domain | `NotificationLog` | one row per dispatch attempt: the delivery record and the inbox row at once |
+| Application | `NotificationDispatcher` | the sweep: candidates → verdict → step → channel → retry → digest, and the rows it stages |
+| Application | `NotificationText` | §7's content contract, rendered from the two `Resources/NotificationStrings{,.vi}.resx` decks (ADR-013) |
+| Application | `NotificationInboxService` | the inbox page and the two mark-read writes |
+| Application | `INotificationStore`, `INotificationChannel` | the two seams — no SQL Server and no network reach the policy |
+| Infrastructure | `EfNotificationStore` | six indexed reads per sweep, three `ExecuteUpdate` writes, no `SELECT *` |
+| Infrastructure | `FcmNotificationChannel`, `SmtpNotificationChannel` | the only two things that talk to a third party |
+| Infrastructure | `NotificationDispatcherWorker` | the 15 s `PeriodicTimer`, the counters, the logged failure |
+
+Two settings and no more: `Notifications:SweepSeconds` (the cadence) and the two channel blocks. **Every rule** — the
+cap, the cooldown, the backoff, the ladder, quiet hours — is a domain constant, so a deployment cannot move what a
+keeper is promised. `Notifications:Smtp:Enabled` is off by default and the development stack turns it on against the
+Mailpit service `docker-compose.yml` now runs.
 
 ## 7. SignalR hub
 
 ```csharp
 public sealed class TelemetryHub : Hub
 {
-    public Task JoinTerrarium(Guid terrariumId) { /* authorise membership, then */ return Groups.AddToGroupAsync(Context.ConnectionId, $"terrarium:{terrariumId}"); }
+    public Task JoinTerrarium(Guid terrariumId) { /* authorise ownership, then */ return Groups.AddToGroupAsync(Context.ConnectionId, $"terrarium:{terrariumId}"); }
     public Task LeaveTerrarium(Guid terrariumId) => Groups.RemoveFromGroupAsync(Context.ConnectionId, $"terrarium:{terrariumId}");
 }
 ```
 
 Events pushed: `readingAdded {sampleId, recordedAt, metrics[]}`, `statusChanged {deviceStatus, lastSeenAt}`,
-`alertChanged {alertId, state, severity}`. Membership is authorised on join — a group is never joined
-before the `TerrariumAccessRequirement` check, otherwise SignalR would become a cross-tenant data leak.
+`alertChanged {alertId, state, severity, family}`. Membership is authorised on join — a group is never joined
+before the ownership check, otherwise SignalR would become a cross-tenant data leak.
 
 **As built (task 2.9, 2026-10-06).** Three things the sketch does not say, all of them decisions rather than
 details:
 
 - **Membership is the ownership query the read surface already makes.** `TerrariumService.IsMemberAsync` asks
   `ITerrariumStore.FindOwnedAsync`, so the hub answers "not yours" and "does not exist" identically, exactly as
-  `GET /terrariums/{id}` does (BR-02.2) — the hub cannot be used to enumerate ids. A connection with no subject is
-  refused rather than trusted; `[Authorize]` should make that unreachable, and the safe direction to be wrong in
-  costs nothing here.
+  `GET /terrariums/{id}` does (BR-02.2) — the hub cannot be used to enumerate ids. The trailing flag the caller's
+  `data.read.any` sets is what lets the administrator follow any account's enclosure, for the same reason they may
+  read it (2026-10-17). A connection with no subject is refused rather than trusted; `[Authorize]` should make that
+  unreachable, and the safe direction to be wrong in costs nothing here.
 - **The push is an Application port implemented in the API project.** `SignalRTelemetryBroadcaster` sits beside the
   hub because `IHubContext<TelemetryHub>` is not visible from Infrastructure; the ingest pipeline still depends only
   on `ITelemetryBroadcaster`. The event body is `ReadingAddedPayload`, in the application layer so its shape is
@@ -395,19 +538,28 @@ details:
   WebSocket handshake. Accepted on `/hubs` only: a token in a URL reaches logs, proxies and referrer headers, which
   is worth paying for the one route that cannot avoid it and nowhere else.
 
-`statusChanged` and `alertChanged` are still unwritten — see the 2.9 block in `07-implementation-roadmap`.
+`statusChanged` and `alertChanged` are both written now: `statusChanged` since 2.9 and `alertChanged` since 3.4 (see
+the 2.9 and 3.4 blocks in `07-implementation-roadmap`).
+
+**`alertChanged` as built (roadmap 3.4).** One event per move, to the terrarium's group, after the commit that wrote
+it — by whichever layer owns that commit: `EvaluatorWorker` (threshold alerts), `SilenceWatchdogWorker` (silence),
+`IngestOutcomeRecorder` (the clock-skew entry and the sensor fault, which the pipelines stage and this class pushes
+once the commit has given them identities) and `AlertService` itself for ack and resolve. The producers do not depend
+on the hub: each outcome carries `AlertChange` records and the fan-out step turns them into
+`AlertChangedPayload`. A touch is not announced — the documented event reports lifecycle moves — and a failed push is
+logged and dropped, never retried into a failed request, which is the same rule the sample push follows.
 
 ## 8. Background workers
 
 | Worker | Schedule | Idempotency | Failure behaviour |
 |---|---|---|---|
 | `IngestWorker` | continuous | `(deviceId, seq)` unique index | Stop acking → broker holds → device retries |
-| `EvaluatorWorker` | continuous (ordered queue) | `EvaluationState` per key | Log + counter, next sample retries; never blocks ingest |
-| `NotificationWorker` | continuous | notification job id | 3 retries with backoff, then `Failed` |
+| `EvaluatorWorker` | continuous (ordered queue) | `EvaluationState` per key | Log + counter, next sample retries; never blocks ingest. Pushes `alertChanged` for every alert the pass opened, escalated or resolved, after the commit |
+| `NotificationDispatcherWorker` | every 15 s (`Notifications:SweepSeconds`) | the delivery rows themselves: an attempt exists → it has been attempted | Log + counter, next tick retries; a batch of alerts that owes nothing is the normal case. The **first tick waits one interval**, because hosted services start before `DatabaseInitializer` has applied its migrations |
 | `RollupWorker` | every minute + nightly 48 h recompute | Upsert on `(terrarium, metric, hour)` | Recompute later; raw data still present |
 | `SummaryWorker` | local midnight + 5 min per terrarium timezone | Upsert on `(terrarium, localDate)` | Recompute on late data |
 | `RetentionSweeperWorker` | nightly 02:00 local | Batched deletes ≤ 10 000 rows/tx | Partial progress is safe; resumes next run |
-| `DeviceSilenceWatchdog` | every 30 s | One alert per terrarium/device | Creates `DeviceSilent` alerts; escalates at 30 min |
+| `SilenceWatchdogWorker` | every 30 s | One open alert per device | Creates `DeviceSilent` alerts, moves the device `Offline` and escalates at 30 min; a failed sweep is logged and the next tick retries. Pushes `alertChanged` after its own commit |
 
 All workers derive from `BackgroundService`, resolve scoped services from a scope factory, and log with a
 correlation id. Each exposes a counter so a stuck worker is visible on `/metrics` (NFR-12).

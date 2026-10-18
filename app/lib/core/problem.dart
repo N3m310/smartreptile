@@ -32,6 +32,11 @@ class AppFailure implements Exception {
   bool get isNetworkFailure => statusCode == 0;
 
   /// Localisation key for the most useful message we can give for this failure.
+  ///
+  /// The administrative codes are mapped by name rather than by status, because the account and role rules refuse
+  /// with a *reason* — "that is the last administrator", "a role with accounts cannot be deleted" — and a screen
+  /// that only said "the server refused the request" would be throwing away the one sentence the caller needs
+  /// (FR-18). Anything unlisted still falls back to the status, so no code can render a blank error.
   String get messageKey {
     if (isNetworkFailure) {
       return 'errorBackendUnreachable';
@@ -39,13 +44,46 @@ class AppFailure implements Exception {
 
     switch (code) {
       case 'invalid_credentials':
+        return 'invalidCredentials';
+      case 'account_locked':
+        return 'accountLocked';
+      case 'rate_limited':
+        return 'rateLimited';
       case 'token_invalid':
       case 'token_reused':
-        return 'errorGeneric';
-      case 'rate_limited':
-        return 'errorGeneric';
+      case 'token_missing':
+      case 'unauthenticated':
+        return 'unauthenticated';
+      case 'user_not_found':
+        return 'adminAccountNotFound';
+      case 'self_change_refused':
+        return 'adminErrorSelfChange';
+      case 'last_administrator_refused':
+        return 'adminErrorLastAdministrator';
+      case 'account_in_use':
+        return 'adminErrorAccountInUse';
+      case 'account_invalid':
+        return 'adminErrorAccountInvalid';
+      case 'password_invalid':
+        return 'passwordPolicyViolation';
+      case 'role_invalid':
+        return 'adminErrorRoleInvalid';
+      case 'role_not_found':
+        return 'adminErrorRoleNotFound';
+      case 'role_in_use':
+        return 'adminErrorRoleInUse';
+      case 'system_role_immutable':
+        return 'adminErrorSystemRole';
+      case 'permission_unknown':
+        return 'adminErrorPermissionUnknown';
       default:
-        return 'errorGeneric';
+        return switch (statusCode) {
+          401 => 'unauthenticated',
+          403 => 'errorForbidden',
+          404 => 'errorNotFound',
+          409 => 'adminErrorConflict',
+          _ => 'errorGeneric',
+        };
     }
   }
 

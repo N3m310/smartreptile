@@ -334,3 +334,144 @@ closures and a new M3-scaffolding block), `04-quality/02` (`TC-I-03`'s evaluator
 repository `README`. No document was added or removed, so the doc set is still **36 files** (35 documents + this
 index).
 
+**Revised 2026-10-13 (fourteenth pass) — the species-profile catalogue is authorable by an administrator, not by
+the keeper.** The catalogue's four writes moved from the `Owner` policy to a new `Admin` role: `Owner` is the keeper
+who owns the terrariums and registration hands it to anybody who signs up, so reading it as "the administrator" had
+quietly given every account the right to rewrite the shared bands every terrarium is judged against, while the
+per-terrarium overrides of BR-10.3 — the ones that *are* the keeper's own — stayed with `Owner`. `Admin` is
+deliberately not a superset: it holds the catalogue writes and no other route. Because registration cannot produce
+it, `SystemAdminAccountSeeder` creates the one account that holds it from the `Admin` configuration section
+(`Admin__Username`/`Admin__Email`/`Admin__Password`, empty by default, which is also the switch), wired as the second
+start-up step; the section owns that credential, so editing the password and restarting rotates it, which is the
+only reset path — the seeded account carries no recovery code, because a start-up step that printed one would be a
+live credential in a log. Touched `02-design/06` §3 (the matrix, plus why `Admin` is not a level of the hierarchy),
+`01-product/03` FR-10's actor line and the acceptance criterion that named the Owner, `01-product/05` UC-03 A2,
+`07-appendices/03` §4.3 (a `D` legend entry and an as-built bullet), `07-appendices/05` §8,
+`03-implementation/03` §2/§6, `03-implementation/07` 4.21, `04-quality/03` 3.16 plus a new 3.17,
+`05-release/01` §3 (the deployment steps that create the administrator) and `05-release/03` §5. No document was
+added or removed, so the doc set is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-13 (thirteenth pass) — M3 task 3.1 is complete: the threshold write half and
+`ThresholdSnapshot`.** `PUT /api/v1/terrariums/{id}/thresholds` and
+`DELETE /api/v1/terrariums/{id}/thresholds/{metric}` (both `Owner`) upsert and revert the per-terrarium overrides,
+validating every band before anything is written — field by field, addressed by position — and answering with the
+resulting effective set in the same shape the read route returns; a band identical to the stored one is a no-op,
+while every real change records one `ThresholdSnapshot` of the set now in force, in the same unit of work, so an
+alert already open keeps the band it was judged against (`TC-U-26`) while the next sample is judged against the new
+one. Touched `02-design/02` §3.13 (as-built notes), `02-design/03` §5, `07-appendices/03` §4.2 (the write routes as
+built), `03-implementation/06` §1, `03-implementation/07` (the 3.1 row and a new write-half block), `04-quality/02`
+§B3, `05-release/03` §5 and the repository `README`. No document was added or removed, so the doc set is still
+**36 files** (35 documents + this index).
+
+**Revised 2026-10-14 (fourteenth pass) — the version a terrarium update must send is now readable from the body, and
+Swagger UI renders a box for it.** The 2026-10-13 review found `PATCH /api/v1/terrariums/{id}` uncallable from the
+one surface the demo is driven from: the concurrency token existed only in an `ETag` response header, which Swagger
+UI does not show, and the route declared no `If-Match` parameter for it to render from — so the route was readable
+and not updatable (TASKS 2026-10-14, item 4). The single-terrarium answers (`GET {id}`, `POST`, `PATCH`) now repeat
+the same base64 as the item's `rowVersion` field, the `PATCH` handler binds `[FromHeader(Name = "If-Match")]` with a
+description naming both places the value comes from, and the `412`/`428` messages name
+`GET /api/v1/terrariums/{id}` instead of only saying "reload it"; list items deliberately carry no `rowVersion`,
+because a token on a read invites an update from a stale copy. Touched `07-appendices/03` §4.2 (the table, the
+precondition block and the error table), `03-implementation/03` §6, `03-implementation/07` (2.8's table and the
+2026-10-14 run), `04-quality/03` (a new case 3.18), `web/src/api/types.ts` and the repository `README`. Verified
+live — 19 assertions against a live API and a scratch database, plus `TerrariumSummarySerialisationTests` (698 → 700
+unit tests).
+
+**The same day, a new request: a species profile can carry a picture.** The catalogue's create and edit forms gained
+a picture section, and `POST`/`GET`/`DELETE /api/v1/species-profiles/{id}/image` went in with it, so the item now
+carries `imageUrl` and `imageUpdatedAt`. A profile's picture is the first byte storage in the repository —
+`Application/Abstractions/IFileStore` over a filesystem adapter writing under `Storage:RootPath`, the `uploads`
+volume compose already mounted for FR-15/FR-17 — and the type stored is the one sniffed from the bytes rather than
+the one the uploader declared. `01-product/03` gains `BR-10.6`, `04-quality/02` gains `TC-U-61…68`, `04-quality/03`
+gains 3.19, and `05-release/03` §5 records the four judgements behind the routes. Verified at two levels: 27
+assertions by `curl` against a live API and a scratch database, then the whole flow driven in a real browser
+(create with a picture, replace, a refused `.txt`, removal), with 17 new unit cases (700 → 717).
+
+**And a third: the mobile app stops opening on the prototype.** `Env.prototypeMode` defaulted to `true`, so
+`flutter run` — the command the README's app section gives — built the clickable prototype, which still carries the
+pre-rename `SmartReptile` wordmark and a *Prototype* notice. The app's own VIVARIUMGUARD shell (`lib/app.dart` and
+`lib/screens/`, the shared ARB deck, the current theme tokens) is now what runs by default, and the prototype is
+opt-in with `--dart-define=PROTOTYPE=true`. Both modes stay compiled — the rule kernel and its 175 tests are
+untouched and still green — and the release builds pass neither define, so no artifact can ship the working aid.
+Verified by building the app three ways and looking at each: no define renders the VIVARIUMGUARD dashboard, the
+explicit flag renders the prototype, `flutter analyze` is clean and `flutter test` passes 175 cases. Touched
+`app/lib/{core/env.dart,main.dart}`, `app/PROTOTYPE.md`, `03-implementation/01` §4.3, `05-release/01` §4, the
+repository `README` and this index. No document was added or removed, so the doc set is still **36 files**
+(35 documents + this index).
+
+**The same day, item 1 of that list: the login body is exactly what the contract says.** `LoginRequest` loses
+`deviceInfo`, which neither client ever sent and which existed only to be bound to null; the `RefreshToken.DeviceInfo`
+column stays for the session list that will read it. Verifying it exposed a second, older fault in the same table:
+`07-appendices/03` §4.1's login row read `{username, password}` while the record binds `usernameOrEmail` — the field
+name the web client already sends and the four other auth rows of that table already use — so a caller following the
+documented body was refused `401 invalid_credentials` about a body that was never read as written. That row is
+corrected. Verified live: the two-field body answers `200`, a body still carrying the removed member answers `200`
+with the column left null, `swagger.json`'s `LoginRequest` lists two properties, and the 700 unit tests stay green
+(one test helper constructed the old three-argument record). Touched `AuthContracts`, `AuthService`,
+`AuthServiceTests`, `07-appendices/03` §4.1, `05-release/03` §5 and this index. No document was added or removed, so
+the doc set is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-14 (fifteenth pass) — the rest of the 2026-10-13 review, and one item left open on purpose.**
+Eight of the review's items were built: the terrarium's ownership answer stops being uniform (`403
+forbidden_terrarium` for another account's enclosure, `410 terrarium_deleted` for a removed one, `404` for an id
+nobody holds) while every other resource keeps `BR-02.2`'s single `404`; the soft delete is decided by a
+`Terrarium.Status` column rather than a nullable timestamp, with the migration back-filling from the old column; the
+administrator reaches any account's enclosure (`OwnerOrAdmin`, `ownerUserId` on the answers, two new audit verbs) and
+gains a `/users` group with two guards against losing the last administrator; a board can be paired by the MAC
+printed on it (`POST /devices/claim-by-mac`, documented as the lower-trust path) or bound while its enclosure is
+created, which is the same act as claiming and therefore returns the one-time secret; a board can be listed, read,
+renamed and removed (`DELETE` revokes **and detaches**, and is not a row delete); an account can edit its preferences
+and delete itself (disable, not purge); and a `TimeZone` catalogue keyed by IANA id — seeded with 113 zones — is what
+now validates both stored zone ids, in place of a bare `TimeZoneInfo` lookup. **Item 7 was not built**: removing
+per-terrarium overrides reverses `FR-10`/`BR-10.3` and deletes the built 3.1 write half and the web editor, so it is
+left open awaiting confirmation and recorded as an open row rather than quietly dropped. The web half was wired as far
+as the terrarium create form (the time-zone picker, the board picker and the one-time `deviceSecret` panel, plus the
+API client functions and types for the new groups); `Devices.tsx`, the account-management screen and the settings
+preference form stay on mock data and are recorded as open in `03-implementation/07` row 4.26's note and in
+`TASKS_2026-10-14.md`. Touched `02-design/02` §3,
+`02-design/06` §3 and §5, `03-implementation/03` §6, `03-implementation/07` (rows 4.22–4.26),
+`04-quality/03` cases 3.20–3.27, `05-release/03` §5 (two rows), `07-appendices/02` §1, `07-appendices/03` §§2.4,
+4.1–4.7 and 5, the repository `README`'s gate table, and `TASKS_2026-10-14.md`. No document was added or removed, so
+the doc set is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-16 (sixteenth pass) — M3 task 3.5: the notification layer, and M3's demo line with it.** M3's
+definition of done is one induced excursion producing "exactly one alert **and one notification**", and until now
+nothing delivered: the engine could raise an alarm and tell nobody. The policy matrix of `02-design/05` §4, §5's
+repeat cooldown, hourly cap and digest, §6's escalation ladder and `BR-13.5`'s retries are now the domain's
+`NotificationPolicy`/`NotificationCadence`; `NotificationDispatcher` is a 15 s sweep over the alerts that could owe
+somebody a message; `NotificationLog` is one row per dispatch attempt, which is the delivery record and the in-app
+inbox at once; the inbox is three routes (`GET /notifications`, `POST /notifications/{id}/read`,
+`POST /notifications/read-all`) and the timeline gained the `notified` entry §6 was written for; the channels are FCM
+HTTP v1 behind a service-account assertion and SMTP, which the development stack now points at a **Mailpit** sink —
+the decision `02-design/05` §4 left open on 2026-10-07, and the reason `R-13` no longer depends on the inbox alone.
+Six readings are recorded where they belong rather than here: the sweep instead of a subscription, one row per
+attempt, the `NotificationLog.Step` column the sketch lacked, the cap rationing the noise and not the record, quiet
+hours judged in the recipient's zone with a zero-length window treated as none, and the digest identified by the
+instant it records. Touched `02-design/05` §3/§4/§5/§6, `03-implementation/03` §6.2 and §8, `03-implementation/07`
+(the 3.5 row, the new 3.5 block and one correction in the 3.4 block), `04-quality/02` §B6 and §B7, `05-release/03`
+§2's `R-13`, §5's log and §6's `TBC-3`, `07-appendices/02` §3.10, `07-appendices/03` §4.2 and §4.5, the repository
+`README`'s gate table and status narrative, `docker-compose.yml`, `.env.example` and both `appsettings` files. No
+document was added or removed, so the doc set is still **36 files** (35 documents + this index).
+
+**Revised 2026-10-17 (seventeenth pass) — the role matrix becomes data, the alerts gain two families, and the
+administrator gets a dashboard.** The last three items of the 2026-10-14 review were one request in three parts, and
+two of them are model changes. The `UserRole` enum and `User.Role` are gone: a role is a row in `Role` holding
+permission codes through `RolePermission`, the sixteen codes the software implements are a catalogue in code, and a
+policy name *is* a code — which is why `Owner`, `Technician` and the composite `OwnerOrAdmin` are deleted, and why
+`02-design/06` §3 could drop the "Admin is not a fourth level" argument it had been qualifying since 2026-10-13:
+`Admin`'s seed is now a superset of `Owner`'s, and the two codes that reach past an account
+(`data.read.any`/`data.write.any`) are what "Admin = toàn bộ dữ liệu" means as a property of a permission set rather
+than a branch in a service. An alert also carries a **family** now — `enclosure` for the enclosure's humidity, light
+and the board it is measured with, `species` for the animal's temperature and UV against its profile — as a property
+of the metric, stored on the row, published on every alert and filterable with `?family=`. Together they unblock the
+third part: `/api/v1/admin/*` (overview, enclosures, boards, alerts), the account CRUD surface at `/api/v1/users`
+with its two guards, and the role matrix as an editable screen, wired into both clients. Touched `01-product/01`,
+`01-product/02` (RBAC, permission, cross-account and alert-family entries), `01-product/03` (FR-02 rewritten, FR-12's
+family rule, the new **FR-19**, the actor list and the index), `01-product/05`, `02-design/01`, `02-design/02`,
+`02-design/05` §2 (the families, and the `Family` column on the source matrix), `02-design/06` §3 (rewritten),
+`03-implementation/03`, `03-implementation/07` (the re-framing block), `04-quality/01`, `04-quality/02`,
+`04-quality/03`, `04-quality/04` (FR-02, FR-12 and the new FR-19 row), `05-release/03`, `06-report/01`,
+`07-appendices/02` (§1, §3.1, §3.7, §3.8, §3.16–§3.18, §4, §7), `07-appendices/03`, the repository `README` (the
+administrator paragraph, the test count, one new evidence row and the gate comments) and this index. No document was
+added or removed, so the doc set is still **36 files** (35 documents + this index).
+

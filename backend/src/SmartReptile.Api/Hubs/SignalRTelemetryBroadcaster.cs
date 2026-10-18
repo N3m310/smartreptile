@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Ingest;
 
 namespace SmartReptile.Api.Hubs;
@@ -35,4 +36,17 @@ public sealed class SignalRTelemetryBroadcaster(IHubContext<TelemetryHub> hub) :
         hub.Clients
             .Group(TelemetryHub.GroupName(statusChanged.TerrariumId))
             .SendAsync("statusChanged", StatusChangedPayload.From(statusChanged), cancellationToken);
+
+    /// <inheritdoc />
+    public async Task BroadcastAlertsAsync(
+        IReadOnlyList<AlertChangedPayload> changes,
+        CancellationToken cancellationToken)
+    {
+        foreach (var change in changes)
+        {
+            await hub.Clients
+                .Group(TelemetryHub.GroupName(change.TerrariumId))
+                .SendAsync("alertChanged", change, cancellationToken);
+        }
+    }
 }

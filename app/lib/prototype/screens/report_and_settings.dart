@@ -239,7 +239,11 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 KeyValueRow(
                   label: Labels.settingsRole,
-                  value: state.user?.role.label ?? '—',
+                  value: state.user?.role ?? '—',
+                ),
+                KeyValueRow(
+                  label: Labels.settingsPermissions,
+                  value: '${state.user?.permissions.length ?? 0}',
                 ),
               ],
             ),

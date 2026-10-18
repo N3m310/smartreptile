@@ -25,7 +25,7 @@ meaning, the source is named.
 |---|---|
 | **Reading** | A single metric value with a timestamp. Stored as `MetricReading(MetricId, Value, Unit)`. |
 | **Sample** | One device report containing all metrics measured at the same instant, plus device health. Stored as `TelemetrySample`; groups its readings. |
-| **Metric** | A named, typed quantity in the dictionary table `Metric`: `TempC`, `HumidityPct`, `LightLux`, `UvIndex`, `SurfaceTempC`, `BatteryPct`, `RssiDbm`. |
+| **Metric** | A named, typed quantity in the metric dictionary (`MetricDictionary`): `TempC`, `HumidityPct`, `LightLux`, `UvIndex`, `SurfaceTempC`, `BatteryPct`, `RssiDbm`. The dictionary is code rather than a table, and since 2026-10-17 it also carries each metric's **alert family**. |
 | **Raw value** | The unprocessed sensor output kept for diagnostics (`RawValue` column / `raw` field in the MQTT payload). |
 | **Filtered value** | The value after on-device smoothing (median-of-5 + EMA) that is used for thresholding. |
 | **Quality flag** | Bitmask on a sample: `0` = OK, `1` = sensor fault, `2` = out of physical plausibility, `4` = stale/first reading after boot, `8` = back-filled offline batch, `16` = calibration applied. |
@@ -44,8 +44,9 @@ meaning, the source is named.
 | **Hysteresis / recovery margin** | Extra distance *inside* the band required to consider the condition recovered (default 0.5 °C, 3 %RH, 5% of the lux threshold). Prevents flapping on the boundary. |
 | **Cooldown** | Minimum time between two notifications for the same open alert (default 60 min). |
 | **Dedupe key** | `{terrariumId}:{metric}:{severity}:{phase}` — guarantees at most one open alert per key. |
-| **Alert** | A persisted event with severity, the triggering value, and an open → acknowledged → resolved lifecycle. Table `Alert`. |
-| **Acknowledge** | A user takes ownership of an alert without changing the environment. Requires `Technician` or `Owner`. |
+| **Alert** | A persisted event with severity, the triggering value, and an open → acknowledged → resolved lifecycle. Table `Alert`. Since 2026-10-17 it also carries its **family** (below). |
+| **Alert family** | Which of the two subjects an alert is about: `enclosure` (the enclosure's own humidity, light, and the board — silence, sensor fault, clock skew) or `species` (the animal's temperature and UV, judged against its species profile). A property of the metric, stored on the alert and filterable with `?family=`. `02-design/05` §2. |
+| **Acknowledge** | A user takes ownership of an alert without changing the environment. Requires the `alert.write` permission (held by `Owner`, `Technician` and `Admin`; not by `Viewer`). |
 | **Auto-resolve** | The system closes an alert when the metric has been inside the band (with hysteresis) for 3 consecutive minutes. |
 | **Silence** | A time-boxed suppression of notifications for one metric (max 24 h), while alerts are still recorded. |
 | **Exposure index** | Accumulated out-of-range magnitude, expressed in **degree-hours** for temperature (`Σ max(0, T − TargetMax) · Δt` or `Σ max(0, TargetMin − T) · Δt`), **%-hours** for humidity, and **lux-deficit hours** for light. The physically meaningful measure of how much stress the animal accumulated. |
@@ -77,7 +78,9 @@ meaning, the source is named.
 | **LWT (Last Will and Testament)** | Retained message the broker publishes when the device disconnects unexpectedly; used to flip `device.status` to `offline` quickly. |
 | **QoS 1** | At-least-once delivery for telemetry. Duplicates are expected and handled by the idempotency rule. |
 | **JWT / refresh token** | User authentication pair: short-lived access token (15 min) + rotating refresh token (30 days), both `HttpOnly`-safe in the app's secure storage. |
-| **RBAC** | Role-based access control: `Owner` (full), `Technician` (operate + acknowledge), `Viewer` (read-only). |
+| **RBAC** | Role-based access control, and since 2026-10-17 it is **data**: a role is a row in `Role` holding permission codes (`RolePermission`), and the sixteen codes the software implements are a catalogue in code. The four system roles are `Admin`, `Owner`, `Technician` and `Viewer`; a custom role grants whatever an administrator gives it. Matrix: `02-design/06` §3. |
+| **Permission** | One thing the software can be asked to do, named by a dotted code — `terrarium.write`, `alert.read`, `user.manage`. It is what a route requires, what a token carries and what a client gates a screen on; a role is only a named set of them. |
+| **Cross-account permission** | The two codes `data.read.any` / `data.write.any`, held by the `Admin` role alone. They are the only grants that answer with another account's data, which is why "Admin sees everything" is a fact about the role's permission set rather than a branch in a service. |
 | **SignalR** | Real-time channel from backend to web dashboard and app for live values and alert badges. |
 | **FCM** | Firebase Cloud Messaging — push channel to the Flutter app. |
 | **RFC 7807** | Standard JSON problem-details error body used by the REST API. |

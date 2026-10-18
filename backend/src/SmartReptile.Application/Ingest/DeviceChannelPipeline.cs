@@ -1,3 +1,5 @@
+using SmartReptile.Application.Alerts;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Devices;
 
@@ -24,7 +26,8 @@ namespace SmartReptile.Application.Ingest;
 public sealed class DeviceChannelPipeline(
     IDeviceChannelParser parser,
     ITelemetryStore store,
-    DeviceStateUpdater stateUpdater)
+    DeviceStateUpdater stateUpdater,
+    DeviceSignalRecorder signals)
 {
     /// <summary>Runs one health, status or events message through every stage.</summary>
     /// <param name="envelope">The message as it arrived, with its channel set.</param>
@@ -73,9 +76,21 @@ public sealed class DeviceChannelPipeline(
 
         var statusChanged = Apply(device, terrariumId, message, recordedAt, envelope.ReceivedAt);
 
+        // The sensor-fault rule reads the parsed event rather than the stored row, because the failure count is a
+        // field of the payload; the row is still written by the caller as the evidence a replay would re-parse. The
+        // decision and the event therefore commit together, so a stored fault is always a signalled one.
+        IReadOnlyList<AlertChange> alertChanges = [];
+
+        if (message.Channel == DeviceChannel.Events && message.Event is { } published)
+        {
+            alertChanges = await signals
+                .RecordEventAsync(device, terrariumId, published, recordedAt, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-        return DeviceChannelOutcome.Stored(statusChanged);
+        return DeviceChannelOutcome.Stored(statusChanged, alertChanges);
     }
 
     private DeviceStatusChanged? Apply(

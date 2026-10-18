@@ -1,101 +1,57 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, ExternalLink, History as HistoryIcon, Plus, X, Loader2 } from 'lucide-react';
+import { Box, ExternalLink, History as HistoryIcon, Loader2, Plus } from 'lucide-react';
 import * as api from '../api/endpoints';
-import type { SpeciesProfileItem, TerrariumList } from '../api/types';
+import { ApiError } from '../api/client';
+import { PERMISSION_CODES } from '../api/types';
+import type { DeviceList, SpeciesProfileList, TerrariumList, TimeZoneList } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
 import { useI18n } from '../i18n';
 import { formatDateTime, formatRelative } from '../lib/format';
+import { describeError, fieldHasError, fieldMessage, fieldMessages } from '../lib/messages';
 import { deviceStatusLabel } from '../lib/status';
 import { usePolled } from '../lib/usePolled';
+import { useSession } from '../state/session';
+
+/**
+ * W2's terrarium list and create (roadmap 4.16).
+ *
+ * Create is wired now that the route it needed exists: `POST /terrariums` takes a `speciesProfileId`, and
+ * `GET /api/v1/species-profiles` (roadmap 3.9) supplies one, so the picker is filled from the API rather than
+ * from a hard-coded id. The panel is Owner-only, because the create route names the Owner policy — a form that
+ * always refuses is worse than no form.
+ */
 
 const POLL_MS = 30_000;
 
 export const Terrariums: React.FC = () => {
   const { t, lang } = useI18n();
+  const { hasPermission } = useSession();
   const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), POLL_MS);
   const items = terrariums.data?.items ?? [];
-
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [profiles, setProfiles] = useState<SpeciesProfileItem[]>([]);
-  const [loadingProfiles, setLoadingProfiles] = useState(false);
-
-  const [name, setName] = useState('');
-  const [speciesProfileId, setSpeciesProfileId] = useState('');
-  const [location, setLocation] = useState('');
-  const [description, setDescription] = useState('');
-  const [timeZoneId, setTimeZoneId] = useState('Asia/Ho_Chi_Minh');
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const handleOpenModal = async () => {
-    setIsModalOpen(true);
-    setSubmitError(null);
-    if (profiles.length === 0) {
-      setLoadingProfiles(true);
-      try {
-        const res = await api.listSpeciesProfiles();
-        setProfiles(res.items);
-        if (res.items.length > 0) {
-          setSpeciesProfileId(res.items[0].id);
-        }
-      } catch (err) {
-        setSubmitError((err as Error).message);
-      } finally {
-        setLoadingProfiles(false);
-      }
-    }
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setName('');
-    setLocation('');
-    setDescription('');
-    setSubmitError(null);
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !speciesProfileId) return;
-
-    setIsSubmitting(true);
-    setSubmitError(null);
-
-    try {
-      await api.createTerrarium({
-        name: name.trim(),
-        speciesProfileId,
-        location: location.trim() || null,
-        description: description.trim() || null,
-        timeZoneId,
-      });
-
-      handleCloseModal();
-      void terrariums.reload();
-    } catch (err) {
-      setSubmitError((err as Error).message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  const [createOpen, setCreateOpen] = useState(false);
+  // The create route names `terrarium.write`, not the Owner role: a deployment may grant the write to another
+  // role, and a screen that tested the name would keep hiding the form from somebody who holds it (FR-18).
+  const canCreate = hasPermission(PERMISSION_CODES.terrariumWrite);
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-heading text-2xl font-bold text-ink">{t('terrariumsTitle')}</h1>
-        </div>
-        <button
-          type="button"
-          onClick={() => void handleOpenModal()}
-          className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-dark"
-        >
-          <Plus className="h-4 w-4" />
-          <span>{t('terrariumNew')}</span>
-        </button>
+      <header className="flex items-start justify-between gap-4">
+        <h1 className="font-heading text-2xl font-bold text-ink">{t('terrariumsTitle')}</h1>
+        {canCreate ? (
+          <button
+            type="button"
+            onClick={() => setCreateOpen((open) => !open)}
+            aria-expanded={createOpen}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            <span>{t('terrariumNew')}</span>
+          </button>
+        ) : null}
       </header>
+
+      {createOpen && canCreate ? <CreatePanel onCreated={() => terrariums.reload()} /> : null}
 
       {terrariums.error?.isNetworkFailure ? (
         <UnreachableBanner onRetry={() => terrariums.reload()} />
@@ -115,7 +71,7 @@ export const Terrariums: React.FC = () => {
           {items.map((item) => (
             <li
               key={item.id}
-              className="flex flex-col justify-between rounded-2xl border border-hairline bg-surface p-5 shadow-sm transition-all hover:border-brand/40"
+              className="flex flex-col justify-between rounded-2xl border border-hairline bg-surface p-5"
             >
               <div>
                 <div className="flex items-start justify-between gap-3">
@@ -183,132 +139,240 @@ export const Terrariums: React.FC = () => {
         </ul>
       ) : null}
 
-      {/* Modal tạo bể nuôi mới */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-hairline bg-surface p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-4 border-b border-hairline">
-              <h3 className="font-heading text-lg font-bold text-ink">{t('terrariumNew')}</h3>
-              <button
-                type="button"
-                onClick={handleCloseModal}
-                className="rounded-lg p-1 text-muted hover:bg-hairline hover:text-ink"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreate} className="mt-5 space-y-4">
-              {submitError && (
-                <div className="rounded-xl border border-critical/40 bg-critical/10 p-3 text-xs text-critical">
-                  {submitError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-muted mb-1.5">
-                  {t('terrariumName')} *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ví dụ: Bể Rồng Úc phòng khách"
-                  className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-muted mb-1.5">
-                  {t('terrariumSpecies')} *
-                </label>
-                {loadingProfiles ? (
-                  <p className="text-xs text-muted flex items-center gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    {t('loadingSpecies')}
-                  </p>
-                ) : (
-                  <select
-                    value={speciesProfileId}
-                    onChange={(e) => setSpeciesProfileId(e.target.value)}
-                    className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
-                  >
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.scientificName})
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-muted mb-1.5">
-                    {t('terrariumLocation')}
-                  </label>
-                  <input
-                    type="text"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="Tầng 1, Kệ số 3"
-                    className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-muted mb-1.5">
-                    {t('terrariumTimeZone')}
-                  </label>
-                  <input
-                    type="text"
-                    value={timeZoneId}
-                    onChange={(e) => setTimeZoneId(e.target.value)}
-                    className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-muted mb-1.5">
-                  {t('terrariumDescription')}
-                </label>
-                <textarea
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Ghi chú thêm về điều kiện bể..."
-                  className="w-full rounded-xl border border-hairline bg-field px-3.5 py-2.5 text-xs text-ink outline-none focus:border-brand"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-hairline">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="rounded-xl border border-hairline px-4 py-2 text-xs font-medium text-ink hover:bg-hairline/20"
-                >
-                  {t('cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !name.trim()}
-                  className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2 text-xs font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>{t('creating')}</span>
-                    </>
-                  ) : (
-                    <span>{t('create')}</span>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
+  );
+};
+
+/**
+ * The create panel (roadmap 4.16). Owner-only by the route's own policy, and shown as a panel rather than a page
+ * because everything it needs is already on this one.
+ *
+ * The profile list is loaded once instead of polled: it changes when someone authors a profile on another screen,
+ * and a picker that reshuffles under a half-filled form is worse than one a minute old. It is the reason this form
+ * could not exist before roadmap 3.9 — `POST /terrariums` needs a `speciesProfileId` and nothing could list one.
+ */
+const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
+  const { t } = useI18n();
+  const profiles = usePolled<SpeciesProfileList>(() => api.listSpeciesProfiles(), null);
+
+  // The catalogue and the fleet are loaded once each rather than polled, for the reason the profile list is: they
+  // change when someone else edits them, and a picker that reshuffles under a half-filled form is worse than one a
+  // minute old (TASKS 2026-10-14, items 2 and 11).
+  const zones = usePolled<TimeZoneList>(() => api.listTimeZones(), null);
+  const boards = usePolled<DeviceList>(() => api.listDevices(), null);
+
+  const [name, setName] = useState('');
+  const [speciesProfileId, setSpeciesProfileId] = useState('');
+  const [location, setLocation] = useState('');
+  const [timeZoneId, setTimeZoneId] = useState('');
+  const [deviceId, setDeviceId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [created, setCreated] = useState(false);
+  const [secret, setSecret] = useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setCreated(false);
+    setSecret(null);
+
+    try {
+      const item = await api.createTerrarium({
+        name,
+        speciesProfileId,
+        // An empty box is "not given", not an empty location: the contract stores null for the latter and the
+        // card renders the difference. The same applies to the zone and the board.
+        location: location.trim() === '' ? null : location,
+        timeZoneId: timeZoneId === '' ? null : timeZoneId,
+        deviceId: deviceId === '' ? null : deviceId,
+      });
+
+      setName('');
+      setSpeciesProfileId('');
+      setLocation('');
+      setTimeZoneId('');
+      setDeviceId('');
+      setCreated(true);
+
+      // Shown once, by the server's own rule: naming a board is a claim, so this is the only moment the secret
+      // exists outside the board (item 2). It is deliberately kept out of the list below.
+      setSecret(item.deviceSecret ?? null);
+      onCreated();
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const nameError = fieldMessage(t, error, 'name');
+  const profileError = fieldMessage(t, error, 'speciesProfileId');
+  const zoneError = fieldMessage(t, error, 'timeZoneId');
+  const deviceError = fieldMessage(t, error, 'deviceId') ?? fieldMessage(t, error, 'macAddress');
+  const inputClass = (field: string) =>
+    `mt-1 w-full rounded-lg border bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand ${
+      fieldHasError(error, field) ? 'border-critical' : 'border-hairline'
+    }`;
+
+  // Only boards that are the caller's and not already bound can be chosen: the server refuses the rest with
+  // `device_already_bound`, and offering a row whose only outcome is a refusal is a worse form.
+  const claimable = (boards.data?.items ?? []).filter(
+    (board) => board.terrariumId === null && board.status !== 'revoked'
+  );
+
+  return (
+    <form onSubmit={submit} className="space-y-3 rounded-2xl border border-hairline bg-surface p-5">
+      <div>
+        <label htmlFor="terrarium-name" className="text-[11px] text-muted">
+          {t('terrariumName')}
+        </label>
+        <input
+          id="terrarium-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          required
+          maxLength={60}
+          className={inputClass('name')}
+        />
+        {nameError ? <p className="mt-1 text-[11px] text-critical">{nameError}</p> : null}
+      </div>
+
+      <div>
+        <label htmlFor="terrarium-species" className="text-[11px] text-muted">
+          {t('terrariumSpecies')}
+        </label>
+        <select
+          id="terrarium-species"
+          value={speciesProfileId}
+          onChange={(event) => setSpeciesProfileId(event.target.value)}
+          required
+          className={inputClass('speciesProfileId')}
+        >
+          <option value="" disabled>
+            {t('speciesProfileChoose')}
+          </option>
+          {(profiles.data?.items ?? []).map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.scientificName ? `${profile.name} — ${profile.scientificName}` : profile.name}
+            </option>
+          ))}
+        </select>
+        {profileError ? <p className="mt-1 text-[11px] text-critical">{profileError}</p> : null}
+        {profiles.error ? (
+          <p className="mt-1 text-[11px] text-critical">{describeError(t, profiles.error)}</p>
+        ) : null}
+      </div>
+
+      <div>
+        <label htmlFor="terrarium-location" className="text-[11px] text-muted">
+          {t('terrariumLocation')}
+        </label>
+        <input
+          id="terrarium-location"
+          value={location}
+          onChange={(event) => setLocation(event.target.value)}
+          maxLength={120}
+          className={inputClass('location')}
+        />
+      </div>
+
+      {/*
+        The zone comes from the catalogue rather than a free-text box (item 11): the server validates against the
+        same list, so a typed id could only be refused, and the offset is what a keeper actually reads off it.
+      */}
+      <div>
+        <label htmlFor="terrarium-zone" className="text-[11px] text-muted">
+          {t('terrariumTimeZone')}
+        </label>
+        <select
+          id="terrarium-zone"
+          value={timeZoneId}
+          onChange={(event) => setTimeZoneId(event.target.value)}
+          className={inputClass('timeZoneId')}
+        >
+          <option value="">{t('terrariumTimeZoneDefault')}</option>
+          {(zones.data?.items ?? []).map((zone) => (
+            <option key={zone.ianaId} value={zone.ianaId}>
+              {`${zone.utcOffset} — ${zone.displayName}`}
+            </option>
+          ))}
+        </select>
+        {zoneError ? <p className="mt-1 text-[11px] text-critical">{zoneError}</p> : null}
+        {zones.error ? <p className="mt-1 text-[11px] text-critical">{describeError(t, zones.error)}</p> : null}
+      </div>
+
+      {/*
+        Naming a board here is a claim: the enclosure and the binding commit together, and the answer carries the
+        secret once (item 2). Only a board with no enclosure is offered — the rest would be refused by the server.
+      */}
+      <div>
+        <label htmlFor="terrarium-device" className="text-[11px] text-muted">
+          {t('terrariumBindDevice')}
+        </label>
+        <select
+          id="terrarium-device"
+          value={deviceId}
+          onChange={(event) => setDeviceId(event.target.value)}
+          className={inputClass('deviceId')}
+        >
+          <option value="">{t('terrariumBindDeviceNone')}</option>
+          {claimable.map((board) => (
+            <option key={board.deviceId} value={board.deviceId}>
+              {board.deviceName === '' ? board.deviceId : `${board.deviceName} (${board.deviceId})`}
+            </option>
+          ))}
+        </select>
+        {deviceError ? <p className="mt-1 text-[11px] text-critical">{deviceError}</p> : null}
+        {boards.error ? <p className="mt-1 text-[11px] text-critical">{describeError(t, boards.error)}</p> : null}
+        {boards.data && claimable.length === 0 && !boards.loading ? (
+          <p className="mt-1 text-[11px] text-muted">{t('terrariumBindDeviceEmpty')}</p>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
+          <p>{describeError(t, error)}</p>
+          {fieldMessages(t, error.errors).map((message) => (
+            <p key={message}>{message}</p>
+          ))}
+        </div>
+      ) : null}
+
+      {created ? (
+        <p
+          role="status"
+          className="rounded-lg border border-brand/40 bg-brand/10 px-2.5 py-2 text-[11px] text-ink"
+        >
+          {t('terrariumCreated')}
+        </p>
+      ) : null}
+
+      {secret ? (
+        <div
+          role="status"
+          className="space-y-1 rounded-lg border border-warn/40 bg-warn/10 px-2.5 py-2 text-[11px] text-ink"
+        >
+          <p>{t('terrariumDeviceSecretOnce')}</p>
+          <code className="block select-all break-all font-mono text-[11px] text-ink">{secret}</code>
+        </div>
+      ) : null}
+
+      <button
+        type="submit"
+        disabled={busy || profiles.loading}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-dark disabled:opacity-70"
+      >
+        {busy ? (
+          <>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <span>{t('creating')}</span>
+          </>
+        ) : (
+          <span>{t('create')}</span>
+        )}
+      </button>
+    </form>
   );
 };

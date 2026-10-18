@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/generated/app_localizations.dart';
 import '../models/terrarium_models.dart';
 import '../state/app_data_provider.dart';
+import '../state/session_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/session_card.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -65,71 +68,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final data = context.watch<AppDataProvider>();
     final devices = data.devices;
 
+    // Đảm bảo _currentTerrariumId luôn tồn tại trong danh sách terrariums từ Database
+    if (data.terrariums.isNotEmpty &&
+        !data.terrariums.any((t) => t.id == _currentTerrariumId)) {
+      _currentTerrariumId = data.terrariums.first.id;
+      final first = data.terrariums.first;
+      _tempMinCtrl.text = first.thresholds.tempMin.toString();
+      _tempMaxCtrl.text = first.thresholds.tempMax.toString();
+      _humMinCtrl.text = first.thresholds.humidityMin.toString();
+      _humMaxCtrl.text = first.thresholds.humidityMax.toString();
+      _lightMinCtrl.text = first.thresholds.lightMin.toString();
+      _lightMaxCtrl.text = first.thresholds.lightMax.toString();
+    }
+
+    final terrariumItems = data.terrariums;
+    final selectedValue = terrariumItems.any((t) => t.id == _currentTerrariumId)
+        ? _currentTerrariumId
+        : (terrariumItems.isNotEmpty ? terrariumItems.first.id : null);
+
     return Scaffold(
       backgroundColor: AppColors.bgMain,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 1. Profile Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.bgCard,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: AppColors.primary.withValues(alpha: 0.2),
-                  child: const Icon(
-                    Icons.person,
-                    color: AppColors.primary,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Nguyễn Văn Quản Trị',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: AppColors.textMain,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'admin@vivariumguard.vn • 0987 654 321',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.edit_outlined,
-                    color: AppColors.textMuted,
-                    size: 20,
-                  ),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Hồ sơ đã được đồng bộ với hệ thống.'),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
+          // 1. Account card: the real session, and the one place the app can be signed in from.
+          const SessionCard(),
 
           const SizedBox(height: 20),
 
@@ -147,42 +110,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Expanded(
-                      child: Text(
-                        'Cấu hình Ngưỡng Vi khí hậu',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textMain,
-                        ),
+                    const Text(
+                      'Cấu hình Ngưỡng Vi khí hậu',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textMain,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _currentTerrariumId,
-                        dropdownColor: AppColors.bgCardHover,
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                    if (terrariumItems.isNotEmpty)
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedValue,
+                          dropdownColor: AppColors.bgCardHover,
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                          items: [
+                            for (final t in terrariumItems)
+                              DropdownMenuItem(value: t.id, child: Text(t.name)),
+                          ],
+                          onChanged: (id) {
+                            if (id != null) {
+                              final target = data.terrariums.firstWhere(
+                                (t) => t.id == id,
+                              );
+                              _loadTerrariumThresholds(target);
+                            }
+                          },
                         ),
-                        items: [
-                          for (final t in data.terrariums)
-                            DropdownMenuItem(value: t.id, child: Text(t.name)),
-                        ],
-                        onChanged: (id) {
-                          if (id != null) {
-                            final target = data.terrariums.firstWhere(
-                              (t) => t.id == id,
-                            );
-                            _loadTerrariumThresholds(target);
-                          }
-                        },
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -319,9 +278,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                       data.updateThresholds(_currentTerrariumId, updated);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Đã cập nhật cấu hình ngưỡng an toàn!'),
-                          backgroundColor: AppColors.primary,
+                        SnackBar(
+                          // The numbers on this screen change; nothing leaves the device. Saying which of the two
+                          // happened is the whole difference between a demo and a lie (task 4.20's rule for the
+                          // web's mock editor, which was deleted rather than kept).
+                          content: Text(
+                            AppLocalizations.of(context)
+                                .mockDataLocalChangeNotice,
+                          ),
+                          backgroundColor: AppColors.bgCardHover,
                         ),
                       );
                     },
@@ -431,70 +396,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 20),
 
           // 4. Notifications Toggles
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.bgCard,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Kênh cảnh báo',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textMain,
+          // A `Card` rather than a decorated `Container`: the switches paint their ink on the nearest `Material`
+          // ancestor, and a coloured box between the two hides that feedback (Flutter asserts on exactly this).
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Kênh cảnh báo',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textMain,
+                    ),
                   ),
-                ),
-                SwitchListTile(
-                  title: const Text(
-                    'Cảnh báo nhiệt độ',
-                    style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                  SwitchListTile(
+                    title: const Text(
+                      'Cảnh báo nhiệt độ',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                    ),
+                    subtitle: const Text(
+                      'Gửi thông báo khi nhiệt vượt ngưỡng',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    value: _notifyTemp,
+                    activeThumbColor: AppColors.primary,
+                    onChanged: (val) => setState(() => _notifyTemp = val),
                   ),
-                  subtitle: const Text(
-                    'Gửi thông báo khi nhiệt vượt ngưỡng',
-                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
+                  SwitchListTile(
+                    title: const Text(
+                      'Cảnh báo độ ẩm',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                    ),
+                    subtitle: const Text(
+                      'Gửi thông báo khi độ ẩm vi phạm',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    value: _notifyHumidity,
+                    activeThumbColor: AppColors.primary,
+                    onChanged: (val) => setState(() => _notifyHumidity = val),
                   ),
-                  value: _notifyTemp,
-                  activeThumbColor: AppColors.primary,
-                  onChanged: (val) => setState(() => _notifyTemp = val),
-                ),
-                SwitchListTile(
-                  title: const Text(
-                    'Cảnh báo độ ẩm',
-                    style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                  SwitchListTile(
+                    title: const Text(
+                      'Thiết bị ngoại tuyến',
+                      style: TextStyle(fontSize: 13, color: AppColors.textMain),
+                    ),
+                    subtitle: const Text(
+                      'Báo khi node ESP32 mất kết nối WiFi',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    value: _notifyOffline,
+                    activeThumbColor: AppColors.primary,
+                    onChanged: (val) => setState(() => _notifyOffline = val),
                   ),
-                  subtitle: const Text(
-                    'Gửi thông báo khi độ ẩm vi phạm',
-                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                  ),
-                  value: _notifyHumidity,
-                  activeThumbColor: AppColors.primary,
-                  onChanged: (val) => setState(() => _notifyHumidity = val),
-                ),
-                SwitchListTile(
-                  title: const Text(
-                    'Thiết bị ngoại tuyến',
-                    style: TextStyle(fontSize: 13, color: AppColors.textMain),
-                  ),
-                  subtitle: const Text(
-                    'Báo khi node ESP32 mất kết nối WiFi',
-                    style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                  ),
-                  value: _notifyOffline,
-                  activeThumbColor: AppColors.primary,
-                  onChanged: (val) => setState(() => _notifyOffline = val),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
           const SizedBox(height: 20),
 
-          // Logout
+          // Sign out. It calls the session rather than pretending: with no session there is nothing to end, and the
+          // button says so instead of reporting a sign-out nothing performed.
           SizedBox(
             width: double.infinity,
             height: 48,
@@ -508,15 +482,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Đã đăng xuất khỏi tài khoản quản trị.'),
-                  ),
-                );
+              onPressed: () async {
+                final session = context.read<SessionProvider>();
+                final l10n = AppLocalizations.of(context);
+
+                if (!session.isSignedIn) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(l10n.sessionSignedOut)),
+                  );
+                  return;
+                }
+
+                await session.signOut();
+
+                if (!context.mounted) {
+                  return;
+                }
+
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text(l10n.signedOut)));
               },
               icon: const Icon(Icons.logout, size: 18),
-              label: const Text('Đăng xuất'),
+              label: Text(AppLocalizations.of(context).signOut),
             ),
           ),
           const SizedBox(height: 24),

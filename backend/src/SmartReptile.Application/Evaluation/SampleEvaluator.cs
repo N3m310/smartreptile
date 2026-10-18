@@ -1,4 +1,5 @@
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Evaluation;
@@ -53,6 +54,7 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
         var openedCritical = 0;
         var escalated = 0;
         var resolved = 0;
+        var changes = new List<AlertChange>();
 
         foreach (var sample in samples)
         {
@@ -160,6 +162,7 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
                             await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
                             state.OpenAlertId = openedAlert.Id;
+                            changes.Add(new AlertChange(openedAlert, AlertEvent.Opened));
                             opened++;
 
                             if (openedAlert.Severity == AlertSeverity.Critical)
@@ -172,6 +175,7 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
 
                     case DecisionKind.Escalate:
                         ThresholdAlertWriter.Escalate(alert!, state.Violation, reading.Value, sample.RecordedAt);
+                        changes.Add(new AlertChange(alert!, AlertEvent.Escalated));
                         escalated++;
                         break;
 
@@ -182,6 +186,7 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
                     case DecisionKind.Resolve:
                         ThresholdAlertWriter.Resolve(alert!, sample.RecordedAt);
                         state.OpenAlertId = null;
+                        changes.Add(new AlertChange(alert!, AlertEvent.Resolved));
                         resolved++;
                         break;
 
@@ -202,7 +207,10 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
             await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return new EvaluationOutcome(advanced, skipped, opened, openedCritical, escalated, resolved);
+        return new EvaluationOutcome(advanced, skipped, opened, openedCritical, escalated, resolved)
+        {
+            AlertChanges = changes,
+        };
     }
 
     /// <summary>

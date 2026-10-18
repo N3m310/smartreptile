@@ -21,6 +21,23 @@ public sealed class RetentionOptions
     public int PurgeBatchSize { get; set; } = 10_000;
 }
 
+/// <summary>
+/// Where stored files live (ADR-009's retention policy covers their contents; this is their location).
+/// </summary>
+public sealed class StorageOptions
+{
+    /// <summary>Configuration section name.</summary>
+    public const string SectionName = "Storage";
+
+    /// <summary>
+    /// Directory the files are written under. A relative path resolves against the content root, which is what
+    /// makes the container's <c>/app</c> and the local run's project directory both land in their own
+    /// <c>uploads/</c> — the directory <c>docker-compose.yml</c> already mounts as a named volume, so a picture
+    /// survives a container rebuild.
+    /// </summary>
+    public string RootPath { get; set; } = "uploads";
+}
+
 /// <summary>System-wide defaults (§03-implementation/01 §5).</summary>
 public sealed class DefaultsOptions
 {
@@ -65,6 +82,36 @@ public sealed class StartupOptions
 
     /// <summary>Seed the metric dictionary and the built-in species profiles.</summary>
     public bool SeedReferenceDataOnStartup { get; set; } = true;
+}
+
+/// <summary>
+/// The system administrator the species-profile writes require (FR-10, <see cref="SystemRoles.AdminId"/>).
+/// </summary>
+/// <remarks>
+/// The role is deliberately unreachable by registration — <c>POST /auth/register</c> produces an
+/// <see cref="SystemRoles.Owner"/> — so the one account that may author the catalogue is created from configuration
+/// instead, and an empty section (the default) simply means "no administrator". The section is also the switch:
+/// there is no separate start-up flag, because a deployment that names no administrator has nothing to disable.
+/// <para>
+/// Development fills all three keys with placeholders. A real deployment sets them as environment variables
+/// (<c>Admin__Username</c>, <c>Admin__Email</c>, <c>Admin__Password</c>), which is also how the credential stays
+/// out of the repository.
+/// </para>
+/// </remarks>
+public sealed class AdminAccountOptions
+{
+    /// <summary>Configuration section name.</summary>
+    public const string SectionName = "Admin";
+
+    /// <summary>Login name of the administrator. Empty means no administrator is seeded.</summary>
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>Address of the administrator. Required, because the account identifier rules and the unique
+    /// index both apply to it exactly as they do to a registered account.</summary>
+    public string Email { get; set; } = string.Empty;
+
+    /// <summary>Password, validated against <see cref="PasswordPolicy"/> before anything is written. Never logged.</summary>
+    public string Password { get; set; } = string.Empty;
 }
 
 /// <summary>Ingest behaviour.</summary>

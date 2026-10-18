@@ -1,11 +1,13 @@
 using System.Text.Json;
 using FluentAssertions;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Infrastructure.Security;
+using SmartReptile.Tests.Unit.Devices;
 
 namespace SmartReptile.Tests.Unit.Application.Ingest;
 
@@ -28,6 +30,7 @@ public class IngestPipelineTests
             new CalibrationApplier(),
             new TelemetryWriter(_store),
             new DeviceStateUpdater(_store),
+            new DeviceSignalRecorder(new FakeDeviceSignalStore()),
             _store);
 
     private Device SeedDevice(string publicId = "sr-3f9a2c", DeviceStatus status = DeviceStatus.Offline)

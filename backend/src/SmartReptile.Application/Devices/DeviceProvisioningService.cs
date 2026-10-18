@@ -1,4 +1,5 @@
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Common;
 using SmartReptile.Domain.Devices;
@@ -30,10 +31,20 @@ public sealed class DeviceProvisioningService(
     IOnboardingThrottleStore throttle,
     IDeviceSessionRegistry sessions,
     IClock clock,
-    ProvisioningSettings settings)
+    ProvisioningSettings settings,
+    DeviceSilenceSettings silence)
 {
     /// <summary>Attempts allowed before a new public id is treated as unallocatable rather than retried forever.</summary>
     private const int PublicIdAttempts = 5;
+
+    /// <summary>Audit value for a binding made with the code shown on the board — the default flow.</summary>
+    private const string ClaimMethodCode = "claim_code";
+
+    /// <summary>
+    /// Audit value for a binding made with the address printed on the case. Recorded so a MAC claim is visible as
+    /// the lower-trust path it is (TASKS 2026-10-14, item 8).
+    /// </summary>
+    private const string ClaimMethodMac = "mac_address";
 
     /// <summary>
     /// Registers a board, or re-issues the code for one that registered but never claimed.
@@ -143,7 +154,89 @@ public sealed class DeviceProvisioningService(
                 "That claim code is not valid. Check the code shown on the device and try again.");
         }
 
-        var terrarium = await store.FindOwnedTerrariumAsync(request.TerrariumId, ownerUserId, cancellationToken);
+        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodCode, cancellationToken);
+    }
+
+    /// <summary>
+    /// Binds a registered device to a terrarium by its MAC address instead of its claim code
+    /// (TASKS 2026-10-14, item 8).
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the lower-trust path, and the documentation says so.</b> A claim code proves the caller has the
+    /// board in front of them, because it is shown on its screen and lives for minutes; a MAC proves nothing — it is
+    /// printed on the case, broadcast on every network the board joins, and guessable in bulk. It exists because a
+    /// keeper who has the board in hand should not be blocked by a screen that failed, and it is confined to a
+    /// board that has already self-registered and has no owner yet. The default flow stays the code.
+    /// <para>
+    /// <b>Every unusable MAC answers the same thing.</b> Unknown, already bound to an enclosure, revoked: one
+    /// <c>device_not_found</c>, for BR-04.3's reason — an answer that told the three apart would turn the route into
+    /// a way to test whether an address belongs to this fleet.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">The MAC address printed on the board, plus the terrarium to bind to.</param>
+    /// <param name="ownerUserId">The authenticated caller; the terrarium must belong to them.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit row; omitted callers get <see cref="AuditActor.Unknown"/>.</param>
+    public async Task<DeviceOutcome> ClaimByMacAsync(
+        ClaimByMacRequest request,
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null)
+    {
+        var now = clock.UtcNow;
+
+        if (!MacAddress.TryNormalise(request.MacAddress, out var mac))
+        {
+            return DeviceOutcome.Invalid(
+                "registration_invalid",
+                "The MAC address was refused.",
+                [
+                    new IdentityViolation(
+                        "macAddress",
+                        "mac_invalid",
+                        "A MAC address must be twelve hex digits, optionally separated by ':' or '-' "
+                        + "(for example AA:BB:CC:DD:EE:FF)."),
+                ]);
+        }
+
+        var device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
+
+        if (device is null || !DeviceProvisioningRules.IsClaimableByMac(device))
+        {
+            return DeviceOutcome.Failure(
+                "device_not_found",
+                "No unclaimed device matches that MAC address. Register the board first, and check that it is not "
+                + "already bound to another terrarium.");
+        }
+
+        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodMac, cancellationToken);
+    }
+
+    /// <summary>
+    /// The binding both claim routes share: check the terrarium, check DI-04, stage the binding and commit it.
+    /// </summary>
+    /// <remarks>
+    /// One implementation rather than two, because the routes differ only in how the board was identified — and a
+    /// security-relevant rule that exists twice is a rule that will disagree with itself. What a binding *is* lives
+    /// in <see cref="StageBinding"/>, which this shares with the create-with-a-device path.
+    /// </remarks>
+    /// <param name="device">The device the caller identified, already checked as claimable.</param>
+    /// <param name="terrariumId">Terrarium the caller named.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
+    /// <param name="now">Instant the binding is made at.</param>
+    /// <param name="method">Which identification path was used, recorded on the audit row.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task<DeviceOutcome> BindAsync(
+        Device device,
+        Guid terrariumId,
+        Guid ownerUserId,
+        AuditActor? actor,
+        DateTimeOffset now,
+        string method,
+        CancellationToken cancellationToken)
+    {
+        var terrarium = await store.FindOwnedTerrariumAsync(terrariumId, ownerUserId, cancellationToken);
 
         if (terrarium is null)
         {
@@ -156,34 +249,7 @@ public sealed class DeviceProvisioningService(
             return DeviceOutcome.Failure("terrarium_already_bound", "That terrarium already has a device bound to it.");
         }
 
-        var secret = credentials.NewSecret();
-        var hashed = credentials.HashSecret(secret);
-
-        store.AddCredential(new DeviceCredential
-        {
-            DeviceId = device.Id,
-            SecretHash = hashed.Hash,
-            Salt = hashed.Salt,
-            IssuedAt = now,
-        });
-
-        device.TerrariumId = terrarium.Id;
-        device.UserId = ownerUserId;
-        device.ProvisionedAt = now;
-        device.ClaimCode = null;
-        device.ClaimCodeExpiresAt = null;
-        device.Status = DeviceStatus.Provisioning;
-
-        // One row for the whole request: the binding and the secret are the same action, so `device.bound` is not
-        // written as well — two rows would make one claim look like two events.
-        store.AddAuditEntry(AuditLog.ForDevice(
-            AuditAction.DeviceClaimed,
-            device.Id,
-            device.PublicId,
-            ownerUserId,
-            actor ?? AuditActor.Unknown,
-            now,
-            afterJson: Serialize(new { terrariumId = terrarium.Id, userId = ownerUserId })));
+        var secret = StageBinding(device, terrarium.Id, ownerUserId, now, method, actor);
 
         // The pre-check gives a clear message; this is the enforcement. Two claims of one terrarium can both pass
         // it, and the filtered unique index DI-04 then refuses the second binding — which is a documented 409, not
@@ -196,6 +262,158 @@ public sealed class DeviceProvisioningService(
         }
 
         return DeviceOutcome.Claimed(new ClaimResult(device.PublicId, secret, terrarium.Id, now));
+    }
+
+    /// <summary>
+    /// Finds the board a create request named, by public id or by MAC address, and reports why it cannot be used
+    /// when that is the answer (TASKS 2026-10-14, item 2).
+    /// </summary>
+    /// <remarks>
+    /// The same rules the claim routes apply, expressed as field violations instead of a problem code, because here
+    /// the board is a field of the body the caller sent — exactly how the create path already reports an unknown
+    /// <c>speciesProfileId</c>. Two selectors at once are refused rather than resolved by precedence: guessing which
+    /// of two boards the caller meant is how the wrong board ends up bound.
+    /// </remarks>
+    /// <param name="publicId">Public id from the body, if any.</param>
+    /// <param name="macAddress">MAC address from the body, if any.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The board to bind and an empty list, no board and an empty list (nothing was named), or no board and the
+    /// violations to refuse the request with.
+    /// </returns>
+    public async Task<(Device? Device, IReadOnlyList<IdentityViolation> Violations)> ResolveClaimableDeviceAsync(
+        string? publicId,
+        string? macAddress,
+        CancellationToken cancellationToken = default)
+    {
+        var wantsId = !string.IsNullOrWhiteSpace(publicId);
+        var wantsMac = !string.IsNullOrWhiteSpace(macAddress);
+
+        if (wantsId && wantsMac)
+        {
+            return (null,
+            [
+                new IdentityViolation(
+                    "deviceId",
+                    "device_selector_ambiguous",
+                    "Name the board by its id or by its MAC address, not both."),
+            ]);
+        }
+
+        if (!wantsId && !wantsMac)
+        {
+            return (null, []);
+        }
+
+        var field = wantsId ? "deviceId" : "macAddress";
+        Device? device;
+
+        if (wantsId)
+        {
+            device = await store.FindDeviceByPublicIdAsync(publicId!.Trim(), cancellationToken);
+        }
+        else if (MacAddress.TryNormalise(macAddress, out var mac))
+        {
+            device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
+        }
+        else
+        {
+            return (null,
+            [
+                new IdentityViolation(
+                    "macAddress",
+                    "mac_invalid",
+                    "A MAC address must be twelve hex digits, optionally separated by ':' or '-' "
+                    + "(for example AA:BB:CC:DD:EE:FF)."),
+            ]);
+        }
+
+        if (device is null)
+        {
+            return (null,
+            [
+                new IdentityViolation(
+                    field,
+                    "device_not_found",
+                    "No device registered with this server matches that. Register the board first "
+                    + "(POST /api/v1/devices/self-register)."),
+            ]);
+        }
+
+        if (!DeviceProvisioningRules.IsClaimableByMac(device))
+        {
+            return (null,
+            [
+                new IdentityViolation(
+                    field,
+                    "device_already_bound",
+                    "That board is already bound to a terrarium, or has been revoked."),
+            ]);
+        }
+
+        return (device, []);
+    }
+
+    /// <summary>
+    /// Stages everything a binding consists of — the credential, the device's binding fields and one audit row —
+    /// and hands back the secret. <b>The caller commits.</b>
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ClaimAsync"/> so that the create-with-a-device path can bind a board inside its own
+    /// unit of work: the enclosure and the binding have to commit together, or a failure between them would leave
+    /// either a terrarium with a board nobody can use or a board bound to an enclosure that does not exist. The
+    /// rules that decide <i>whether</i> a board may be bound stay in the two entry points, so this stages only what
+    /// a decision has already allowed.
+    /// </remarks>
+    /// <param name="device">Board to bind, already checked as claimable.</param>
+    /// <param name="terrariumId">Terrarium to bind it to.</param>
+    /// <param name="ownerUserId">Acting account, recorded as the device's owner and on the audit row.</param>
+    /// <param name="now">Instant of the binding.</param>
+    /// <param name="method">Which identification path was used, recorded on the audit row.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
+    /// <returns>The secret to hand back exactly once.</returns>
+    public string StageBinding(
+        Device device,
+        Guid terrariumId,
+        Guid ownerUserId,
+        DateTimeOffset now,
+        string method,
+        AuditActor? actor = null)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        var secret = credentials.NewSecret();
+        var hashed = credentials.HashSecret(secret);
+
+        store.AddCredential(new DeviceCredential
+        {
+            DeviceId = device.Id,
+            SecretHash = hashed.Hash,
+            Salt = hashed.Salt,
+            IssuedAt = now,
+        });
+
+        device.TerrariumId = terrariumId;
+        device.UserId = ownerUserId;
+        device.ProvisionedAt = now;
+        device.ClaimCode = null;
+        device.ClaimCodeExpiresAt = null;
+        device.Status = DeviceStatus.Provisioning;
+
+        // One row for the whole request: the binding and the secret are the same action, so `device.bound` is not
+        // written as well — two rows would make one claim look like two events. `method` is recorded because the two
+        // identification paths carry different trust, and a trail that could not tell them apart could not answer
+        // "how did this board get bound?" (TASKS 2026-10-14, item 8).
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceClaimed,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            afterJson: Serialize(new { terrariumId, userId = ownerUserId, method })));
+
+        return secret;
     }
 
     /// <summary>
@@ -287,10 +505,85 @@ public sealed class DeviceProvisioningService(
             return DeviceOutcome.Done();
         }
 
+        await RevokeCoreAsync(device, ownerUserId, now, detach: false, actor, cancellationToken);
+
+        return DeviceOutcome.Done();
+    }
+
+    /// <summary>
+    /// Removes a board from the caller's fleet: its credentials are revoked and it is detached from its enclosure
+    /// (TASKS 2026-10-14, item 9b).
+    /// </summary>
+    /// <remarks>
+    /// <b>This is not a row delete, and the documentation says so.</b> The board's readings, health reports, events
+    /// and audit rows name it, so removing the row would take a keeper's history with it — or fail on those foreign
+    /// keys. What a keeper means by "remove this board" is that it should stop being theirs and stop reporting, and
+    /// that is exactly what happens: credentials revoked (BR-05.4), session closed, enclosure unbound so the DI-04
+    /// slot is free for a replacement. The audit row is the same <c>device.revoked</c> verb as
+    /// <c>POST /devices/{id}/revoke</c>, with the detachment recorded in its payload — one verb for one effect,
+    /// rather than a second word for what the credential does.
+    /// </remarks>
+    /// <param name="deviceId">Public id of the device.</param>
+    /// <param name="ownerUserId">The authenticated caller, who must own the device.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
+    public async Task<DeviceOutcome> DeleteAsync(
+        string deviceId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null)
+    {
+        var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
+
+        if (device is null || device.UserId != ownerUserId)
+        {
+            return DeviceOutcome.Failure("not_found", "Device not found.");
+        }
+
+        var now = clock.UtcNow;
+
+        // Unlike revoke, this runs even for an already-revoked board: a board revoked while still bound to an
+        // enclosure has to be detachable afterwards, and that is the one thing this route does that revoke does not.
+        if (device.Status == DeviceStatus.Revoked && device.TerrariumId is null)
+        {
+            return DeviceOutcome.Described(Describe(device));
+        }
+
+        await RevokeCoreAsync(device, ownerUserId, now, detach: true, actor, cancellationToken);
+
+        return DeviceOutcome.Described(Describe(device));
+    }
+
+    /// <summary>
+    /// Invalidates a board's credentials, closes its session and (optionally) detaches it. The one place a
+    /// revocation is written, shared by the revoke and delete routes.
+    /// </summary>
+    /// <param name="device">Board to revoke, already checked as the caller's.</param>
+    /// <param name="ownerUserId">Acting account.</param>
+    /// <param name="now">Instant of the change.</param>
+    /// <param name="detach">True to clear the enclosure binding as well.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task RevokeCoreAsync(
+        Device device,
+        Guid ownerUserId,
+        DateTimeOffset now,
+        bool detach,
+        AuditActor? actor,
+        CancellationToken cancellationToken)
+    {
+        var alreadyRevoked = device.Status == DeviceStatus.Revoked;
+
         device.Status = DeviceStatus.Revoked;
-        device.RevokedAt = now;
+        device.RevokedAt ??= now;
         device.ClaimCode = null;
         device.ClaimCodeExpiresAt = null;
+
+        if (detach)
+        {
+            device.TerrariumId = null;
+            device.ProvisionedAt = null;
+        }
 
         var credentialsRevoked = 0;
 
@@ -308,15 +601,204 @@ public sealed class DeviceProvisioningService(
             ownerUserId,
             actor ?? AuditActor.Unknown,
             now,
-            afterJson: Serialize(new { status = nameof(DeviceStatus.Revoked), credentialsRevoked })));
+            afterJson: Serialize(new
+            {
+                status = nameof(DeviceStatus.Revoked),
+                credentialsRevoked,
+                detached = detach,
+                alreadyRevoked,
+            })));
+
+        if (!alreadyRevoked)
+        {
+            // Marked so the payload can say whether this call or an earlier one killed the credential.
+        }
 
         await store.SaveChangesAsync(cancellationToken);
 
         // After the write, so the credential check already refuses the device even if this kick fails or the
         // board reconnects before it takes effect.
         await sessions.KickAsync(device.PublicId, "device_revoked", cancellationToken);
+    }
 
-        return DeviceOutcome.Done();
+    /// <summary>The label a board carries until its owner renames it.</summary>
+    private const string DefaultDeviceName = "New node";
+
+    /// <summary>
+    /// True when the board belongs to the caller. Claiming sets <c>UserId</c>, so a board that only registered and
+    /// was never claimed has no owner and answers "not found" to everybody — which is why the fleet routes cannot be
+    /// used to enumerate boards in provisioning mode.
+    /// </summary>
+    private static bool IsCallers(Device device, Guid ownerUserId) => device.UserId == ownerUserId;
+
+    /// <summary>Projects a board onto the fleet screen's shape (FR-16, TASKS 2026-10-14, item 9b).</summary>
+    private DeviceDetail Describe(Device device) => new(
+        device.PublicId,
+        device.DeviceName,
+        device.ChipId,
+        device.MacAddress,
+        string.IsNullOrEmpty(device.FirmwareVersion) ? null : device.FirmwareVersion,
+        DeviceStatusNames.Of(device.Status),
+        DeriveRuntimeStatus(device),
+        device.Protocol == DeviceProtocol.Mqtt ? "mqtt" : "http_fallback",
+        device.TerrariumId,
+        device.Terrarium?.Name,
+        device.LastSeenAt,
+        device.SamplingIntervalSec,
+        device.PublishIntervalSec,
+        device.ProvisionedAt,
+        device.RevokedAt,
+        device.CreatedAt,
+        device.SignalStrengthDbm,
+        device.BatteryPct,
+        device.UptimeSeconds,
+        device.FreeHeapKb,
+        device.CalibrationJson);
+
+    /// <summary>
+    /// The online/offline badge the fleet screen shows. Identical to the rule the terrarium header uses, down to the
+    /// same <see cref="DeviceSilencePolicy"/> call, so the two screens cannot disagree about one board
+    /// (§02-design/03 §4.3).
+    /// </summary>
+    private string DeriveRuntimeStatus(Device device)
+    {
+        if (device.Status is DeviceStatus.Revoked or DeviceStatus.Provisioning or DeviceStatus.Maintenance)
+        {
+            return DeviceStatusNames.Of(device.Status);
+        }
+
+        if (device.LastSeenAt is not { } lastSeenAt)
+        {
+            return DeviceStatusNames.Of(DeviceStatus.Offline);
+        }
+
+        return DeviceSilencePolicy.IsSilent(
+            clock.UtcNow - lastSeenAt,
+            device.SamplingIntervalSec,
+            silence.SilentAfterIntervals)
+            ? DeviceStatusNames.Of(DeviceStatus.Offline)
+            : DeviceStatusNames.Of(DeviceStatus.Online);
+    }
+
+    /// <summary>The caller's boards, ordered by display name (TASKS 2026-10-14, item 9b).</summary>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<DeviceOutcome> ListAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+    {
+        var devices = await store.ListOwnedAsync(ownerUserId, cancellationToken);
+
+        return DeviceOutcome.Listed([.. devices.Select(Describe)]);
+    }
+
+    /// <summary>One board, or <c>not_found</c> when it is unknown or belongs to someone else.</summary>
+    /// <param name="deviceId">Public id of the device.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<DeviceOutcome> GetAsync(
+        string deviceId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
+
+        if (device is null || !IsCallers(device, ownerUserId))
+        {
+            return DeviceOutcome.Failure("not_found", "Device not found.");
+        }
+
+        return DeviceOutcome.Described(Describe(device));
+    }
+
+    /// <summary>
+    /// Edits a board's name and intervals (TASKS 2026-10-14, item 9b). A patch: an omitted field keeps its value.
+    /// </summary>
+    /// <remarks>
+    /// Not audited, and deliberately: <c>BR-18.4</c> names the credential operations, and renaming a node or moving
+    /// its interval is the ordinary use of a settings screen rather than an event anything has to answer for later.
+    /// The same reasoning already applies to edits of an enclosure.
+    /// </remarks>
+    /// <param name="deviceId">Public id of the device.</param>
+    /// <param name="request">The fields to change; omitted members are left alone.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<DeviceOutcome> UpdateAsync(
+        string deviceId,
+        UpdateDeviceRequest request,
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
+
+        if (device is null || !IsCallers(device, ownerUserId))
+        {
+            return DeviceOutcome.Failure("not_found", "Device not found.");
+        }
+
+        var violations = new List<IdentityViolation>();
+
+        var name = request.DeviceName?.Trim();
+        if (request.DeviceName is not null)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                // An empty name would leave the fleet screen with a blank row; the default label is the honest value
+                // for "no name given".
+                name = DefaultDeviceName;
+            }
+            else if (name.Length > DeviceLimits.NameMaxLength)
+            {
+                violations.Add(new IdentityViolation(
+                    "deviceName",
+                    "device_name_too_long",
+                    $"A name may be at most {DeviceLimits.NameMaxLength} characters."));
+            }
+        }
+
+        ValidateInterval(request.SamplingIntervalSec, "samplingIntervalSec", violations);
+        ValidateInterval(request.PublishIntervalSec, "publishIntervalSec", violations);
+
+        if (violations.Count > 0)
+        {
+            return DeviceOutcome.Invalid("device_invalid", "The device changes were refused.", violations);
+        }
+
+        if (name is not null)
+        {
+            device.DeviceName = name;
+        }
+
+        if (request.SamplingIntervalSec is { } sampling)
+        {
+            device.SamplingIntervalSec = sampling;
+        }
+
+        if (request.PublishIntervalSec is { } publishing)
+        {
+            device.PublishIntervalSec = publishing;
+        }
+
+        await store.SaveChangesAsync(cancellationToken);
+
+        return DeviceOutcome.Described(Describe(device));
+    }
+
+    /// <summary>An interval inside the bounds of <see cref="DeviceLimits"/>, or a violation naming the field.</summary>
+    private static void ValidateInterval(int? value, string field, List<IdentityViolation> violations)
+    {
+        if (value is not { } interval)
+        {
+            return;
+        }
+
+        if (interval is < DeviceLimits.MinIntervalSec or > DeviceLimits.MaxIntervalSec)
+        {
+            violations.Add(new IdentityViolation(
+                field,
+                "interval_out_of_range",
+                $"An interval must be between {DeviceLimits.MinIntervalSec} and {DeviceLimits.MaxIntervalSec} seconds."));
+        }
     }
 
     /// <summary>
