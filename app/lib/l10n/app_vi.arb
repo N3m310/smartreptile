@@ -390,6 +390,9 @@
 
   "adminSectionRollup": "Mỗi tài khoản đang có gì",
   "adminColumnAccount": "Tài khoản",
+  "adminColumnUsername": "Tên đăng nhập",
+  "adminColumnEmail": "Email",
+  "adminExportCsv": "Xuất CSV",
   "adminColumnRole": "Vai trò",
   "adminColumnState": "Trạng thái",
   "adminColumnTerrariums": "Bể nuôi",
@@ -400,6 +403,16 @@
   "adminBadgeActive": "Đang dùng",
   "adminBadgeDisabled": "Đã khoá",
   "adminRollupEmpty": "Chưa tài khoản nào có bể nuôi.",
+  "adminSearchAccountsRollup": "Tìm theo tên đăng nhập hoặc email",
+  "adminFilterRoleAll": "Mọi vai trò",
+  "adminFilterAccountStateAll": "Mọi trạng thái tài khoản",
+  "adminFilterResults": "Đang hiển thị {count}/{total} tài khoản",
+  "@adminFilterResults": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
 
   "adminListsTitle": "Toàn bộ dữ liệu",
   "adminTabTerrariums": "Bể nuôi",

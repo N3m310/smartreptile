@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Box, Cpu, Leaf, RefreshCw, Users } from 'lucide-react';
+import { AlertTriangle, Box, Cpu, Download, Leaf, RefreshCw, Users } from 'lucide-react';
 import * as api from '../api/endpoints';
 import type {
   AdminAlertView,
@@ -296,53 +296,168 @@ const CountTile: React.FC<{
  */
 const AccountRollupTable: React.FC<{ accounts: AdminOverviewData['accounts'] }> = ({ accounts }) => {
   const { t, lang } = useI18n();
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const roles = [...new Set(accounts.map((account) => account.role))].sort((left, right) =>
+    left.localeCompare(right)
+  );
+  const query = search.trim().toLocaleLowerCase();
+  const filteredAccounts = accounts.filter((account) => {
+    const matchesSearch =
+      !query ||
+      account.username.toLocaleLowerCase().includes(query) ||
+      account.email.toLocaleLowerCase().includes(query);
+    const matchesRole = !roleFilter || account.role === roleFilter;
+    const matchesState =
+      !stateFilter ||
+      (stateFilter === 'active' ? account.isActive : !account.isActive);
+    return matchesSearch && matchesRole && matchesState;
+  });
 
   if (accounts.length === 0) {
     return <EmptyPanel title={t('emptyStateTitle')} body={t('adminRollupEmpty')} />;
   }
 
   return (
-    <div className={TABLE_WRAP}>
-      <table className={TABLE}>
-        <thead className="border-b border-hairline text-muted">
-          <tr>
-            <th className={TH}>{t('adminColumnAccount')}</th>
-            <th className={TH}>{t('adminColumnRole')}</th>
-            <th className={TH}>{t('adminColumnState')}</th>
-            <th className={TH}>{t('adminColumnTerrariums')}</th>
-            <th className={TH}>{t('adminColumnDevices')}</th>
-            <th className={TH}>{t('adminColumnAlertsOpen')}</th>
-            <th className={TH}>{t('adminColumnCreated')}</th>
-            <th className={TH}>{t('adminColumnLastLogin')}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-hairline">
-          {accounts.map((account) => (
-            <tr key={account.userId} className="hover:bg-raised/40">
-              <td className={TD}>
-                <span className="block font-semibold text-ink">{account.username}</span>
-                <span className="block text-[11px] text-muted">{account.email}</span>
-              </td>
-              <td className={`${TD} font-mono`}>{account.role}</td>
-              <td className={TD}>
-                <AccountState active={account.isActive} />
-              </td>
-              <td className={`${TD} font-mono`}>{account.terrariums}</td>
-              <td className={`${TD} font-mono`}>{account.devices}</td>
-              <td className={`${TD} font-mono ${account.alertsOpen > 0 ? 'text-warning' : ''}`}>
-                {account.alertsOpen}
-              </td>
-              <td className={`${TD} whitespace-nowrap text-muted`}>{formatDate(account.createdAt, lang)}</td>
-              <td className={`${TD} whitespace-nowrap text-muted`}>
-                {formatDateTime(account.lastLoginAt, lang)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          label={t('adminSearchAccountsRollup')}
+          placeholder={t('adminSearchAccountsRollup')}
+        />
+        <label className="text-[11px] text-muted">
+          <span className="mb-1 block">{t('adminColumnRole')}</span>
+          <select
+            value={roleFilter}
+            onChange={(event) => setRoleFilter(event.target.value)}
+            className="rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+          >
+            <option value="">{t('adminFilterRoleAll')}</option>
+            {roles.map((role) => (
+              <option key={role} value={role}>{role}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-[11px] text-muted">
+          <span className="mb-1 block">{t('adminColumnStatus')}</span>
+          <select
+            value={stateFilter}
+            onChange={(event) => setStateFilter(event.target.value)}
+            className="rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+          >
+            <option value="">{t('adminFilterAccountStateAll')}</option>
+            <option value="active">{t('adminBadgeActive')}</option>
+            <option value="disabled">{t('adminBadgeDisabled')}</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={filteredAccounts.length === 0}
+          onClick={() =>
+            downloadAccountsCsv(
+              [
+                t('adminColumnUsername'),
+                t('adminColumnEmail'),
+                t('adminColumnRole'),
+                t('adminColumnState'),
+                t('adminColumnTerrariums'),
+                t('adminColumnDevices'),
+                t('adminColumnAlertsOpen'),
+                t('adminColumnCreated'),
+                t('adminColumnLastLogin'),
+              ],
+              filteredAccounts.map((account) => [
+                account.username,
+                account.email,
+                account.role,
+                account.isActive ? t('adminBadgeActive') : t('adminBadgeDisabled'),
+                account.terrariums,
+                account.devices,
+                account.alertsOpen,
+                formatDate(account.createdAt, lang),
+                formatDateTime(account.lastLoginAt, lang),
+              ])
+            )
+          }
+          className="inline-flex items-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          {t('adminExportCsv')}
+        </button>
+      </div>
+      <p className="text-[11px] text-muted">
+        {t('adminFilterResults', { count: filteredAccounts.length, total: accounts.length })}
+      </p>
+
+      {filteredAccounts.length === 0 ? (
+        <EmptyPanel title={t('emptyStateTitle')} body={t('adminNoRows')} />
+      ) : (
+        <div className={TABLE_WRAP}>
+          <table className={TABLE}>
+            <thead className="border-b border-hairline text-muted">
+              <tr>
+                <th className={TH}>{t('adminColumnAccount')}</th>
+                <th className={TH}>{t('adminColumnRole')}</th>
+                <th className={TH}>{t('adminColumnState')}</th>
+                <th className={TH}>{t('adminColumnTerrariums')}</th>
+                <th className={TH}>{t('adminColumnDevices')}</th>
+                <th className={TH}>{t('adminColumnAlertsOpen')}</th>
+                <th className={TH}>{t('adminColumnCreated')}</th>
+                <th className={TH}>{t('adminColumnLastLogin')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {filteredAccounts.map((account) => (
+                <tr key={account.userId} className="hover:bg-raised/40">
+                  <td className={TD}>
+                    <span className="block font-semibold text-ink">{account.username}</span>
+                    <span className="block text-[11px] text-muted">{account.email}</span>
+                  </td>
+                  <td className={`${TD} font-mono`}>{account.role}</td>
+                  <td className={TD}>
+                    <AccountState active={account.isActive} />
+                  </td>
+                  <td className={`${TD} font-mono`}>{account.terrariums}</td>
+                  <td className={`${TD} font-mono`}>{account.devices}</td>
+                  <td className={`${TD} font-mono ${account.alertsOpen > 0 ? 'text-warning' : ''}`}>
+                    {account.alertsOpen}
+                  </td>
+                  <td className={`${TD} whitespace-nowrap text-muted`}>{formatDate(account.createdAt, lang)}</td>
+                  <td className={`${TD} whitespace-nowrap text-muted`}>
+                    {formatDateTime(account.lastLoginAt, lang)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
+
+function downloadAccountsCsv(headers: string[], rows: (string | number)[][]): void {
+  const escapeCell = (value: string | number): string => {
+    let text = String(value);
+    if (/^[\t\r ]*[=+\-@]/.test(text)) {
+      text = `'${text}`;
+    }
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const csv = `\uFEFF${[headers, ...rows]
+    .map((row) => row.map(escapeCell).join(','))
+    .join('\r\n')}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `admin-accounts-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 /** Enabled or disabled, in words — a soft-deleted account *is* a disabled one, and the list is where that shows. */
 const AccountState: React.FC<{ active: boolean }> = ({ active }) => {
