@@ -5,9 +5,13 @@ using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Evaluation;
 using SmartReptile.Domain.Identity;
+using SmartReptile.Domain.Notifications;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Domain.Reference;
 using SmartReptile.Domain.Species;
+using SmartReptile.Domain.Summaries;
 using SmartReptile.Domain.Terrariums;
+using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Infrastructure.Persistence;
 
@@ -38,6 +42,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Per-terrarium band overrides.</summary>
     public DbSet<ThresholdOverride> ThresholdOverrides => Set<ThresholdOverride>();
 
+    /// <summary>Effective bands captured whenever a terrarium's overrides change (§02-design/02 §3.13).</summary>
+    public DbSet<ThresholdSnapshot> ThresholdSnapshots => Set<ThresholdSnapshot>();
+
     /// <summary>Sensor nodes.</summary>
     public DbSet<Device> Devices => Set<Device>();
 
@@ -56,14 +63,38 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Metric values inside samples.</summary>
     public DbSet<MetricReading> MetricReadings => Set<MetricReading>();
 
+    /// <summary>Recomputable per-metric UTC-hour statistics.</summary>
+    public DbSet<TelemetryHourlyRollup> TelemetryHourlyRollups => Set<TelemetryHourlyRollup>();
+
+    /// <summary>Computed environmental statistics for one terrarium-local day.</summary>
+    public DbSet<DailyEnvironmentalSummary> DailyEnvironmentalSummaries => Set<DailyEnvironmentalSummary>();
+
     /// <summary>Alerts and their lifecycle.</summary>
     public DbSet<Alert> Alerts => Set<Alert>();
+
+    /// <summary>Time-boxed silence windows (FR-13).</summary>
+    public DbSet<MetricSilence> MetricSilences => Set<MetricSilence>();
+
+    /// <summary>Roles and the permission matrix (FR-18).</summary>
+    public DbSet<Role> Roles => Set<Role>();
+
+    /// <summary>The permission catalogue, seeded from <c>Permissions.All</c>.</summary>
+    public DbSet<Permission> PermissionCatalog => Set<Permission>();
+
+    /// <summary>Which role grants which permission — the matrix itself.</summary>
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
+    /// <summary>Delivery records: one row per dispatch attempt, which is also the in-app inbox (FR-12/FR-13).</summary>
+    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
 
     /// <summary>Dwell/hysteresis state of the threshold evaluator, one row per (terrarium, metric, phase).</summary>
     public DbSet<EvaluationState> EvaluationStates => Set<EvaluationState>();
 
     /// <summary>Audit trail (FR-18).</summary>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    /// <summary>The time-zone catalogue a picker reads and the write paths validate against.</summary>
+    public DbSet<TimeZoneReference> TimeZones => Set<TimeZoneReference>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -75,13 +106,86 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         ConfigureSpecies(modelBuilder);
         ConfigureDevices(modelBuilder);
         ConfigureTelemetry(modelBuilder);
+        ConfigureSummaries(modelBuilder);
         ConfigureAlerts(modelBuilder);
+        ConfigureSilences(modelBuilder);
+        ConfigureNotifications(modelBuilder);
         ConfigureEvaluation(modelBuilder);
         ConfigureAuditing(modelBuilder);
+        ConfigureReferenceData(modelBuilder);
+    }
+
+    /// <summary>
+    /// The reference tables: data the application reads to fill a picker and validates a body against, owned by the
+    /// seeder rather than by a user (TASKS 2026-10-14, item 11).
+    /// </summary>
+    private static void ConfigureReferenceData(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TimeZoneReference>(entity =>
+        {
+            // The IANA id is the key: it is the standard's own identifier, and Terrarium.TimeZoneId stores exactly
+            // this string, so a surrogate key would only add a translation step (ADR-015).
+            entity.HasKey(zone => zone.IanaId);
+            entity.Property(zone => zone.IanaId).HasMaxLength(64);
+            entity.Property(zone => zone.DisplayName).HasMaxLength(120).IsRequired();
+            entity.Property(zone => zone.CountryCode).HasMaxLength(2).IsRequired();
+
+            // "The picker's list, in order" is the only query this table serves.
+            entity.HasIndex(zone => zone.SortOrder);
+
+            entity.ToTable("TimeZone");
+        });
     }
 
     private static void ConfigureIdentity(ModelBuilder modelBuilder)
     {
+        // Roles and the permission matrix (FR-18). Configured before User because the account's foreign key points
+        // at it, and the two tables below it are pure join/catalogue rows.
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.Code).HasMaxLength(Role.CodeMaxLength).IsRequired();
+            entity.Property(r => r.Name).HasMaxLength(Role.NameMaxLength).IsRequired();
+            entity.Property(r => r.Description).HasMaxLength(Role.DescriptionMaxLength).IsRequired();
+
+            // Two editors must not silently overwrite each other's permission set — the terrarium's own rule.
+            entity.Property(r => r.RowVersion).IsRowVersion();
+
+            // Case-insensitive by the database's collation, like the username, so `Admin` and `admin` cannot be two
+            // roles a deployment accidentally creates.
+            entity.HasIndex(r => r.Code).IsUnique();
+
+            entity.ToTable("Role");
+        });
+
+        modelBuilder.Entity<Permission>(entity =>
+        {
+            entity.HasKey(p => p.Code);
+            entity.Property(p => p.Code).HasMaxLength(Permission.CodeMaxLength);
+            entity.Property(p => p.Group).HasMaxLength(Permission.GroupMaxLength).IsRequired();
+            entity.Property(p => p.Name).HasMaxLength(Permission.NameMaxLength).IsRequired();
+            entity.Property(p => p.Description).HasMaxLength(Permission.DescriptionMaxLength).IsRequired();
+            entity.ToTable("Permission");
+        });
+
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            // The pair is the identity: a grant either exists or does not, so there is no surrogate key and no
+            // duplicate row to reconcile.
+            entity.HasKey(rp => new { rp.RoleId, rp.PermissionCode });
+            entity.Property(rp => rp.PermissionCode).HasMaxLength(Permission.CodeMaxLength);
+
+            entity.HasOne(rp => rp.Role).WithMany(r => r.Permissions)
+                .HasForeignKey(rp => rp.RoleId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(rp => rp.Permission).WithMany(p => p.Roles)
+                .HasForeignKey(rp => rp.PermissionCode).OnDelete(DeleteBehavior.Cascade);
+
+            // "Who holds this permission" is the query the last-administrator guard asks before every role change.
+            entity.HasIndex(rp => rp.PermissionCode);
+
+            entity.ToTable("RolePermission");
+        });
+
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(u => u.Id);
@@ -101,6 +205,13 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             // Username uniqueness is case-insensitive (BR-01.1).
             entity.HasIndex(u => u.Username).IsUnique();
             entity.HasIndex(u => u.Email).IsUnique();
+
+            // Restrict, not cascade: deleting a role must not silently delete the accounts holding it. The role
+            // API refuses such a delete, and this is the database saying the same thing in case something else
+            // ever tries.
+            entity.HasOne(u => u.Role).WithMany(r => r.Users)
+                .HasForeignKey(u => u.RoleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(u => u.RoleId);
 
             entity.ToTable("User");
         });
@@ -148,10 +259,12 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(t => t.RowVersion).IsRowVersion();
 
             // Soft delete (DI-10): the query filter keeps deleted terrariums out of normal reads while
-            // their alerts and summaries survive for audit.
-            entity.HasQueryFilter(t => t.DeletedAt == null);
+            // their alerts and summaries survive for audit. The state column is what the filter reads, so a
+            // writer that only stamped DeletedAt cannot leave a "deleted" row visible.
+            entity.HasQueryFilter(t => t.Status != TerrariumStatus.Deleted);
 
-            entity.HasIndex(t => t.UserId);
+            // "This account's live enclosures", which is every list query: the owner leads, the state narrows.
+            entity.HasIndex(t => new { t.UserId, t.Status });
             entity.HasOne<User>().WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(t => t.SpeciesProfile).WithMany()
                 .HasForeignKey(t => t.SpeciesProfileId).OnDelete(DeleteBehavior.Restrict);
@@ -167,6 +280,12 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(p => p.Name).HasMaxLength(80).IsRequired();
             entity.Property(p => p.ScientificName).HasMaxLength(120);
             entity.Property(p => p.Notes).HasMaxLength(1000);
+
+            // The picture itself lives in the file store; the row keeps the key and the sniffed media type, so the
+            // two columns describe the file rather than being it (FR-10).
+            entity.Property(p => p.ImageStorageKey).HasMaxLength(64);
+            entity.Property(p => p.ImageContentType).HasMaxLength(100);
+            entity.Property(p => p.ImageUpdatedAt);
             entity.Property(p => p.PhotoperiodHours).HasPrecision(4, 2);
             entity.Property(p => p.LightThresholdLux).HasPrecision(9, 2);
             entity.Property(p => p.MinLightHoursPerDay).HasPrecision(4, 2);
@@ -233,6 +352,29 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
                     "CK_ThresholdOverride_CriticalOrder",
                     "[CriticalMin] IS NULL OR ([CriticalMin] <= [TargetMin] AND [CriticalMax] >= [TargetMax])");
             });
+        });
+
+        modelBuilder.Entity<ThresholdSnapshot>(entity =>
+        {
+            entity.HasKey(snapshot => snapshot.Id);
+            entity.Property(snapshot => snapshot.EffectiveThresholdsJson).IsRequired();
+
+            // SHA-256 as lower-case hex: fixed width, so char(64) and not nvarchar(64).
+            entity.Property(snapshot => snapshot.ThresholdVersionHash)
+                .HasMaxLength(64)
+                .IsFixedLength()
+                .IsUnicode(false)
+                .IsRequired();
+
+            // "the snapshot in force at an instant" is the only query: newest for one terrarium, so the index leads
+            // with the terrarium and orders by time descending.
+            entity.HasIndex(snapshot => new { snapshot.TerrariumId, snapshot.CapturedAtUtc })
+                .IsDescending(false, true);
+
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(snapshot => snapshot.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("ThresholdSnapshot");
         });
     }
 
@@ -353,6 +495,59 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         });
     }
 
+    private static void ConfigureSummaries(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TelemetryHourlyRollup>(entity =>
+        {
+            entity.HasKey(rollup => rollup.Id);
+            entity.Property(rollup => rollup.Id).ValueGeneratedOnAdd();
+            entity.Property(rollup => rollup.HourStartUtc).HasPrecision(3);
+            entity.Property(rollup => rollup.MinValue).HasPrecision(9, 3);
+            entity.Property(rollup => rollup.MaxValue).HasPrecision(9, 3);
+            entity.Property(rollup => rollup.AvgValue).HasPrecision(9, 3);
+            entity.Property(rollup => rollup.ExposureValue).HasPrecision(18, 6);
+            entity.Property(rollup => rollup.ComputedAt).HasPrecision(3);
+
+            entity.HasIndex(rollup => new { rollup.TerrariumId, rollup.Metric, rollup.HourStartUtc }).IsUnique();
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(rollup => rollup.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+            // SQL Server rejects a second cascade path from Terrarium through ThresholdSnapshot to this table.
+            entity.HasOne<ThresholdSnapshot>().WithMany()
+                .HasForeignKey(rollup => rollup.ThresholdSnapshotId).OnDelete(DeleteBehavior.NoAction);
+
+            entity.ToTable("TelemetryHourlyRollup");
+        });
+
+        modelBuilder.Entity<DailyEnvironmentalSummary>(entity =>
+        {
+            entity.HasKey(summary => summary.Id);
+            entity.Property(summary => summary.Id).ValueGeneratedOnAdd();
+            entity.Property(summary => summary.TimeZoneId).HasMaxLength(64).IsRequired();
+            entity.Property(summary => summary.CoveragePct).HasPrecision(6, 2);
+            entity.Property(summary => summary.TempMin).HasPrecision(9, 3);
+            entity.Property(summary => summary.TempMax).HasPrecision(9, 3);
+            entity.Property(summary => summary.TempAvg).HasPrecision(9, 3);
+            entity.Property(summary => summary.HumidityMin).HasPrecision(9, 3);
+            entity.Property(summary => summary.HumidityMax).HasPrecision(9, 3);
+            entity.Property(summary => summary.HumidityAvg).HasPrecision(9, 3);
+            entity.Property(summary => summary.LuxAvg).HasPrecision(12, 3);
+            entity.Property(summary => summary.LightHours).HasPrecision(8, 3);
+            entity.Property(summary => summary.UvMax).HasPrecision(9, 3);
+            entity.Property(summary => summary.OutOfRangeMinutesJson).IsRequired();
+            entity.Property(summary => summary.TempExposureDegCHours).HasPrecision(12, 4);
+            entity.Property(summary => summary.HumidityDryExposurePctHours).HasPrecision(12, 4);
+            entity.Property(summary => summary.HumidityWetExposurePctHours).HasPrecision(12, 4);
+            entity.Property(summary => summary.LightDeficitHours).HasPrecision(8, 3);
+            entity.Property(summary => summary.ComputedAt).HasPrecision(3);
+
+            entity.HasIndex(summary => new { summary.TerrariumId, summary.LocalDate }).IsUnique();
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(summary => summary.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("DailyEnvironmentalSummary");
+        });
+    }
+
     private static void ConfigureAlerts(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Alert>(entity =>
@@ -388,6 +583,69 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     }
 
     /// <summary>
+    /// The silence windows of FR-13 (§07-appendices/02 §3.15). Created by 3.4, which is also the only writer: the
+    /// dispatcher of 3.5 reads them, and nothing deletes them — a window that expired is history, and history is
+    /// what the audit trail is for.
+    /// </summary>
+    private static void ConfigureSilences(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MetricSilence>(entity =>
+        {
+            entity.HasKey(silence => silence.Id);
+            entity.Property(silence => silence.Reason).HasMaxLength(MetricSilence.ReasonMaxLength).IsRequired();
+            entity.Property(silence => silence.UntilUtc).HasPrecision(3);
+            entity.Property(silence => silence.CreatedAt).HasPrecision(3);
+            entity.Property(silence => silence.CancelledAt).HasPrecision(3);
+
+            // "What is suppressing this terrarium right now" is the query the dashboard renders and the dispatcher
+            // asks before every notification, so the window's end is part of the index.
+            entity.HasIndex(silence => new { silence.TerrariumId, silence.UntilUtc });
+
+            entity.HasOne<Terrarium>().WithMany().HasForeignKey(silence => silence.TerrariumId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("MetricSilence");
+        });
+    }
+
+    /// <summary>
+    /// The delivery records of FR-13 (§07-appendices/02 §3.10), which are also the in-app inbox of FR-12.
+    /// </summary>
+    /// <remarks>
+    /// Three index choices, each answering a question the dispatcher asks on every sweep: the inbox reads
+    /// <c>(UserId, CreatedAt DESC)</c>, the response timeline of §6 reads <c>(AlertId)</c>, and the hourly cap and the
+    /// digest both read a terrarium's rows inside a window, which is what <c>(TerrariumId, CreatedAt)</c> is for.
+    /// <para>
+    /// <b>No foreign key to <c>Alert</c>.</b> The audit rule this schema follows elsewhere applies here too: the
+    /// record of what a keeper was told must not disappear with the alert it was about, and a cascade would let a
+    /// future retention job erase the delivery history of an incident. <c>AlertId</c> is therefore a plain column,
+    /// like <c>AuditLog</c>'s own references.
+    /// </para>
+    /// </remarks>
+    private static void ConfigureNotifications(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<NotificationLog>(entity =>
+        {
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).ValueGeneratedOnAdd();
+            entity.Property(row => row.Title).HasMaxLength(NotificationLog.TitleMaxLength).IsRequired();
+            entity.Property(row => row.Body).HasMaxLength(NotificationLog.BodyMaxLength).IsRequired();
+            entity.Property(row => row.DeepLink).HasMaxLength(NotificationLog.DeepLinkMaxLength);
+            entity.Property(row => row.SuppressedReason).HasMaxLength(NotificationLog.ReasonMaxLength);
+            entity.Property(row => row.LastError).HasMaxLength(NotificationLog.LastErrorMaxLength);
+            entity.Property(row => row.CreatedAt).HasPrecision(3);
+            entity.Property(row => row.SentAt).HasPrecision(3);
+            entity.Property(row => row.ReadAt).HasPrecision(3);
+
+            entity.HasIndex(row => new { row.UserId, row.CreatedAt }).IsDescending(false, true);
+            entity.HasIndex(row => row.AlertId);
+            entity.HasIndex(row => new { row.TerrariumId, row.CreatedAt });
+
+            entity.ToTable("NotificationLog");
+        });
+    }
+
+    /// <summary>
     /// The evaluator's state table (§07-appendices/02 §3.9). The key is the (terrarium, metric, phase) triple
     /// itself: one state row per key is the invariant, and making it the primary key means a bug that tries to
     /// write a second row fails at the database rather than at review time.
@@ -401,6 +659,7 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(state => state.FirstOutOfBandAt).HasPrecision(3);
             entity.Property(state => state.CriticalSinceAt).HasPrecision(3);
             entity.Property(state => state.LastNotificationAt).HasPrecision(3);
+            entity.Property(state => state.LastEvaluatedAtUtc).HasPrecision(3);
 
             // Two evaluators must not advance one key at the same time.
             entity.Property(state => state.RowVersion).IsRowVersion();

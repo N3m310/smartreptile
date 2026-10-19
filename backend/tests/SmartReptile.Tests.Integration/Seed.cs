@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Identity;
+using SmartReptile.Domain.Metrics;
 using SmartReptile.Infrastructure.Persistence;
 
 namespace SmartReptile.Tests.Integration;
@@ -22,17 +25,26 @@ public static class Seed
     public static Task<Guid> AnySpeciesProfileIdAsync(SmartReptileDbContext db) =>
         db.SpeciesProfiles.OrderBy(p => p.Name).Select(p => p.Id).FirstAsync();
 
-    /// <summary>An owner. Required because <c>Terrarium.UserId</c> is a non-null foreign key.</summary>
-    public static async Task<Guid> UserAsync(SmartReptileDbContext db)
+    /// <summary>
+    /// An owner. Required because <c>Terrarium.UserId</c> is a non-null foreign key and <c>User.RoleId</c> is a
+    /// non-null one since the matrix moved into tables.
+    /// </summary>
+    /// <param name="db">Context and transaction to write in.</param>
+    /// <param name="roleId">
+    /// Role to give the account. <c>Owner</c> by default, because that is what registration produces and what a test
+    /// account owning a terrarium needs; a caller testing authorisation passes another role's id.
+    /// </param>
+    public static async Task<Guid> UserAsync(SmartReptileDbContext db, Guid? roleId = null)
     {
         var id = Guid.NewGuid();
         var tag = id.ToString("N")[..8];
 
         await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO [User] (Id, Username, Email, PasswordHash, PasswordSalt, PasswordIterations, Role,
+            INSERT INTO [User] (Id, Username, Email, PasswordHash, PasswordSalt, PasswordIterations, RoleId,
                                 PreferredLanguage, TimeZoneId, MinNotifySeverity, ChannelFcmEnabled,
                                 ChannelEmailEnabled, CreatedAt)
-            VALUES ({id}, {"it-" + tag}, {tag + "@example.test"}, 0x00, 0x00, 100000, 1,
+            VALUES ({id}, {"it-" + tag}, {tag + "@example.test"}, 0x00, 0x00, 100000,
+                    {roleId ?? SystemRoles.OwnerId},
                     'en', 'Asia/Ho_Chi_Minh', 2, 1, 0, SYSDATETIMEOFFSET())
             """);
 
@@ -55,6 +67,15 @@ public static class Seed
     }
 
     /// <summary>
+    /// Marks a terrarium as soft-deleted the way the API does: the state column is what the query filter reads,
+    /// and the timestamp is only the detail of when (DI-10).
+    /// </summary>
+    public static Task SoftDeleteAsync(SmartReptileDbContext db, Guid terrariumId) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE [Terrarium] SET [Status] = 1, [DeletedAt] = SYSDATETIMEOFFSET() WHERE [Id] = {terrariumId}
+            """);
+
+    /// <summary>
     /// A sensor node bound to <paramref name="terrariumId"/>. <paramref name="status"/> is the raw
     /// <c>DeviceStatus</c> value: 1 Online, 3 Revoked — the value that matters for the DI-04 filtered index,
     /// which excludes only revoked devices.
@@ -75,12 +96,37 @@ public static class Seed
     }
 
     /// <summary>An alert row. <paramref name="state"/> is the raw <c>AlertState</c>: 0 open, 2 resolved.</summary>
+    /// <param name="db">Context and transaction to write in.</param>
+    /// <param name="terrariumId">Terrarium the alert belongs to.</param>
+    /// <param name="deviceId">Device that raised it.</param>
+    /// <param name="dedupeKey">Open-alert uniqueness key.</param>
+    /// <param name="state">Raw lifecycle state.</param>
+    /// <param name="metric">
+    /// Raw <c>MetricCode</c>, or null for a device-level alert. Nullable because the difference is a rule rather
+    /// than a detail: a silence that names a metric covers only that metric, so a metric-less alert is the case
+    /// that proves the rule.
+    /// </param>
+    /// <param name="family">
+    /// Raw <c>AlertFamily</c>: 0 enclosure, 1 species. Defaulted from <paramref name="metric"/> the way the writers
+    /// do, because a row inserted with the wrong family is exactly what the family filter must not be fooled by.
+    /// </param>
     public static Task AlertAsync(
-        SmartReptileDbContext db, Guid terrariumId, Guid deviceId, string dedupeKey, int state) =>
+        SmartReptileDbContext db,
+        Guid terrariumId,
+        Guid deviceId,
+        string dedupeKey,
+        int state,
+        int? metric = null,
+        int? family = null) =>
         db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO [Alert] (TerrariumId, DeviceId, Severity, Phase, DedupeKey, State, Source, TriggeredAt)
-            VALUES ({terrariumId}, {deviceId}, 1, 0, {dedupeKey}, {state}, 0, SYSDATETIMEOFFSET())
+            INSERT INTO [Alert] (TerrariumId, DeviceId, Metric, Family, Severity, Phase, DedupeKey, State, Source, TriggeredAt)
+            VALUES ({terrariumId}, {deviceId}, {metric}, {family ?? DefaultFamilyFor(metric)}, 1, 0, {dedupeKey}, {state}, 0, SYSDATETIMEOFFSET())
             """);
+
+    /// <summary>The family a metric's alerts belong to, as the raw column value.</summary>
+    /// <param name="metric">Raw metric code, or null for a device-level alert.</param>
+    private static int DefaultFamilyFor(int? metric) =>
+        metric is null ? (int)AlertFamily.Enclosure : (int)Alert.FamilyFor((MetricCode)metric);
 
     /// <summary>A threshold band. The ordering CHECK constraints are exactly what some tests violate.</summary>
     public static Task ThresholdAsync(

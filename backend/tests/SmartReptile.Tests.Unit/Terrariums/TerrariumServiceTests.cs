@@ -1,6 +1,8 @@
 using FluentAssertions;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Readings;
 using SmartReptile.Application.Terrariums;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
@@ -8,6 +10,7 @@ using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Terrariums;
 using SmartReptile.Domain.Thresholds;
 using SmartReptile.Tests.Unit.Application;
+using SmartReptile.Tests.Unit.Devices;
 
 namespace SmartReptile.Tests.Unit.Terrariums;
 
@@ -21,12 +24,38 @@ public class TerrariumServiceTests
     private static readonly DateTimeOffset Now = new(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
 
     private readonly FakeTerrariumStore _store = new();
+    private readonly FakeTimeZoneStore _zones = new();
+    private readonly FakeProvisioningStore _provisioningStore = new();
+    private readonly FakeDeviceCredentials _credentials = new();
     private readonly TestClock _clock = new() { UtcNow = Now };
+    private readonly DeviceProvisioningService _provisioning;
     private readonly TerrariumService _service;
     private readonly Guid _owner = Guid.NewGuid();
 
-    public TerrariumServiceTests() =>
-        _service = new TerrariumService(_store, _clock, new TerrariumSettings("Asia/Ho_Chi_Minh", 3));
+    public TerrariumServiceTests()
+    {
+        // Create keys its new row on the caller's own subject, so the caller has to be an account this store knows.
+        _store.AddUser(_owner);
+
+        // The create path stages a board's binding through the claim use case rather than re-implementing it
+        // (TASKS 2026-10-14, item 2), so the service under test needs a real provisioning service over fakes.
+        _provisioning = new DeviceProvisioningService(
+            _provisioningStore,
+            new FakeClaimCodeGenerator(),
+            _credentials,
+            new FakeOnboardingThrottleStore(),
+            new FakeDeviceSessionRegistry(),
+            _clock,
+            new ProvisioningSettings(ClaimCode.DefaultAlphabet, ClaimCode.DefaultLength, 15, OnboardingLimits.Documented),
+            new DeviceSilenceSettings(3));
+
+        _service = new TerrariumService(
+            _store,
+            _zones,
+            _provisioning,
+            _clock,
+            new TerrariumSettings("Asia/Ho_Chi_Minh", 3));
+    }
 
     // ---- live-update membership (FR-08, roadmap task 2.9) -------------------------------------------
 
@@ -50,7 +79,7 @@ public class TerrariumServiceTests
     {
         var profile = _store.AddProfile();
         var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
-        terrarium.DeletedAt = Now;
+        FakeTerrariumStore.SoftDelete(terrarium, Now);
 
         (await _service.IsMemberAsync(terrarium.Id, _owner)).Should().BeFalse();
     }
@@ -69,6 +98,21 @@ public class TerrariumServiceTests
 
         outcome.Succeeded.Should().BeTrue();
         outcome.Terrariums.Should().ContainSingle().Which.Name.Should().Be("Alpha");
+        outcome.Terrariums!.Single().OwnerUserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task List_returns_every_accounts_terrariums_to_an_administrator_with_their_owners()
+    {
+        var profile = _store.AddProfile();
+        var owner = Guid.NewGuid();
+        _store.AddTerrarium(_owner, "Mine", profile);
+        _store.AddTerrarium(owner, "Theirs", profile);
+
+        var outcome = await _service.ListAsync(_owner, CancellationToken.None, mayReachAnyAccount: true);
+
+        outcome.Terrariums!.Select(item => item.Name).Should().BeEquivalentTo("Mine", "Theirs");
+        outcome.Terrariums.Single(item => item.Name == "Theirs").OwnerUserId.Should().Be(owner);
     }
 
     [Fact]
@@ -117,7 +161,7 @@ public class TerrariumServiceTests
     }
 
     [Fact]
-    public async Task Get_of_another_accounts_terrarium_is_not_found()
+    public async Task Get_of_another_accounts_terrarium_is_forbidden()
     {
         var profile = _store.AddProfile();
         var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
@@ -125,7 +169,60 @@ public class TerrariumServiceTests
         var outcome = await _service.GetAsync(foreign.Id, _owner, CancellationToken.None);
 
         outcome.Succeeded.Should().BeFalse();
+
+        // Told apart from a missing id on purpose (TASKS 2026-10-14, item 3): a keeper who mistyped an id and a
+        // keeper looking at somebody else's enclosure need different answers, and the row is not disclosed either way.
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
+    }
+
+    [Fact]
+    public async Task Get_of_a_missing_terrarium_is_not_found()
+    {
+        var outcome = await _service.GetAsync(Guid.NewGuid(), _owner, CancellationToken.None);
+
         outcome.Problem!.Code.Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task Get_of_a_deleted_terrarium_is_gone()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        FakeTerrariumStore.SoftDelete(terrarium, Now);
+
+        var outcome = await _service.GetAsync(terrarium.Id, _owner, CancellationToken.None);
+
+        // 410 rather than 404: the readings, alerts and summaries of this terrarium are still stored, so claiming it
+        // never existed would say the opposite of the truth (TASKS 2026-10-14, item 6).
+        outcome.Problem!.Code.Should().Be("terrarium_deleted");
+    }
+
+    [Fact]
+    public async Task Get_of_another_accounts_terrarium_is_served_to_an_administrator()
+    {
+        var profile = _store.AddProfile();
+        var owner = Guid.NewGuid();
+        var theirs = _store.AddTerrarium(owner, "Theirs", profile);
+
+        var outcome = await _service.GetAsync(theirs.Id, _owner, CancellationToken.None, mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.Name.Should().Be("Theirs");
+
+        // Named, because an administrator's answer can describe an enclosure they did not ask for and cannot
+        // otherwise attribute (TASKS 2026-10-14, item 5).
+        outcome.Terrarium.OwnerUserId.Should().Be(owner);
+    }
+
+    [Fact]
+    public async Task Get_reports_no_owner_to_a_caller_who_is_not_an_administrator()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.GetAsync(terrarium.Id, _owner, CancellationToken.None);
+
+        outcome.Terrarium!.OwnerUserId.Should().BeNull("ownership is not a field an ordinary client acts on");
     }
 
     // ---- create -------------------------------------------------------------------------------------
@@ -159,6 +256,26 @@ public class TerrariumServiceTests
     }
 
     [Fact]
+    public async Task Create_refuses_a_caller_that_is_not_an_account_of_this_database()
+    {
+        var profile = _store.AddProfile();
+        var request = new CreateTerrariumRequest("Alpha", profile.Id, null, null, null);
+
+        // What an access token minted against another database — or before this one was rebuilt — looks like from
+        // here: signature and lifetime are fine, the subject names nobody. The insert used to answer a foreign-key
+        // violation as `500 internal_error`; the caller is told to sign in again instead (BUG-11).
+        var unknownAccount = await _service.CreateAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        unknownAccount.Problem!.Code.Should().Be("unauthenticated");
+
+        // A token with no usable subject claim reaches the service as Guid.Empty, and takes the same path.
+        var noSubject = await _service.CreateAsync(request, Guid.Empty, CancellationToken.None);
+
+        noSubject.Problem!.Code.Should().Be("unauthenticated");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task Create_refuses_an_unknown_time_zone()
     {
         var profile = _store.AddProfile();
@@ -168,7 +285,207 @@ public class TerrariumServiceTests
             _owner,
             CancellationToken.None);
 
-        outcome.Problem!.Errors.Should().ContainSingle().Which.Field.Should().Be("timeZoneId");
+        // The id is validated against the catalogue the picker is filled from, not against a bare provider lookup
+        // (TASKS 2026-10-14, item 11): a zone the clients cannot offer must not be storable, or the edit form would
+        // have no row to show for it.
+        var violation = outcome.Problem!.Errors.Should().ContainSingle().Subject;
+        violation.Field.Should().Be("timeZoneId");
+        violation.Code.Should().Be("terrarium_timezone_invalid");
+        violation.Message.Should().Contain("GET /api/v1/time-zones");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Create_stores_the_catalogues_spelling_of_a_zone_sent_in_another_case()
+    {
+        var profile = _store.AddProfile();
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, "asia/ho_chi_minh"),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.TimeZoneId.Should().Be("Asia/Ho_Chi_Minh");
+    }
+
+    // ---- create with a board (TASKS 2026-10-14, item 2) ---------------------------------------------
+
+    [Fact]
+    public async Task Create_binds_the_board_it_names_and_returns_its_secret_once()
+    {
+        var profile = _store.AddProfile();
+        var device = AddRegisteredDevice("A0:B1:C2:D3:E4:F5");
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null, DeviceId: device.PublicId),
+            _owner,
+            CancellationToken.None,
+            new AuditActor("198.51.100.9", "curl/8.5.0", "corr-create"));
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.DeviceSecret.Should().NotBeNullOrWhiteSpace("the caller has one chance to keep it");
+
+        // Bound to the enclosure that was just created, owned by the caller, and holding exactly one credential.
+        device.TerrariumId.Should().Be(outcome.Terrarium.Id);
+        device.UserId.Should().Be(_owner);
+        device.ProvisionedAt.Should().Be(Now);
+        device.ClaimCode.Should().BeNull("the code a code-claim would consume is cleared by either path");
+        device.Credentials.Should().ContainSingle();
+
+        // One commit for both writes: the enclosure and the binding are one act, so a failure between them cannot
+        // leave a half-made pair behind. The two fakes stand in for the one scoped context the two adapters share
+        // in production, which is why the row is still pending here rather than rolled up — what matters is that the
+        // binding did not commit on its own.
+        _store.SaveCount.Should().Be(1);
+        _provisioningStore.PendingAuditEntries.Should().ContainSingle(
+            "the audit row was staged into the same unit of work rather than committed separately");
+        _provisioningStore.CommittedAuditEntries.Should().BeEmpty();
+        _provisioningStore.Devices.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Create_leaves_the_secret_absent_when_no_board_is_named()
+    {
+        var profile = _store.AddProfile();
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Terrarium!.DeviceSecret.Should().BeNull();
+        _provisioningStore.Devices.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Create_binds_a_board_by_mac_address_too()
+    {
+        var profile = _store.AddProfile();
+
+        // Registered the way a board reports itself — colon-separated — and named the way a keeper types what is
+        // printed on the case.
+        var device = AddRegisteredDevice("A0:B1:C2:D3:E4:F5");
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null, MacAddress: "a0b1c2d3e4f5"),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        device.TerrariumId.Should().Be(outcome.Terrarium!.Id);
+    }
+
+    [Fact]
+    public async Task Create_refuses_two_selectors_rather_than_guessing()
+    {
+        var profile = _store.AddProfile();
+        var device = AddRegisteredDevice("A0:B1:C2:D3:E4:F5");
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest(
+                "Alpha",
+                profile.Id,
+                null,
+                null,
+                null,
+                DeviceId: device.PublicId,
+                MacAddress: "A0:B1:C2:D3:E4:F5"),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("device_selector_ambiguous");
+        _store.SaveCount.Should().Be(0, "nothing is written when the request cannot be acted on");
+    }
+
+    [Fact]
+    public async Task Create_refuses_an_unknown_board_and_creates_nothing()
+    {
+        var profile = _store.AddProfile();
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null, DeviceId: "sr-nope00"),
+            _owner,
+            CancellationToken.None);
+
+        var violation = outcome.Problem!.Errors.Should().ContainSingle().Subject;
+        violation.Field.Should().Be("deviceId");
+        violation.Code.Should().Be("device_not_found");
+
+        // All or nothing: a bad board must not leave an empty enclosure behind, which is what a keeper would end up
+        // with if the binding happened after the insert.
+        _store.SaveCount.Should().Be(0);
+        _store.Terrariums.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Create_refuses_a_board_that_is_already_bound()
+    {
+        var profile = _store.AddProfile();
+        var device = AddRegisteredDevice("A0:B1:C2:D3:E4:F5");
+        var other = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+        device.TerrariumId = other.Id;
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null, DeviceId: device.PublicId),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("device_already_bound");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Create_refuses_a_malformed_mac_address()
+    {
+        var profile = _store.AddProfile();
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null, MacAddress: "not-a-mac"),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("mac_invalid");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Create_records_which_selector_bound_the_board()
+    {
+        var profile = _store.AddProfile();
+        var device = AddRegisteredDevice("A0:B1:C2:D3:E4:F5");
+        var actor = new AuditActor("198.51.100.9", "curl/8.5.0", "corr-create");
+
+        (await _service.CreateAsync(
+            new CreateTerrariumRequest("Alpha", profile.Id, null, null, null, DeviceId: device.PublicId),
+            _owner,
+            CancellationToken.None,
+            actor)).Succeeded.Should().BeTrue();
+
+        // The trail has to say how the board was identified: the id path and the MAC path carry different trust.
+        var entry = _provisioningStore.PendingAuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.DeviceClaimed);
+        entry.UserId.Should().Be(_owner);
+        entry.IpAddress.Should().Be("198.51.100.9");
+        entry.AfterJson.Should().Contain("\"method\":\"device_id\"");
+    }
+
+    /// <summary>A board that registered with this server and has not claimed anything yet.</summary>
+    private Device AddRegisteredDevice(string mac)
+    {
+        var device = new Device
+        {
+            PublicId = $"sr-{Guid.NewGuid().ToString("N")[..6]}",
+            DeviceName = "New node",
+            ChipId = Guid.NewGuid().ToString("N")[..12],
+            MacAddress = mac,
+            Status = DeviceStatus.Provisioning,
+            ClaimCode = "K7M2QP4T",
+            ClaimCodeExpiresAt = Now.AddMinutes(15),
+        };
+
+        _provisioningStore.AddDevice(device);
+        return device;
     }
 
     [Fact]
@@ -370,14 +687,32 @@ public class TerrariumServiceTests
     }
 
     [Fact]
-    public async Task LatestReadings_of_another_accounts_terrarium_is_not_found()
+    public async Task LatestReadings_of_another_accounts_terrarium_is_forbidden()
     {
         var profile = _store.AddProfile();
         var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
 
         var outcome = await _service.LatestReadingsAsync(foreign.Id, _owner, CancellationToken.None);
 
-        outcome.Problem!.Code.Should().Be("not_found");
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
+    }
+
+    [Fact]
+    public async Task LatestReadings_of_another_accounts_terrarium_is_served_to_an_administrator()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+        var device = FakeTerrariumStore.AddDevice(terrarium, DeviceStatus.Online, Now);
+        _store.AddSample(terrarium.Id, device.Id, Now.AddMinutes(-1), default, (MetricCode.TempC, 28m));
+
+        var outcome = await _service.LatestReadingsAsync(
+            terrarium.Id,
+            _owner,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Readings!.Metrics.Should().ContainSingle().Which.Code.Should().Be("tempC");
     }
 
     // ---- effective thresholds (FR-10, BR-10.3, roadmap 3.1) ------------------------------------------
@@ -442,14 +777,14 @@ public class TerrariumServiceTests
     }
 
     [Fact]
-    public async Task EffectiveThresholds_of_another_accounts_terrarium_is_not_found()
+    public async Task EffectiveThresholds_of_another_accounts_terrarium_is_forbidden()
     {
         var profile = _store.AddProfile();
         var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
 
         var outcome = await _service.EffectiveThresholdsAsync(foreign.Id, _owner, CancellationToken.None);
 
-        outcome.Problem!.Code.Should().Be("not_found");
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
     }
 
     [Fact]
@@ -477,6 +812,361 @@ public class TerrariumServiceTests
         // was coloured with, so the two cannot drift apart.
         card.Target.Should().Be(new MetricBand(resolved.TargetMin, resolved.TargetMax));
         card.Status.Should().Be(ReadingStatus.OutOfRange);
+    }
+
+    // ---- threshold write (FR-10, roadmap 3.1's write half) -------------------------------------------
+
+    [Fact]
+    public async Task UpsertThresholds_writes_the_override_and_a_snapshot_of_the_new_set()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+
+        // The write answers with the set now in force, so an editor does not have to re-read to re-render.
+        var temperature = outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC");
+        temperature.Source.Should().Be("override");
+        temperature.TargetMin.Should().Be(28m);
+        temperature.TargetMax.Should().Be(30m);
+
+        var stored = terrarium.ThresholdOverrides.Should().ContainSingle().Which;
+        stored.Metric.Should().Be(MetricCode.TempC);
+        stored.TargetMin.Should().Be(28m);
+        stored.CreatedByUserId.Should().Be(_owner);
+
+        // TC-U-26: the change records one snapshot of the set now in force, hashed so it can be linked to later.
+        var snapshot = _store.ThresholdSnapshots.Should().ContainSingle().Which;
+        snapshot.TerrariumId.Should().Be(terrarium.Id);
+        snapshot.CapturedAtUtc.Should().Be(Now);
+        snapshot.EffectiveThresholdsJson.Should().Contain("\"targetMin\":28");
+        snapshot.EffectiveThresholdsJson.Should().Contain("\"source\":\"override\"");
+        snapshot.ThresholdVersionHash.Should().MatchRegex("^[0-9a-f]{64}$");
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_records_the_snapshot_with_the_new_band_and_not_the_old_one()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 24m, 26m);
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        // The snapshot is resolved after the change, so it holds the band the next sample will be judged against.
+        _store.ThresholdSnapshots.Single().EffectiveThresholdsJson
+            .Should().Contain("\"targetMin\":28").And.NotContain("\"targetMin\":24");
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_of_the_same_band_again_is_a_no_op()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        // Re-saving an unchanged editor page is not history: nothing is written and no second snapshot is recorded.
+        outcome.Succeeded.Should().BeTrue();
+        _store.ThresholdSnapshots.Should().ContainSingle();
+        _store.SaveCount.Should().Be(1);
+        terrarium.ThresholdOverrides.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_keeps_a_metric_the_body_did_not_mention()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 24m, 26m);
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.HumidityPct, 50m, 70m)]),
+            _owner,
+            CancellationToken.None);
+
+        // The request is a patch over the override set, not a replacement.
+        terrarium.ThresholdOverrides.Should().HaveCount(2);
+        terrarium.ThresholdOverrides.Single(row => row.Metric == MetricCode.TempC).TargetMin.Should().Be(24m);
+        terrarium.ThresholdOverrides.Single(row => row.Metric == MetricCode.HumidityPct).TargetMin.Should().Be(50m);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_defaults_the_engine_parameters_it_was_not_given()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        var stored = terrarium.ThresholdOverrides.Single();
+        stored.DwellWarnMinutes.Should().Be(5);
+        stored.DwellCritMinutes.Should().Be(2);
+        stored.RecoveryMargin.Should().Be(0.5m);
+        stored.Enabled.Should().BeTrue();
+        stored.Phase.Should().Be(ThresholdPhase.Any);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_rejects_an_inverted_band_and_writes_nothing()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 40m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        // TC-U-21: refusal carries the stable code and the field, and nothing is persisted.
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Select(violation => violation.Code).Should().Contain("threshold_ordering_invalid");
+        terrarium.ThresholdOverrides.Should().BeEmpty();
+        _store.ThresholdSnapshots.Should().BeEmpty();
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_rejects_a_critical_band_that_does_not_enclose_the_target()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 26m, 32m, criticalMin: 28m, criticalMax: 34m)]),
+            _owner,
+            CancellationToken.None);
+
+        // TC-U-22.
+        outcome.Problem!.Errors!.Select(violation => violation.Code).Should().Contain("threshold_critical_invalid");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_rejects_a_dwell_and_a_recovery_margin_that_cannot_hold()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest(
+            [
+                Override(MetricCode.TempC, 26m, 32m, dwellWarn: 5, dwellCrit: 6) with { RecoveryMargin = 4m },
+            ]),
+            _owner,
+            CancellationToken.None);
+
+        // TC-U-23: both rules are reported field by field rather than as one opaque refusal.
+        outcome.Problem!.Errors!.Select(violation => violation.Code).Should().BeEquivalentTo(
+        [
+            "threshold_dwell_invalid",
+            "threshold_recovery_margin_invalid",
+        ]);
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_reports_every_bad_entry_it_was_given()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest(
+            [
+                Override(MetricCode.TempC, 26m, 32m) with { Metric = "luminosity", Phase = "dusk" },
+                Override(MetricCode.TempC, 26m, 32m) with { TargetMin = null, TargetMax = null },
+            ]),
+            _owner,
+            CancellationToken.None);
+
+        // One bad entry does not hide the next, and the fields are addressed by their position in the body.
+        outcome.Problem!.Errors!.Select(violation => (violation.Field, violation.Code)).Should().BeEquivalentTo(
+        [
+            ($"overrides[0].metric", "metric_invalid"),
+            ($"overrides[0].phase", "threshold_phase_invalid"),
+            ($"overrides[1].targetMin", "threshold_target_required"),
+            ($"overrides[1].targetMax", "threshold_target_required"),
+        ]);
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_refuses_two_bands_for_one_metric_and_phase()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest(
+            [
+                Override(MetricCode.TempC, 26m, 32m),
+                Override(MetricCode.TempC, 28m, 30m),
+            ]),
+            _owner,
+            CancellationToken.None);
+
+        // The table has one row per (terrarium, metric, phase); the second entry is the one refused.
+        var duplicate = outcome.Problem!.Errors!.Single();
+        duplicate.Code.Should().Be("threshold_duplicate");
+        duplicate.Field.Should().Be("overrides[1].metric");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_records_a_change_even_when_the_phase_in_force_does_not_use_it()
+    {
+        var (terrarium, _, _) = Arrange();
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 3, 23, 0, 0, TimeSpan.Zero);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            terrarium.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m, phase: "day")]),
+            _owner,
+            CancellationToken.None);
+
+        // A Day band is silent at 23:00, so the band in force is still the profile's night band…
+        outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC").Source.Should().Be("profile");
+
+        // …but the edit is still a change to this terrarium's configuration, so it is recorded (UC-03 A4).
+        _store.ThresholdSnapshots.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_of_another_accounts_terrarium_is_forbidden()
+    {
+        var profile = _store.AddProfile();
+        var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            foreign.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
+        foreign.ThresholdOverrides.Should().BeEmpty();
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UpsertThresholds_of_another_accounts_terrarium_succeeds_for_an_administrator()
+    {
+        var profile = _store.AddProfile();
+        var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+
+        var outcome = await _service.UpsertThresholdsAsync(
+            foreign.Id,
+            new UpdateThresholdsRequest([Override(MetricCode.TempC, 28m, 30m)]),
+            _owner,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        foreign.ThresholdOverrides.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_reverts_the_metric_to_the_profile_and_snapshots()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 28m, 30m);
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(
+            terrarium.Id,
+            "tempC",
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.ThresholdOverrides.Should().BeEmpty();
+
+        // The band in force is the profile's day band again, and the revert is snapshotted like any other change.
+        var temperature = outcome.Thresholds!.EffectiveThresholds.Single(entry => entry.Metric == "tempC");
+        temperature.Source.Should().Be("profile");
+        temperature.TargetMin.Should().Be(26m);
+        _store.ThresholdSnapshots.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_removes_every_phase_of_the_metric()
+    {
+        var (terrarium, _, _) = Arrange();
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 28m, 30m);
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.TempC, 21m, 23m, ThresholdPhase.Night);
+        FakeTerrariumStore.AddOverride(terrarium, MetricCode.HumidityPct, 50m, 70m);
+
+        await _service.DeleteThresholdOverrideAsync(terrarium.Id, "tempC", _owner, CancellationToken.None);
+
+        // "Revert this metric" is the whole metric, not the phase the caller happened to be looking at.
+        terrarium.ThresholdOverrides.Should().ContainSingle().Which.Metric.Should().Be(MetricCode.HumidityPct);
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_of_a_metric_without_an_override_is_a_no_op()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(
+            terrarium.Id,
+            "tempC",
+            _owner,
+            CancellationToken.None);
+
+        // Idempotent: a retry that failed would leave the caller believing the override was still in force.
+        outcome.Succeeded.Should().BeTrue();
+        _store.SaveCount.Should().Be(0);
+        _store.ThresholdSnapshots.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_refuses_an_unknown_metric_key()
+    {
+        var (terrarium, _, _) = Arrange();
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(
+            terrarium.Id,
+            "luminosity",
+            _owner,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Single().Code.Should().Be("metric_invalid");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeleteThresholdOverride_of_another_accounts_terrarium_is_forbidden()
+    {
+        var profile = _store.AddProfile();
+        var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+        FakeTerrariumStore.AddOverride(foreign, MetricCode.TempC, 28m, 30m);
+
+        var outcome = await _service.DeleteThresholdOverrideAsync(foreign.Id, "tempC", _owner, CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
+        foreign.ThresholdOverrides.Should().ContainSingle();
     }
 
     // ---- readings (range) ---------------------------------------------------------------------------
@@ -640,7 +1330,7 @@ public class TerrariumServiceTests
     }
 
     [Fact]
-    public async Task Readings_of_another_accounts_terrarium_is_not_found()
+    public async Task Readings_of_another_accounts_terrarium_is_forbidden()
     {
         var profile = _store.AddProfile();
         var foreign = _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
@@ -653,7 +1343,7 @@ public class TerrariumServiceTests
             Now,
             CancellationToken.None);
 
-        outcome.Problem!.Code.Should().Be("not_found");
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
     }
 
     // ---- coverage -----------------------------------------------------------------------------------
@@ -730,6 +1420,30 @@ public class TerrariumServiceTests
 
         return (terrarium, device, profile);
     }
+
+    /// <summary>One band for a write request, with the metric spelled the way a client sends it.</summary>
+    private static ThresholdOverrideInput Override(
+        MetricCode metric,
+        decimal targetMin,
+        decimal targetMax,
+        string phase = "any",
+        decimal? criticalMin = null,
+        decimal? criticalMax = null,
+        int? dwellWarn = null,
+        int? dwellCrit = null,
+        string? note = null) =>
+        new(
+            MetricDictionary.Get(metric).ApiKey,
+            phase,
+            targetMin,
+            targetMax,
+            criticalMin,
+            criticalMax,
+            dwellWarn,
+            dwellCrit,
+            null,
+            note,
+            null);
 
     // ---- update and delete (FR-03, roadmap 2.8's remaining half) -------------------------------------
 
@@ -860,7 +1574,7 @@ public class TerrariumServiceTests
     }
 
     [Fact]
-    public async Task Update_reports_a_foreign_terrarium_as_not_found()
+    public async Task Update_reports_a_foreign_terrarium_as_forbidden()
     {
         var profile = _store.AddProfile();
         var terrarium = _store.AddTerrarium(Guid.NewGuid(), "Someone else's", profile);
@@ -872,9 +1586,81 @@ public class TerrariumServiceTests
             terrarium.RowVersion!,
             CancellationToken.None);
 
-        // Identical to "does not exist", so the route cannot be used to enumerate ids (BR-02.2).
-        outcome.Problem!.Code.Should().Be("not_found");
+        // Refused as "not yours" rather than "not found" (TASKS 2026-10-14, item 3) — and refused either way, so the
+        // name is untouched.
+        outcome.Problem!.Code.Should().Be("forbidden_terrarium");
         terrarium.Name.Should().Be("Someone else's");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Update_of_another_accounts_terrarium_is_allowed_for_an_administrator_and_audited()
+    {
+        var profile = _store.AddProfile();
+        var owner = Guid.NewGuid();
+        var terrarium = _store.AddTerrarium(owner, "Theirs", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Renamed by support", null, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.Name.Should().Be("Renamed by support");
+
+        // Recorded with the administrator as the actor and the owner in the payload, which is the point of the row:
+        // "who changed whose enclosure" has two answers and the trail has to carry both (BR-18.4).
+        var entry = _store.AuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.TerrariumUpdated);
+        entry.EntityName.Should().Be(AuditEntity.Terrarium);
+        entry.EntityId.Should().Be(terrarium.Id.ToString());
+        entry.UserId.Should().Be(_owner);
+        entry.BeforeJson.Should().Contain("Theirs");
+        entry.AfterJson.Should().Contain("Renamed by support");
+    }
+
+    [Fact]
+    public async Task Update_by_the_owner_writes_no_audit_row()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Renamed", null, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.AuditEntries.Should().BeEmpty("the trail records the administrator's cross-account actions, not the "
+                                           + "ordinary edit a keeper makes to their own terrarium");
+    }
+
+    [Fact]
+    public async Task Delete_of_another_accounts_terrarium_is_allowed_for_an_administrator_and_audited()
+    {
+        var profile = _store.AddProfile();
+        var owner = Guid.NewGuid();
+        var terrarium = _store.AddTerrarium(owner, "Theirs", profile);
+
+        var outcome = await _service.DeleteAsync(
+            terrarium.Id,
+            _owner,
+            allowUnboundDevice: false,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.Status.Should().Be(TerrariumStatus.Deleted);
+
+        var entry = _store.AuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.TerrariumDeleted);
+        entry.UserId.Should().Be(_owner);
+        entry.BeforeJson.Should().Contain("Active");
     }
 
     [Fact]
@@ -932,6 +1718,7 @@ public class TerrariumServiceTests
 
         outcome.Succeeded.Should().BeFalse();
         outcome.Problem!.Code.Should().Be("conflict_device_bound");
+        terrarium.Status.Should().Be(TerrariumStatus.Active, "a refused delete must leave the state alone");
         terrarium.DeletedAt.Should().BeNull();
         _store.SaveCount.Should().Be(0);
     }
@@ -946,6 +1733,7 @@ public class TerrariumServiceTests
         var outcome = await _service.DeleteAsync(terrarium.Id, _owner, allowUnboundDevice: true, CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue();
+        terrarium.Status.Should().Be(TerrariumStatus.Deleted);
         terrarium.DeletedAt.Should().Be(Now);
         _store.SaveCount.Should().Be(1);
 
@@ -965,6 +1753,7 @@ public class TerrariumServiceTests
         var outcome = await _service.DeleteAsync(terrarium.Id, _owner, allowUnboundDevice: false, CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue();
+        terrarium.Status.Should().Be(TerrariumStatus.Deleted);
         terrarium.DeletedAt.Should().Be(Now);
     }
 

@@ -76,10 +76,10 @@ public class Device
     /// <summary>Last sample or health message received — drives the online/offline indicator.</summary>
     public DateTimeOffset? LastSeenAt { get; set; }
 
-    /// <summary>Desired sampling interval pushed downlink (default 60 s, allowed 10–300 s).</summary>
+    /// <summary>Desired sampling interval pushed downlink (default 60 s, allowed 10–300 s — see <see cref="DeviceLimits"/>).</summary>
     public int SamplingIntervalSec { get; set; } = 60;
 
-    /// <summary>Desired publish interval pushed downlink.</summary>
+    /// <summary>Desired publish interval pushed downlink (default 60 s, allowed 10–300 s — see <see cref="DeviceLimits"/>).</summary>
     public int PublishIntervalSec { get; set; } = 60;
 
     /// <summary>Per-device calibration offsets applied at ingest (BR-06.7/BR-07.4), e.g. <c>{"tempOffsetC":-0.4}</c>.</summary>

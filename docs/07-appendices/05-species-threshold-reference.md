@@ -222,10 +222,12 @@ belongs in report section R3.4/R13.
 A band can only be as meaningful as the measurement behind it. This table is what the report's "limitations"
 paragraph should point at.
 
-## 8. Custom profiles (user-created)
+## 8. Custom profiles (administrator-created)
 
-Users can create their own profile for a species not covered (`POST /species-profiles`, or "duplicate" a
-built-in and adjust). For custom profiles:
+The catalogue's writes are `Admin`-only (`02-design/06` §3): an administrator creates a profile for a species not
+covered (`POST /species-profiles`, or "duplicate" a built-in and adjust). A keeper who needs different numbers for
+their own enclosure uses a per-terrarium override instead (BR-10.3), which needs no administrator. For custom
+profiles:
 - the band-ordering and critical-enclosure rules still apply (DI-05);
 - a `SourceRef` is **encouraged** (free text) but not enforced — the app nudges with a "where did this number
   come from?" hint, because a keeper's own experience is a legitimate source and pretending otherwise would be

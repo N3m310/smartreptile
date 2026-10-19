@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../state/app_data_provider.dart';
 import '../theme/app_theme.dart';
 import 'terrarium_detail_screen.dart';
@@ -114,8 +115,11 @@ class TerrariumsScreen extends StatelessWidget {
                           );
                       Navigator.pop(ctx);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Đã thêm Terrarium thành công!'),
+                        SnackBar(
+                          content: Text(
+                            AppLocalizations.of(context)
+                                .mockDataLocalChangeNotice,
+                          ),
                           backgroundColor: AppColors.primary,
                         ),
                       );

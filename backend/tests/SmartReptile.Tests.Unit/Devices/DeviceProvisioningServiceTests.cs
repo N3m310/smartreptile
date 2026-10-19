@@ -34,7 +34,8 @@ public class DeviceProvisioningServiceTests
             _throttle,
             _sessions,
             _clock,
-            new ProvisioningSettings(ClaimCode.DefaultAlphabet, ClaimCode.DefaultLength, 15, OnboardingLimits.Documented));
+            new ProvisioningSettings(ClaimCode.DefaultAlphabet, ClaimCode.DefaultLength, 15, OnboardingLimits.Documented),
+            new DeviceSilenceSettings(3));
 
     // ---- self-register ------------------------------------------------------------------------------
 
@@ -437,6 +438,406 @@ public class DeviceProvisioningServiceTests
 
         outcome.Succeeded.Should().BeFalse();
         _store.CommittedAuditEntries.Should().BeEmpty("nothing changed, so there is nothing to audit");
+    }
+
+    // ---- claim by MAC (TASKS 2026-10-14, item 8) ----------------------------------------------------
+
+    [Fact]
+    public async Task ClaimByMac_binds_a_registered_board_and_issues_its_secret_once()
+    {
+        var registered = (await SelfRegisterAsync()).Registration!;
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, terrarium.Id), _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        var claim = outcome.Claim!;
+        claim.DeviceId.Should().Be(registered.DeviceId);
+        claim.Secret.Should().NotBeNullOrWhiteSpace();
+        claim.TerrariumId.Should().Be(terrarium.Id);
+
+        var device = _store.Devices.Single();
+        device.TerrariumId.Should().Be(terrarium.Id);
+        device.ClaimCode.Should().BeNull("the code a code-claim would have consumed is cleared by either path");
+        device.Credentials.Should().ContainSingle("the secret is issued at bind time on both paths");
+    }
+
+    [Theory]
+    [InlineData("a0:b1:c2:d3:e4:f5")]
+    [InlineData("A0-B1-C2-D3-E4-F5")]
+    [InlineData("a0b1c2d3e4f5")]
+    [InlineData("A0B1.C2D3.E4F5")]
+    [InlineData("  A0:B1:C2:D3:E4:F5  ")]
+    public async Task ClaimByMac_accepts_the_spellings_a_human_types(string typed)
+    {
+        var registered = (await SelfRegisterAsync()).Registration!;
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(typed, terrarium.Id), _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Claim!.DeviceId.Should().Be(registered.DeviceId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("A0:B1:C2:D3:E4")]
+    [InlineData("A0:B1:C2:D3:E4:F5:06")]
+    [InlineData("ZZ:B1:C2:D3:E4:F5")]
+    public async Task ClaimByMac_refuses_an_address_that_is_not_twelve_hex_digits(string? typed)
+    {
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(typed, terrarium.Id), _owner);
+
+        outcome.Problem!.Code.Should().Be("registration_invalid");
+        outcome.Problem.Errors.Should().ContainSingle().Which.Field.Should().Be("macAddress");
+        outcome.Problem.Errors!.Single().Code.Should().Be("mac_invalid");
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ClaimByMac_answers_one_thing_for_an_unknown_address()
+    {
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(
+            new ClaimByMacRequest("AA:BB:CC:DD:EE:99", terrarium.Id),
+            _owner);
+
+        outcome.Problem!.Code.Should().Be("device_not_found");
+    }
+
+    [Fact]
+    public async Task ClaimByMac_refuses_a_board_that_is_already_bound_indistinguishably()
+    {
+        var first = (await SelfRegisterAsync()).Registration!;
+        var terrarium = _store.AddTerrarium(_owner);
+        (await _service.ClaimAsync(new ClaimRequest(first.ClaimCode, terrarium.Id), _owner))
+            .Succeeded.Should().BeTrue();
+
+        var unknown = await _service.ClaimByMacAsync(
+            new ClaimByMacRequest("AA:BB:CC:DD:EE:99", terrarium.Id),
+            _owner);
+
+        var bound = await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, _store.AddTerrarium(_owner).Id), _owner);
+
+        // BR-04.3's reasoning applied to the address: telling "already claimed" apart from "never registered" would
+        // make the route a way to test whether an address belongs to this fleet (TASKS 2026-10-14, item 8).
+        bound.Problem!.Code.Should().Be("device_not_found");
+        bound.Problem.Message.Should().Be(unknown.Problem!.Message);
+    }
+
+    [Fact]
+    public async Task ClaimByMac_refuses_a_revoked_board()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        (await _service.RevokeAsync(deviceId, _owner)).Succeeded.Should().BeTrue();
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, terrarium.Id), _owner);
+
+        outcome.Problem!.Code.Should().Be("device_not_found");
+    }
+
+    [Fact]
+    public async Task ClaimByMac_still_hides_a_terrarium_the_caller_does_not_own()
+    {
+        (await SelfRegisterAsync()).Succeeded.Should().BeTrue();
+        var someoneElses = _store.AddTerrarium(Guid.NewGuid());
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, someoneElses.Id), _owner);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+        _store.Devices.Single().TerrariumId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ClaimByMac_records_the_path_it_used_on_the_audit_row()
+    {
+        (await SelfRegisterAsync()).Succeeded.Should().BeTrue();
+        var terrarium = _store.AddTerrarium(_owner);
+
+        (await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, terrarium.Id), _owner, actor: _actor))
+            .Succeeded.Should().BeTrue();
+
+        // Both paths write `device.claimed`; the row says which one, because they carry different trust and a trail
+        // that could not tell them apart could not answer "how did this board get bound?" (item 8).
+        var entry = _store.CommittedAuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.DeviceClaimed);
+        entry.AfterJson.Should().Contain("\"method\":\"mac_address\"");
+    }
+
+    [Fact]
+    public async Task Claim_records_the_code_path_so_the_two_are_tellable_apart()
+    {
+        var (code, _, terrariumId) = await ArrangeAsync();
+
+        (await _service.ClaimAsync(new ClaimRequest(code, terrariumId), _owner, actor: _actor))
+            .Succeeded.Should().BeTrue();
+
+        _store.CommittedAuditEntries.Should().ContainSingle()
+            .Which.AfterJson.Should().Contain("\"method\":\"claim_code\"");
+    }
+
+    // ---- fleet reads and edits (TASKS 2026-10-14, item 9b) ------------------------------------------
+
+    [Fact]
+    public async Task List_returns_the_callers_boards_with_their_enclosure_and_derived_badge()
+    {
+        var (deviceId, _, terrariumId) = await ClaimedAsync();
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        _store.Devices.Single().LastSeenAt = _clock.UtcNow;
+
+        var someoneElse = new Device
+        {
+            PublicId = "sr-other1",
+            DeviceName = "Theirs",
+            ChipId = "FFFFFFFFFFFF",
+            MacAddress = "AA:BB:CC:DD:EE:FF",
+            UserId = Guid.NewGuid(),
+        };
+        _store.AddDevice(someoneElse);
+
+        var outcome = await _service.ListAsync(_owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        var board = outcome.Devices.Should().ContainSingle().Subject;
+        board.DeviceId.Should().Be(deviceId);
+        board.TerrariumId.Should().Be(terrariumId);
+        board.Status.Should().Be("provisioning", "a claimed board stays in provisioning until it reports");
+        board.Runtime.Should().Be("provisioning");
+        board.TerrariumName.Should().BeNull("the store's fixture terrarium carries no name navigation");
+    }
+
+    [Fact]
+    public async Task List_reads_a_silent_board_as_offline_and_a_revoked_one_as_revoked()
+    {
+        var terrarium = _store.AddTerrarium(_owner, "Alpha");
+        var silent = BoundDevice("sr-silent", terrarium.Id, DeviceStatus.Online);
+        var revoked = BoundDevice("sr-revokd", terrarium.Id, DeviceStatus.Revoked);
+
+        // Silence is the signal for a board that could still report; a revoked one is a state it cannot leave.
+        silent.LastSeenAt = _clock.UtcNow.AddSeconds(-181);
+        revoked.LastSeenAt = _clock.UtcNow;
+
+        var outcome = await _service.ListAsync(_owner);
+
+        outcome.Devices!.Single(board => board.DeviceId == "sr-silent").Runtime.Should().Be("offline");
+        outcome.Devices.Single(board => board.DeviceId == "sr-revokd").Runtime.Should().Be("revoked");
+    }
+
+    [Fact]
+    public async Task Get_hides_a_board_belonging_to_another_account()
+    {
+        var theirs = new Device
+        {
+            PublicId = "sr-theirs",
+            DeviceName = "Theirs",
+            ChipId = "FFFFFFFFFFFF",
+            MacAddress = "AA:BB:CC:DD:EE:FF",
+            UserId = Guid.NewGuid(),
+        };
+        _store.AddDevice(theirs);
+
+        var outcome = await _service.GetAsync("sr-theirs", _owner);
+
+        // Same answer as an unknown id (BR-02.2), so the route cannot be used to enumerate boards.
+        outcome.Problem!.Code.Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task Get_does_not_offer_a_board_that_only_registered()
+    {
+        var registered = (await SelfRegisterAsync()).Registration!;
+
+        var outcome = await _service.GetAsync(registered.DeviceId, _owner);
+
+        // An unclaimed board has no owner, so it belongs to nobody's fleet yet.
+        outcome.Problem!.Code.Should().Be("not_found");
+    }
+
+    [Fact]
+    public async Task Update_renames_a_board_and_changes_its_intervals()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        var outcome = await _service.UpdateAsync(
+            deviceId,
+            new UpdateDeviceRequest("Shed node", 30, 120),
+            _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+
+        var board = outcome.Device!;
+        board.DeviceName.Should().Be("Shed node");
+        board.SamplingIntervalSec.Should().Be(30);
+        board.PublishIntervalSec.Should().Be(120);
+
+        var stored = _store.Devices.Single(device => device.PublicId == deviceId);
+        stored.DeviceName.Should().Be("Shed node");
+        stored.SamplingIntervalSec.Should().Be(30);
+    }
+
+    [Fact]
+    public async Task Update_is_a_patch_that_leaves_omitted_fields_alone()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        await _service.UpdateAsync(deviceId, new UpdateDeviceRequest("Shed node", 30, 120), _owner);
+        var outcome = await _service.UpdateAsync(deviceId, new UpdateDeviceRequest("Shed node 2", null, null), _owner);
+
+        var board = outcome.Device!;
+        board.DeviceName.Should().Be("Shed node 2");
+        board.SamplingIntervalSec.Should().Be(30, "a field the body did not mention keeps its value");
+        board.PublishIntervalSec.Should().Be(120);
+    }
+
+    [Fact]
+    public async Task Update_restores_the_default_label_when_the_name_is_emptied()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        var outcome = await _service.UpdateAsync(deviceId, new UpdateDeviceRequest(string.Empty, null, null), _owner);
+
+        outcome.Device!.DeviceName.Should().Be("New node");
+    }
+
+    [Theory]
+    [InlineData(9)]
+    [InlineData(301)]
+    [InlineData(0)]
+    [InlineData(-60)]
+    public async Task Update_refuses_an_interval_outside_the_bounds(int interval)
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        var outcome = await _service.UpdateAsync(
+            deviceId,
+            new UpdateDeviceRequest(null, interval, null),
+            _owner);
+
+        outcome.Problem!.Code.Should().Be("device_invalid");
+
+        var violation = outcome.Problem.Errors.Should().ContainSingle().Subject;
+        violation.Field.Should().Be("samplingIntervalSec");
+        violation.Code.Should().Be("interval_out_of_range");
+        _store.Devices.Single(device => device.PublicId == deviceId).SamplingIntervalSec.Should().Be(60);
+    }
+
+    [Fact]
+    public async Task Update_refuses_a_name_longer_than_the_column()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        var outcome = await _service.UpdateAsync(
+            deviceId,
+            new UpdateDeviceRequest(new string('x', DeviceLimits.NameMaxLength + 1), null, null),
+            _owner);
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("device_name_too_long");
+    }
+
+    [Fact]
+    public async Task Update_of_another_accounts_board_is_not_found()
+    {
+        var theirs = new Device
+        {
+            PublicId = "sr-theirs",
+            DeviceName = "Theirs",
+            ChipId = "FFFFFFFFFFFF",
+            MacAddress = "AA:BB:CC:DD:EE:FF",
+            UserId = Guid.NewGuid(),
+        };
+        _store.AddDevice(theirs);
+
+        var outcome = await _service.UpdateAsync("sr-theirs", new UpdateDeviceRequest("Mine now", null, null), _owner);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+        theirs.DeviceName.Should().Be("Theirs");
+    }
+
+    [Fact]
+    public async Task Delete_revokes_the_board_detaches_it_and_records_the_detachment()
+    {
+        var (deviceId, _, terrariumId) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Device!.Status.Should().Be("revoked");
+        outcome.Device.Runtime.Should().Be("revoked");
+        outcome.Device.TerrariumId.Should().BeNull("the DI-04 slot is free again for a replacement");
+        outcome.Device.ProvisionedAt.Should().BeNull();
+
+        device.Status.Should().Be(DeviceStatus.Revoked);
+        device.Credentials.Should().OnlyContain(credential => credential.RevokedAt != null);
+        _sessions.Kicks.Should().ContainSingle().Which.DeviceId.Should().Be(deviceId);
+
+        // The claim that set this test up wrote its own row, so the delete's is the last one.
+        var entry = _store.CommittedAuditEntries.Last();
+        entry.Action.Should().Be(AuditAction.DeviceRevoked);
+        entry.AfterJson.Should().Contain("\"detached\":true");
+
+        // The row survives — the readings, health reports and audit rows that name it do too.
+        _store.Devices.Should().ContainSingle(candidate => candidate.PublicId == deviceId);
+        terrariumId.Should().NotBe(Guid.Empty);
+    }
+
+    [Fact]
+    public async Task Delete_of_another_accounts_board_is_not_found()
+    {
+        var theirs = new Device
+        {
+            PublicId = "sr-theirs",
+            DeviceName = "Theirs",
+            ChipId = "FFFFFFFFFFFF",
+            MacAddress = "AA:BB:CC:DD:EE:FF",
+            UserId = Guid.NewGuid(),
+        };
+        _store.AddDevice(theirs);
+
+        var outcome = await _service.DeleteAsync("sr-theirs", _owner);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+        theirs.Status.Should().Be(DeviceStatus.Provisioning);
+    }
+
+    [Fact]
+    public async Task Delete_still_detaches_a_board_that_was_already_revoked_while_bound()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+        device.Status = DeviceStatus.Revoked;
+        device.RevokedAt = _clock.UtcNow;
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner);
+
+        // Revoke leaves the binding alone, so delete has to be able to finish the job — otherwise a board revoked
+        // while bound could never release its enclosure's slot.
+        outcome.Device!.TerrariumId.Should().BeNull();
+        device.TerrariumId.Should().BeNull();
+    }
+
+    /// <summary>A board already bound to a terrarium and owned by the caller.</summary>
+    private Device BoundDevice(string publicId, Guid terrariumId, DeviceStatus status)
+    {
+        var device = new Device
+        {
+            PublicId = publicId,
+            DeviceName = publicId,
+            ChipId = Guid.NewGuid().ToString("N")[..12],
+            MacAddress = "AA:BB:CC:DD:EE:01",
+            Status = status,
+            TerrariumId = terrariumId,
+            UserId = _owner,
+        };
+
+        _store.AddDevice(device);
+        return device;
     }
 
     // ---- helpers ------------------------------------------------------------------------------------

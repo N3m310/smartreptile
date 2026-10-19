@@ -39,6 +39,46 @@ const CODE_KEY: Record<string, string> = {
   metric_invalid: 'errorMetricInvalid',
   invalid_range: 'errorInvalidRange',
   species_profile_not_found: 'errorProfileNotFound',
+  // The catalogue's own refusals (FR-10). Top-level codes rather than field names, because their answers are "a
+  // built-in cannot be edited" and "a terrarium is using it" — neither is a message about one input.
+  builtin_immutable: 'builtinImmutable',
+  profile_in_use: 'profileInUse',
+  profile_name_taken: 'profileNameTaken',
+  // The picture refusals arrive both ways — as a top-level code and as `errors[].field = "file"` — so they are in
+  // this table and in the field table below. A form that answered "the request was refused" for a 3 MB photograph
+  // would tell the keeper nothing about what to do differently.
+  image_required: 'imageRequired',
+  image_too_large: 'imageTooLarge',
+  image_type_unsupported: 'imageTypeUnsupported',
+  image_invalid: 'imageInvalid',
+  image_not_set: 'imageNotSet',
+  // The administrator's refusals (FR-18). Unlike the authentication group these are meant to be read by the
+  // person who caused them: "that is the last administrator" and "you cannot do that to your own account" are
+  // rules an administrator has to know, so each gets its own sentence rather than one opaque failure.
+  user_not_found: 'adminAccountNotFound',
+  self_change_refused: 'adminErrorSelfChange',
+  last_administrator_refused: 'adminErrorLastAdministrator',
+  account_in_use: 'adminErrorAccountInUse',
+  account_invalid: 'adminErrorAccountInvalid',
+  // The reset route validates the new password with the same policy registration uses, so its refusal is the
+  // policy's own sentence rather than a second one that could disagree with it.
+  password_invalid: 'passwordPolicyViolation',
+  quiet_hours_incomplete: 'adminFormQuietHoursHint',
+  quiet_hours_invalid: 'adminFormQuietHoursFormat',
+  severity_invalid: 'adminFormSeverityValues',
+  role_invalid: 'adminErrorRoleInvalid',
+  role_not_found: 'adminErrorRoleNotFound',
+  role_in_use: 'adminErrorRoleInUse',
+  role_code_taken: 'adminRoleCodeTaken',
+  role_code_invalid: 'adminErrorRoleInvalid',
+  role_name_invalid: 'adminErrorRoleInvalid',
+  role_description_invalid: 'adminErrorRoleInvalid',
+  system_role_immutable: 'adminErrorSystemRole',
+  permission_unknown: 'adminErrorPermissionUnknown',
+  // The two list filters cannot be triggered by this client — its options are the two families and the three
+  // states — so a refusal is a validation sentence rather than a vocabulary of its own.
+  family_invalid: 'errorValidationFailed',
+  state_invalid: 'errorValidationFailed',
   maintenance: 'maintenanceNotice',
   timeout: 'errorServiceUnavailable',
   network_unreachable: 'errorBackendUnreachable',
@@ -64,6 +104,53 @@ const FIELD_KEY: Record<string, string> = {
   username_too_short: 'usernameTooShort',
   username_invalid: 'usernameInvalid',
   email_invalid: 'emailInvalid',
+  terrarium_name_required: 'terrariumNameRequired',
+  terrarium_name_too_long: 'terrariumNameTooLong',
+  terrarium_location_too_long: 'terrariumLocationTooLong',
+  terrarium_description_too_long: 'terrariumDescriptionTooLong',
+  terrarium_timezone_invalid: 'terrariumTimeZoneInvalid',
+  species_profile_not_found: 'errorProfileNotFound',
+  // The band rules of `03-implementation/06` §2, one code per rule so the editor marks the input that is wrong
+  // rather than showing one opaque refusal (BR-10.2).
+  threshold_target_required: 'thresholdTargetRequired',
+  threshold_ordering_invalid: 'thresholdOrderingInvalid',
+  threshold_critical_invalid: 'thresholdCriticalInvalid',
+  threshold_dwell_invalid: 'thresholdDwellInvalid',
+  threshold_recovery_margin_invalid: 'thresholdMarginInvalid',
+  threshold_implausible_band: 'thresholdImplausibleBand',
+  threshold_duplicate: 'thresholdDuplicate',
+  // The catalogue's field rules (`SpeciesProfileService.ParseFields`/`ParseBands`), addressed by field name or by
+  // position, so the editor marks the input that is wrong rather than showing one opaque refusal.
+  profile_name_required: 'profileNameRequired',
+  profile_name_too_long: 'profileNameTooLong',
+  profile_name_taken: 'profileNameTaken',
+  // The picture rules, all addressed to the `file` part of the multipart body.
+  image_required: 'imageRequired',
+  image_too_large: 'imageTooLarge',
+  image_type_unsupported: 'imageTypeUnsupported',
+  image_invalid: 'imageInvalid',
+  climate_zone_invalid: 'climateZoneInvalid',
+  scientific_name_too_long: 'scientificNameTooLong',
+  profile_notes_too_long: 'profileNotesTooLong',
+  photoperiod_invalid: 'photoperiodInvalid',
+  lights_on_invalid: 'lightsOnInvalid',
+  light_threshold_invalid: 'lightThresholdInvalid',
+  min_light_hours_invalid: 'minLightHoursInvalid',
+  profile_bands_required: 'profileBandsRequired',
+  threshold_phase_invalid: 'thresholdPhaseInvalid',
+  source_ref_too_long: 'sourceRefTooLong',
+  // The account and role fields (`UserAdminService`, `RoleAdminService`), addressed by field name so the editor
+  // marks the input that is wrong. The three role-shape codes share one sentence, and the violation's own field
+  // name is what puts it under the right input.
+  quiet_hours_incomplete: 'adminFormQuietHoursHint',
+  quiet_hours_invalid: 'adminFormQuietHoursFormat',
+  severity_invalid: 'adminFormSeverityValues',
+  role_invalid: 'adminErrorRoleInvalid',
+  role_code_taken: 'adminRoleCodeTaken',
+  role_code_invalid: 'adminErrorRoleInvalid',
+  role_name_invalid: 'adminErrorRoleInvalid',
+  role_description_invalid: 'adminErrorRoleInvalid',
+  permission_unknown: 'adminErrorPermissionUnknown',
 };
 
 /** The sentence for a failed call. `apiBaseUrl` and the code are shown when the table has no entry. */
@@ -82,6 +169,20 @@ export function describeError(t: TFunc, error: ApiError | null): string {
     return t('errorBackendUnreachable');
   }
   return `${t('errorRequestFailed')} (${error.code})`;
+}
+
+/**
+ * The sentence for a failed change-password call.
+ *
+ * `/auth/change-password` answers a wrong current password with the same opaque `401 invalid_credentials` a failed
+ * sign-in gets (`07-appendices/03` §4.1) — "this credential is wrong" is one condition with one code — but the
+ * sentence that code maps to names a *username*, and this form has no username field to be wrong: the only
+ * credential it can send is the one it is asking about. The deck's `wrongCurrentPassword` is therefore the honest
+ * reading of that code here. Every other refusal — the policy violation, the lockout, an unreachable server — is
+ * the sentence its own code already has.
+ */
+export function describeChangePasswordError(t: TFunc, error: ApiError | null): string {
+  return error?.code === 'invalid_credentials' ? t('wrongCurrentPassword') : describeError(t, error);
 }
 
 /**

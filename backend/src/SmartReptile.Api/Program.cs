@@ -13,10 +13,14 @@ using Microsoft.IdentityModel.Tokens;
 using SmartReptile.Api.Endpoints;
 using SmartReptile.Api.Hubs;
 using SmartReptile.Api.Middleware;
+using SmartReptile.Api.OpenApi;
 using SmartReptile.Api.Security;
+using SmartReptile.Application.Admin;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
 using SmartReptile.Application.Ingest;
+using SmartReptile.Application.Reference;
+using SmartReptile.Application.Species;
 using SmartReptile.Application.Terrariums;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure;
@@ -72,8 +76,10 @@ var unauthorizedBody = new
 
 var forbiddenBody = new
 {
+    // The code stays `insufficient_role` because it is what a deployed client already handles; the title says what
+    // the refusal now means, which since 2026-10-17 is a missing permission rather than a missing role.
     type = "https://smartreptile.example/problems/insufficient_role",
-    title = "Your role does not allow this action.",
+    title = "Your account does not hold the permission this action needs.",
     status = StatusCodes.Status403Forbidden,
     code = "insufficient_role",
 };
@@ -145,14 +151,15 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
-    // Policies, not role strings, at the endpoint (§02-design/06 §3). Owner is listed in the Technician policy
-    // explicitly rather than implied: an Owner may do everything a Technician may, and saying so is cheaper than
-    // a hierarchy rule that has to be discovered.
-    options.AddPolicy(AuthorizationPolicies.Owner, policy =>
-        policy.RequireClaim("role", nameof(UserRole.Owner)));
+    // One policy per permission in the catalogue (FR-18). The names are the codes, so an endpoint asks for the
+    // capability it needs and no route translates a role into one — see AuthorizationPolicies for why that
+    // translation moved into the database.
+    options.AddPermissionPolicies();
 
-    options.AddPolicy(AuthorizationPolicies.Technician, policy =>
-        policy.RequireClaim("role", nameof(UserRole.Owner), nameof(UserRole.Technician)));
+    // The routes that are about the caller's own account carry a token and nothing more: signing yourself out,
+    // reading your own profile, changing your own password. Keeping this as a named policy means every other
+    // endpoint in the codebase names a permission, so "which capability does this route need" is always answered.
+    options.AddPolicy(AuthorizationPolicies.Authenticated, policy => policy.RequireAuthenticatedUser());
 });
 
 /// <summary>Writes an RFC 7807 body for a response the framework would otherwise leave empty.</summary>
@@ -195,6 +202,33 @@ builder.Services.AddSingleton(sp =>
     return new TerrariumSettings(defaults.TimeZoneId, defaults.SilentAfterIntervals);
 });
 
+// The species-profile catalogue (FR-10 — roadmap 3.9). No settings of its own: a profile's defaults are the
+// domain defaults, so there is nothing here for a deployment to move.
+builder.Services.AddScoped<SpeciesProfileService>();
+
+// The silence watchdog's settings (FR-07, roadmap task 3.3). The missed-interval count is the one the read surface
+// already derives the online badge from, so a deployment that changes it moves the stored status and the badge
+// together; the 30-minute critical threshold is a rule, not a setting. The device-onboarding service takes the same
+// value, so the fleet screen's badge and the terrarium header's badge cannot disagree (TASKS 2026-10-14, item 9b).
+builder.Services.AddSingleton(sp => new DeviceSilenceSettings(
+    sp.GetRequiredService<IOptions<DefaultsOptions>>().Value.SilentAfterIntervals));
+
+// Reference data (TASKS 2026-10-14, item 11). No settings: the catalogue is the table, seeded from the code that
+// owns it.
+builder.Services.AddScoped<ReferenceService>();
+
+// Account management for the administrator (TASKS 2026-10-14, item 12). No settings of its own: the guards are
+// rules rather than deployment choices.
+builder.Services.AddScoped<UserAdminService>();
+
+// The role/permission matrix as data (TASKS 2026-10-14, item 12). Editing it is an administrative write, so the
+// service is registered like any other account operation.
+builder.Services.AddScoped<RoleAdminService>();
+
+// The administrator's get-all dashboard (TASKS 2026-10-14, item 13). Read-only and cross-account: every route that
+// reaches it names `data.read.any`.
+builder.Services.AddScoped<AdminService>();
+
 // ---- rate limiting (§07-appendices/03 §5) ------------------------------------------------------------
 builder.Services.AddRateLimiter(options =>
 {
@@ -224,6 +258,21 @@ builder.Services.AddRateLimiter(options =>
         factory: _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+        }));
+
+    // The session's own routes — `/auth/me`, `/auth/refresh`, `/auth/logout` — are not credential-guessing
+    // surfaces: each needs a token the caller already holds, and the client calls them as a matter of course
+    // (read the profile on load, rotate a 15-minute token, end a session). Sharing the credential budget made
+    // ordinary housekeeping spend it, and a `429` on a rotation is the one refusal that can end a signed-in
+    // session — so these three get a budget sized for the client that uses them rather than for an attacker who
+    // is guessing passwords. The credential routes keep the tight budget above.
+    options.AddPolicy("authSession", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
         }));
@@ -279,8 +328,22 @@ builder.Services.AddSwaggerGen(options =>
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
         Scheme = "bearer",
         BearerFormat = "JWT",
-        Description = "Paste a user access token (15 minute lifetime).",
+        Description = "The accessToken field of POST /api/v1/auth/login's response — not its refreshToken, which no "
+                    + "bearer route accepts. Paste the value alone, without a 'Bearer ' prefix, which Swagger UI adds "
+                    + "itself. It is valid for 15 minutes and nothing here rotates it for you, so a call that answers "
+                    + "401 unauthenticated after a while means the token aged out: run POST /api/v1/auth/refresh with "
+                    + "the refreshToken and paste the accessToken it returns.",
     });
+
+    // The document has to *require* the scheme on the operations that use it, or Swagger UI accepts a token in its
+    // dialog and never sends it — every authenticated call then answers `401 unauthenticated`, which reads as a bad
+    // token. That is what this filter is for; a definition alone is only what makes the dialog appear.
+    options.OperationFilter<BearerSecurityOperationFilter>();
+
+    // The other half of the same problem, for the conditional header an update must carry: the parameter is bound
+    // as nullable so the endpoint can answer `428` itself, which would otherwise leave the document describing it
+    // as optional. See the filter's remarks.
+    options.OperationFilter<RequiredIfMatchOperationFilter>();
 });
 
 var app = builder.Build();
@@ -376,6 +439,14 @@ app.MapOpsEndpoints(applicationVersion);
 app.MapAuthEndpoints();
 app.MapDeviceEndpoints();
 app.MapTerrariumEndpoints();
+app.MapSpeciesProfileEndpoints();
+app.MapAlertEndpoints();
+app.MapNotificationEndpoints();
+app.MapAuditEndpoints();
+app.MapReferenceEndpoints();
+app.MapUserEndpoints();
+app.MapRoleEndpoints();
+app.MapAdminEndpoints();
 app.MapIngestEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
@@ -391,8 +462,16 @@ app.MapGet("/", () => Results.Ok(new
         "/api/v1/devices/self-register", "/api/v1/devices/claim",
         "/api/v1/devices/{deviceId}/rotate-secret", "/api/v1/devices/{deviceId}/revoke",
         "/api/v1/terrariums", "/api/v1/terrariums/{terrariumId}",
+        "/api/v1/species-profiles", "/api/v1/species-profiles/{profileId}",
+        "/api/v1/species-profiles/{profileId}/duplicate",
         "/api/v1/terrariums/{terrariumId}/readings/latest", "/api/v1/terrariums/{terrariumId}/readings",
         "/api/v1/terrariums/{terrariumId}/coverage",
+        "/api/v1/terrariums/{terrariumId}/thresholds", "/api/v1/terrariums/{terrariumId}/thresholds/{metric}",
+        "/api/v1/terrariums/{terrariumId}/silences", "/api/v1/terrariums/{terrariumId}/silences/{silenceId}",
+        "/api/v1/alerts", "/api/v1/alerts/{alertId}", "/api/v1/alerts/{alertId}/ack",
+        "/api/v1/alerts/{alertId}/resolve", "/api/v1/alerts/{alertId}/timeline",
+        "/api/v1/notifications", "/api/v1/notifications/{notificationId}/read", "/api/v1/notifications/read-all",
+        "/api/v1/audit",
     },
     docs = "docs/README.md",
 })).WithTags("ops");
@@ -413,9 +492,12 @@ await using (var scope = app.Services.CreateAsyncScope())
     {
         var outcome = await initializer.InitializeAsync();
         logger.LogInformation(
-            "Start-up complete: migrationsApplied={MigrationsApplied}, profilesSeeded={ProfilesSeeded}, version={Version}",
+            "Start-up complete: migrationsApplied={MigrationsApplied}, profilesSeeded={ProfilesSeeded}, "
+            + "timeZonesSeeded={TimeZonesSeeded}, adminSeeded={AdminSeeded}, version={Version}",
             outcome.MigrationsApplied,
             outcome.ProfilesSeeded,
+            outcome.TimeZonesSeeded,
+            outcome.AdminSeeded,
             applicationVersion);
     }
     catch (Exception ex)

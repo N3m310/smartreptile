@@ -1,16 +1,5 @@
 namespace SmartReptile.Domain.Identity;
 
-/// <summary>
-/// Roles from §02-design/06 §3. The permission matrix lives in one authorisation handler, so an endpoint
-/// never re-implements the rule (§02-design/06 §3 implementation note).
-/// </summary>
-public enum UserRole
-{
-    Owner = 0,
-    Technician = 1,
-    Viewer = 2,
-}
-
 /// <summary>A user account with its notification preferences (FR-01, FR-13).</summary>
 public class User
 {
@@ -51,8 +40,18 @@ public class User
     /// <summary>When the current recovery code was issued; set on creation and again on every rotation.</summary>
     public DateTimeOffset? RecoveryCodeIssuedAt { get; set; }
 
-    /// <summary>Authorisation role.</summary>
-    public UserRole Role { get; set; } = UserRole.Owner;
+    /// <summary>
+    /// Authorisation role (FR-18). A foreign key into <c>Role</c> rather than an enum column: what an account may do
+    /// is the permission set its role holds, and that set is a deployment's decision the administrator edits.
+    /// </summary>
+    /// <remarks>
+    /// Registration and the seeder write a constant from <see cref="SystemRoles"/>, so the key is never the result
+    /// of a lookup that an empty database could fail to answer.
+    /// </remarks>
+    public Guid RoleId { get; set; } = SystemRoles.OwnerId;
+
+    /// <summary>Role navigation. Loaded where the permission set is needed.</summary>
+    public Role? Role { get; set; }
 
     /// <summary>UI language, <c>vi</c> or <c>en</c> (ADR-013).</summary>
     public string PreferredLanguage { get; set; } = "vi";

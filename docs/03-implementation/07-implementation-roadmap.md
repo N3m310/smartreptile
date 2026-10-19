@@ -332,7 +332,8 @@ rather than implied by a green row. Contract: `07-appendices/03` §4.2.
 | Piece | Where | Verified by |
 |---|---|---|
 | List, create, detail | `Api/Endpoints/TerrariumEndpoints.cs`, `Application/Terrariums/TerrariumService.cs` | service tests + the live run below |
-| `PATCH` with `If-Match`, and the `ETag` on `GET`/`POST`/`PATCH` responses | `TerrariumService.UpdateAsync`, `Terrarium.RowVersion`, `EfTerrariumStore.TrySaveChangesAsync`, `TerrariumEndpoints.{SetETag,ParseIfMatch}` | service tests + a live `200`/`412`/`428`/`400` run below |
+| `PATCH` with `If-Match`, and the `ETag` on `GET`/`POST`/`PATCH` responses | `TerrariumService.UpdateAsync`, `Terrarium.RowVersion`, `EfTerrariumStore.TrySaveChangesAsync`, `TerrariumEndpoints.{SetETag,TerrariumPayload,ParseIfMatch}` | service tests + a live `200`/`412`/`428`/`400` run below |
+| The same token in the body as `rowVersion`, and `If-Match` declared as a header parameter so Swagger UI renders the box (2026-10-14) | `TerrariumSummary.RowVersion`, `TerrariumEndpoints`'s `[FromHeader(Name = "If-Match")]`, `OpenApi/RequiredIfMatchOperationFilter.cs` | `TerrariumSummarySerialisationTests` + the live run of 2026-10-14 below |
 | `DELETE` as a soft delete, refused while a live device is bound unless `?allowUnboundDevice=true` | `TerrariumService.DeleteAsync` | service tests + a live `409`/`204` run below |
 | Ownership is a query parameter: foreign, missing and soft-deleted are one `404 not_found` | `Infrastructure/Persistence/EfTerrariumStore.cs` | service tests + live `404` |
 | `readings/latest`: newest value per metric, the effective band, the device state | `TerrariumService.LatestReadingsAsync` | service tests + live run |
@@ -370,6 +371,24 @@ signed out (no invented numbers behind it), and after signing in renders the rea
 Nguy hiểm · Ngưỡng 24.0–28.0 °C` and `Độ ẩm 50%RH · Ngoài ngưỡng · Ngưỡng 30–40 %RH` — from
 `GET /api/v1/terrariums` and `readings/latest`, with the browser confirming
 `Access-Control-Allow-Origin: http://localhost:8081`.
+
+**Run again on 2026-10-14, against a fresh database, for the version in the body.** The 2026-10-13 review found the
+update route uncallable from Swagger — the token existed only in a response header Swagger UI does not show, and the
+route declared no `If-Match` parameter for it to render a box from. `TerrariumSummary.RowVersion` now carries the
+same base64 the `ETag` header does on `GET {id}`, `POST` and `PATCH`, the `PATCH` handler binds
+`[FromHeader(Name = "If-Match")]`, and both refusals name the route that hands the value out. 19 assertions, all
+green: `201` on create with `ETag` equal to the body's `rowVersion`; `GET {id}` `200` with the same pair; a **list**
+item with no `rowVersion` at all; `200` and a **new** token on an `If-Match` that matched, in both the plain-base64
+and the quoted `ETag` form; `412 precondition_failed` on the same token afterwards, with the row's name provably
+unchanged; `428 precondition_required` with no header, both messages carrying the route to read; `If-Match: *`
+accepted; and an empty `name` still `400 validation_failed` with `errors[0].field = "name"`, written after the
+precondition passed and changing nothing. `swagger.json` now carries the `If-Match` header parameter on
+`PATCH /api/v1/terrariums/{terrariumId}` — `in: header`, `required: true`, description included — which is the box
+Swagger UI renders; the binding stays nullable and `RequiredIfMatchOperationFilter` marks the document, because a
+non-nullable parameter would have the framework answer a missing header with its own `400` instead of the
+documented `428`. **700 backend unit tests pass** (was 698; the two new
+ones are `TerrariumSummarySerialisationTests`), and the response bodies above are the ones the Flutter app and the
+dashboard already parse — the field is additive.
 
 **What is deliberately still open in 2.8.**
 
@@ -530,14 +549,15 @@ covers, which is the same set the read surface resolves a card's band from — a
 
 | # | Task | Track | Acceptance |
 |---|---|---|---|
-| 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Read half done 2026-10-09** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `TC-U-21…25` are green; the override write path and `ThresholdSnapshot` (`TC-U-26`) are open. See the block below |
-| 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green. **Decision engine done 2026-10-09** — the pure function, the evaluator that writes open/escalate/touch/resolve, and a live excursion through a real broker (see the block after this table); the per-device reorder window of §7 is open |
-| 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09` |
-| 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36` |
-| 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push) |
-| 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`) |
-| 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15` |
+| 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Complete — read half 2026-10-09, write half 2026-10-13** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `PUT`/`DELETE` overrides write a `ThresholdSnapshot` on every change; all of `TC-U-21…26` are green. See the two blocks below |
+| 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` and `TC-U-60` green. **Decision engine done 2026-10-09; live 30-second event-time reorder buffer and persisted watermark added 2026-10-19** — late samples remain available to history/summaries but cannot move live alert state backward. **Still open:** restart recovery for committed samples not yet evaluated; the in-memory queue does not replay them after process restart |
+| 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) were built with 3.6 on 2026-10-19 and are green. See the block below |
+| 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36`. **Built 2026-10-10** — the list, the detail, the timeline, ack and resolve, the three silence routes and the `alertChanged` push; `TC-U-36`'s role matrix holds because ack, resolve and both silence writes name the `Technician` policy, and `TC-I-07` is covered from the service side (the project has no HTTP host). See the block below |
+| 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push). **Built 2026-10-16; real FCM receipt verified 2026-10-19** — the policy matrix, the retry schedule, the escalation ladder, the hourly cap and the digest are the domain's `NotificationPolicy`/`NotificationCadence`; the dispatcher is a 15 s sweep over the alerts that owe somebody a message; the inbox is `GET /notifications` with the two mark-read routes; the channels are FCM HTTP v1 with a service-account assertion and SMTP against the Mailpit sink the development stack now runs. `TC-U-37…45` are green as 22 dispatcher cases plus 24 domain cases, and the whole chain was exercised live: a seeded excursion produced one Vietnamese inbox entry, one `notified` timeline entry and `notifications_sent_total = 1`. A synthetic `DeviceSilent` alert was also sent through the real backend/FCM path and appeared as an Android system notification on the API 36 emulator. The receipt was 113 s after the dispatcher recorded `Sent`, so it proves device receipt but not the 90 s timing in `TC-E2E-03`. See the block below |
+| 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`). **Complete — 2026-10-19** — migration `AddEnvironmentalSummaries` adds unique-key hourly rollups and local-date summaries; `SummaryWorker` recomputes the last 48 h plus today/yesterday every 15 min; `SummaryRecomputationTests` proves an inserted late sample updates existing rows without duplicating them. The acceptance cases now close too: `EvaluationThroughPipelineTests` plays the `daily` fixture through the real evaluator and asserts one back-dated alert with its peak **and** the rollup and daily summary against hand-computed values (`TC-I-06`), and the two SHOULD signals are built and green — `GradientWarning` (12 °C surface-to-air boundary, `TC-U-30`) and `LightDeficit` (accumulated light-hours judged at 21:00 local, `TC-U-31`). The summaries read endpoint is a later route item and is not part of this task |
+| 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15`. **Complete — acceptance measured 2026-10-19** — `/health/live`, `/health/ready`, `/version` and `/metrics` are verified; 1,000 synthetic MQTT samples increased `ingest_samples_total` from 7 to 1,007 exactly (nine batches, zero rejected), and SQL Server confirmed all 1,000 rows persisted; with the broker forced to fail startup on an unassigned bind address, `/health/ready` returned `503` with `database: Healthy` and `mqtt-broker: Unhealthy`, while authenticated `GET /api/v1/auth/me` remained `200`; the normal API was restored to healthy afterward. `npm run check:strings` passed with 509 keys identical in English and Vietnamese, with every web-referenced key defined. The audit query's scope and cursor were already covered by five integration cases |
 | 3.8 | `07-appendices/05` literature pass 2 — every shipped row cited | doc/report | 100% citation gate met |
+| 3.9 | Species-profile catalogue: `GET`/`POST`/`POST {id}/duplicate`/`PATCH {id}`/`DELETE {id}` on `/api/v1/species-profiles`, built-ins immutable, `409 profile_in_use` on delete | backend | **Built 2026-10-13** — `Application/Species/SpeciesProfileService.cs`, `Abstractions/ISpeciesProfileStore.cs`, `Infrastructure/Species/EfSpeciesProfileStore.cs`, `Api/Endpoints/SpeciesProfileEndpoints.cs`. Bands are validated by the domain's own `ThresholdBand.Validate` (BR-10.2), every write is audited with its before/after state (BR-10.4), and the routes were exercised live against SQL Server: create, duplicate (citation carried over), a patch that replaces the band set, `403 builtin_immutable`, `404` for a foreign profile, `409 profile_in_use`, `409 profile_name_taken`, `204` once the terrarium moved, and `401` for an orphaned token. 19 unit cases. **This is the route 4.16's create form was blocked on** — `POST /terrariums` needs a `speciesProfileId` and nothing exposed one until now |
 
 **DoD:** inducing a real excursion (lamp on / ice pack) produces exactly one alert and one notification,
 and a 4-minute disturbance produces nothing. **This is the milestone to demo to the mentor.**
@@ -583,10 +603,10 @@ a layer** when a layer holds both an `Any` row and a phase-specific one, which i
 pseudocode says and the only reading under which the two sentences in that section agree. Both are now stated in
 the document itself rather than only in the code's remarks.
 
-**What this deliberately does not include.** No override write path — `PUT`/`DELETE /terrariums/{id}/thresholds` is
-the other half of 3.1, so the live check had to insert its override rows with `sqlcmd` and says so. No
-`ThresholdSnapshot` table, because its natural writer is the change path (3.2/3.4) and a table nothing writes is
-just a promise. And no `SystemDefault` tier: the specification names it as tier 3 of the resolution order and
+**What this did not include on 2026-10-09, and what closed it.** No override write path and no `ThresholdSnapshot`
+table: the live check inserted its override rows with `sqlcmd` and said so, and the snapshot waited for the change
+path that would write it. Both landed with the task's write half on 2026-10-13 — the block below — so the only
+thing still absent is the `SystemDefault` tier: the specification names it as tier 3 of the resolution order and
 then **never gives it a value anywhere in the doc set**, so it is unbuilt rather than invented — a metric no layer
 resolves for the current phase is *absent* from the response, and absent is what the editor needs to show
 "configured nowhere" honestly.
@@ -604,6 +624,77 @@ and `readings/latest` still `200` beside it. The check deletes what it created.
 
 ---
 
+## M3 task 3.1, write half — the override write path and `ThresholdSnapshot` (built 2026-10-13)
+
+The read half could report *why* a limit was what it was, but nothing could change one: the editor that 4.20 needs
+could preview a band and not author it. This half adds the two routes `07-appendices/03` §4.2 names and the table
+`02-design/02` §3.13 promises, around one property — **a change is recorded, and an alert already open is not
+rewritten**.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `ThresholdSnapshot` — the effective set at an instant, its JSON and its SHA-256 stored as `char(64)` | `Domain/Thresholds/ThresholdSnapshot.cs`; table `ThresholdSnapshot` (migration `20261013025001_AddThresholdSnapshots`), cascade-deleted with its terrarium, indexed `(TerrariumId, CapturedAtUtc DESC)` | the two integration cases below |
+| `TerrariumService.UpsertThresholdsAsync` — validate every entry, then upsert `(metric, phase)` and snapshot once | `Application/Terrariums/TerrariumService.cs` | 17 new `TerrariumServiceTests` cases |
+| `TerrariumService.DeleteThresholdOverrideAsync` — revert one metric, idempotently | same | the same cases |
+| `PUT /terrariums/{id}/thresholds` and `DELETE /terrariums/{id}/thresholds/{metric}`, both role `Owner` | `Api/Endpoints/TerrariumEndpoints.cs` | the live run below |
+| `AddThresholdOverride` / `RemoveThresholdOverride` / `AddThresholdSnapshot` on the store port | `Application/Abstractions/ITerrariumStore.cs`, `Infrastructure/Persistence/EfTerrariumStore.cs` | the integration cases below |
+
+**Four decisions worth stating, because they are choices and not consequences.**
+
+1. **Validation is all-or-nothing and every failure is field-level.** Each entry is checked for a known metric, a
+   known phase, both target bounds, the note's length, and then the band rules of `03-implementation/06` §2 — the
+   same `ThresholdBand.Validate` the database's CHECK constraints mirror. The entry's position addresses the field
+   (`overrides[1].targetMin`), duplicates of one `(metric, phase)` are refused where the caller can see which entry,
+   and nothing is written when anything is refused. The two rules that an *inverted* band also trips — the recovery
+   margin cannot fit inside a band of negative width — are reported alongside the ordering failure rather than
+   instead of it, which is what the validator already did and what the live run shows.
+2. **A no-op is not a change.** A band byte-for-byte equal to the stored one writes no snapshot and does not touch
+   the row, so re-saving an unchanged editor page is not recorded as history. The request is a **patch over the
+   override set**: a metric the body does not mention keeps whatever override it had.
+3. **The snapshot is resolved *after* the change, not before.** It records the set the next sample will be judged
+   against, which is the one an alert opened later should point at. A change that does not alter the set in force —
+   a Day band authored at midnight — is still a change, and is still snapshotted, because the configuration moved
+   even though this instant's answer did not.
+4. **A new override is staged through the store, not by adding to the loaded collection.** An entity discovered in a
+   tracked navigation with a client-assigned key is a candidate for an `UPDATE` as far as EF is concerned, and the
+   first cut of this task wrote `UPDATE [ThresholdOverride] … WHERE [Id] = …` affecting zero rows and threw
+   `DbUpdateConcurrencyException` against a real database — the unit suite could not see it, and only the SQL Server
+   run did. `AddThresholdOverride` / `RemoveThresholdOverride` exist so the adapter decides the state, and the fake
+   mirrors the adapter's fix-up so the snapshot's input is the same in both.
+
+**What this deliberately does not include.** No `If-Match` on the write paths: §4.2 lists the precondition for
+`PATCH /terrariums/{id}` alone, and two keepers racing to write one band resolve last-writer-wins, which is a
+smaller problem than 4.20 having to carry a token the contract never gave it. No audit row: the snapshot *is* the
+history the requirement asks for — it answers "which bands was this judged against?" — and the closed vocabulary of
+`02-design/02` §3.18 has no threshold verb. And no `SystemDefault` tier, still for the reason the read half gives.
+
+**Verification.** 655 unit tests (17 new; the suite was 638), `dotnet format --verify-no-changes --severity error`
+clean on the solution and on the integration project, and two new integration cases against SQL Server Express:
+a change commits the override and its snapshot together and the evaluator's own band source
+(`EfEvaluationStore.FindContextAsync` through `ThresholdResolver`) resolves the **new** band afterwards, while the
+alert's denormalised `BandMin`/`BandMax` are untouched; a revert deletes the row — not disables it — and leaves two
+snapshots, one reporting an override and one not. The suite is 55 cases, all green. (**Corrected 2026-10-17:** the
+one case that used to be red — `AlertLifecycleTests.The_cursor_pages…`, recorded here on 2026-10-13 as failing
+identically with this task's edits reverted — was wrong in its *expectation*, not in the cursor logic: it seeds four
+alerts and asserted one row on the second page when two remain. The case now asserts the invariant directly (both
+pages together, strictly descending, no id twice, four rows in total), so it can no longer pass for the wrong
+reason.)
+
+A live run through the real API and SQL Server (registered Owner, log in, create a terrarium on a seeded profile)
+checked the HTTP half the service tests cannot see — 13 assertions, all as expected: anonymous `PUT` and `DELETE`
+both `401`; **`PUT` a `tempC` band `28–30`** → `200` with `source: override` and one snapshot row; **an inverted
+band** → `400 validation_failed` naming `overrides[0].targetMin` (`threshold_ordering_invalid`) and
+`overrides[0].recoveryMargin` (`threshold_recovery_margin_invalid`), with the stored override unchanged; **an open
+alert carrying `BandMin/BandMax` `24/32`** then a second `PUT` moving the band to `29–31` → `200`, two snapshot rows,
+and the alert still reading **`24.000/32.000`** — `TC-U-26` measured over HTTP rather than argued; `GET` then
+reporting `source: override` at `29–31`, so the next evaluation uses the new band; **`DELETE …/thresholds/tempC`** →
+`200` with the profile's band back (`source: profile`, `24–28`), a second `DELETE` → `200` (idempotent, no new row),
+and `DELETE …/thresholds/luminosity` → `400 metric_invalid` listing the keys a client may send. `swagger.json`
+reported **37 operations, both new paths under the bearer scheme** (35 before), and `GET /` now advertises the
+thresholds family — which it had never done, not even for the read route it gained on 2026-10-09.
+
+---
+
 ## M3 task 3.2 — the threshold engine (built 2026-10-09)
 
 The engine is the reason the product exists: everything before it stored measurements, and this is the first thing
@@ -615,9 +706,10 @@ cannot see.
 |---|---|---|
 | `ThresholdDecision.Decide(band, value, observedAt, state, nowUtc, openAlertSeverity)` — dwell, hysteresis and escalation as one static method with no dependency at all | `Domain/Evaluation/ThresholdDecision.cs` | 19 `ThresholdDecisionTests` cases (the `TC-U-10…20` matrix) |
 | `ThresholdAlertWriter` — the four field-level writes the lifecycle needs, with no I/O | `Application/Evaluation/ThresholdAlertWriter.cs` | the evaluator's tests, which assert the row's fields |
-| `SampleEvaluator` — resolves the band through `ThresholdResolver`, applies the decision, keeps `EvaluationState` and the alert row in step | `Application/Evaluation/SampleEvaluator.cs` | 18 cases, including the pointer/row reconciliation |
+| `SampleEvaluator` — resolves the band through `ThresholdResolver`, applies the decision, keeps `EvaluationState` and the alert row in step | `Application/Evaluation/SampleEvaluator.cs` | 19 cases, including the pointer/row reconciliation and persisted event-time watermark |
 | `IEvaluationStore` extended: the configured bands, the still-open alerts, `AddAlert`, and the dwell window's readings | `Infrastructure/Evaluation/EfEvaluationStore.cs` | 19 integration cases + the live run |
 | `alerts_opened_total` wired, by severity, from the outcome | `Infrastructure/Evaluation/EvaluatorWorker.cs` | the live run's counter assertion |
+| `EvaluationReorderBuffer` — 30-second per-device `(RecordedAt, Sequence)` ordering, late-sample handling | `Infrastructure/Evaluation/EvaluationReorderBuffer.cs`, `InProcessEvaluationQueue.cs` | `TC-U-60` |
 
 **Five readings of the design were settled here, and each is now stated where it belongs** rather than only in the
 code: the dwell is measured against the evaluation instant while everything recorded is the sample's own instant
@@ -629,13 +721,13 @@ the critical window is consecutive, so one reading back inside the critical band
 triggering value and peak are read back from the stored readings of the dwell window instead of being kept in two
 more columns.
 
-**Two pieces of the design are deliberately absent.** Delivery: evaluation writes alerts and the dispatcher sends
-them (3.5), and `alertChanged` arrives with the lifecycle API in 3.4, so nothing is emitted to a client that could
-not act on it. And the per-device reorder window of `03-implementation/03` §5 / `02-design/03` §7 — a 30-second
-buffer ordered by `RecordedAt`: samples are evaluated in ingest order, which for a single node *is* `RecordedAt`
-order, but a second publisher or a broker redelivery could still arrive out of order and the id watermark cannot
-detect it. It is named here as open rather than implied, because building it would delay every evaluation by 30
-seconds and no test case demands it yet.
+**The live ordering window is now built; one durability gap remains.** `InProcessEvaluationQueue` holds samples for
+30 seconds, then releases them in per-device event-time/sequence order. `EvaluationState` persists the event-time
+watermark, so a sample older than the last evaluated event is skipped for live evaluation and remains queryable in
+telemetry history and summaries. Unit cases cover out-of-order arrival, independent device ordering, late samples,
+and event-time idempotency. The queue is still in memory, however: a process restart can discard queued work, and
+there is no startup replay yet. That restart-recovery guarantee remains open; alert delivery and client pushes
+continue to belong to 3.5 and 3.4 respectively.
 
 **Verification.** 545 unit tests (19 + 26 new; the scaffolding's evaluator tests were replaced by the ones that now
 cover the engine), 19 integration tests against SQL Server Express, `dotnet format
@@ -651,6 +743,345 @@ the margin resolved it as `Recovered` and cleared the state's pointer and excurs
 **second** row while the first stayed resolved; and the counters moved by exactly the two openings and the ten
 published samples, with no duplicate. The run used a one-minute dwell through an override (the seeded leopard
 gecko band asks for five) and deleted everything it created.
+
+---
+
+## M3 task 3.3 — the derived signals (built 2026-10-10)
+
+Silence is the one alert whose input is an *absence*: nothing arrives to trigger a pass, so that signal needed
+somebody to look at the fleet on a timer, where 3.2's engine could be queue-driven precisely because readings do
+arrive. The other two are the opposite — a fault and a clock problem both *announce* themselves — so they are
+decided in the pipelines that receive their evidence, inside the unit of work that stores it. Each rule is a pure
+function, which is what lets the boundaries be tested without a clock, a store or a wait.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `DeviceSilencePolicy` — `3 × samplingInterval` → Warning, 30 min → Critical, plus the threshold and the back-dating, as one pure function | `Domain/Devices/DeviceSilencePolicy.cs` | 9 `DeviceSilencePolicyTests` cases |
+| `SensorFaultPolicy` — BR-07.1's three consecutive failures, and the reading that a payload with no count is the device's own word | `Domain/Devices/SensorFaultPolicy.cs` | 9 `SensorFaultPolicyTests` cases |
+| `DeviceClockSkewPolicy` — what counts as a skewed sample (V-09's flag, which carries V-08's exclusion) and the hourly floor | `Domain/Devices/DeviceClockSkewPolicy.cs` | 4 `DeviceClockSkewPolicyTests` cases |
+| `DeviceSilenceAlertWriter` / `DeviceSignalAlertWriter` — the field-level changes each family can take, dependency-free | `Application/Devices/` | the monitor's and the recorder's tests, which assert the rows' fields |
+| `DeviceSilenceMonitor` — one sweep: `Online → Offline`, one back-dated alert, escalation in place, resolution when the device returns | `Application/Devices/DeviceSilenceMonitor.cs` | 9 cases, `TC-U-27` among them |
+| `DeviceSignalRecorder` — the fault from the event that reports it and the skew notice from the batch that shows it, both idempotent | `Application/Devices/DeviceSignalRecorder.cs` | 15 cases, `TC-U-28`/`TC-U-29` among them |
+| `IDeviceSilenceStore`/`IDeviceSignalStore` + their EF adapters — the fleet, the open entries and the last signal, in a handful of indexed lookups | `Infrastructure/Devices/` | the start-up run below |
+| `SilenceWatchdogWorker` — a `PeriodicTimer` at 30 s, `alerts_opened_total` by severity, a throwing sweep logged and left for the next tick | `Infrastructure/Devices/SilenceWatchdogWorker.cs` | the start-up run below |
+
+**The readings of the design settled here**, each now stated where it belongs: the silence alert is a device-level
+row whose value and band fields stay null (silence is not a reading, and a number for it would be invented) and
+whose `TriggeredAt` is back-dated to the instant the device should have been heard from, so the duration measures
+the outage rather than the sweep cadence; the state machine's `Online → Offline` edge and the read surface's badge
+go through the same `SilenceThreshold`, so they cannot disagree at the boundary; the **sensor-fault alert names its
+metric** where `02-design/02` §3.14 sketched `MetricId` as null — a deviation, recorded in `02-design/03` §4.3,
+because two dead probes are two entries and a device-level row names neither; a fault closes with `Recovered` and
+not `ResolvedReason.SensorFault`, which is the label for the opposite direction; and the clock-skew entry is one
+per episode, refreshed while the clock stays wrong, with V-09's hour as the floor for a *new* one.
+
+**What the signals deliberately do not do.** Nothing here sends anything — delivery is the dispatcher's (3.5), the
+same boundary the band engine keeps. `SensorFault` raises no threshold alert: the faulted reading carries quality
+bit 1, `QualityRules.IsEvaluable` excludes it, and "the probe is dead" is stated as itself rather than as an
+excursion. A device in `Maintenance` is not judged by the silence sweep, and an alert already open when it went in
+is not closed behind the owner's back. And none of this changes what is stored: the raw `DeviceEvent` row keeps the
+whole payload, so a rule that changes can be replayed against history by re-parsing it.
+
+**Verification.** 588 unit tests (42 new: 9 silence policy, 9 sensor-fault policy, 4 clock-skew policy, 9 silence
+monitor, 15 signal recorder — minus the two rewritten pipeline constructors), everything builds with no warnings,
+and `dotnet format --verify-no-changes --severity error` is clean. A start-up run against no database shows the
+watchdog registered and sweeping on its timer — `Silence watchdog started; sweeping every 30s`, then
+`The silence sweep threw; the next sweep retries` — which is the wiring check and, incidentally, the failure
+behaviour §02-design/03 §8 asks for: one unhappy sweep does not stop the watchdog. The live halves of `TC-I-09`
+(stop a node for five minutes, watch the Warning open and the badge go offline, resume, watch both close) and of
+`TC-U-28`/`TC-U-29` over a broker (publish a `sensor_fault`, publish a batch with a ten-minute skew) need the broker
+and SQL Server together and are the next run to record.
+
+---
+
+## M3 task 3.4 — the alert lifecycle, the silence windows and `alertChanged` (built 2026-10-10)
+
+FR-12's API and FR-13's suppression are built: an alert can be listed, paged, read with an excerpt of the values it
+was judged on, acknowledged, resolved and followed on a timeline; a keeper can silence a metric — or the whole
+terrarium — for at most a day with a reason on record; every one of those actions writes an audit row in the same
+transaction as the change; and every alert that opens, escalates, is acknowledged or is resolved is pushed to the
+clients watching that terrarium.
+
+**What is where.** `Domain/Alerts/AlertLifecycle.cs` decides the transitions and `AlertService` orders them around
+the decision; `Domain/Alerts/MetricSilence.cs` + `MetricSilencePolicy.cs` hold the window and its cap, with
+`MetricSilenceService` creating, listing and cancelling; `IAlertStore` and `IMetricSilenceStore` are the ports and
+`Infrastructure/Alerts/` the EF adapters; `Api/Endpoints/AlertEndpoints.cs` maps the five alert routes and the three
+silence routes, with ack, resolve and both silence writes naming the `Technician` policy. `alertChanged` is pushed
+from four places, each **after** the commit that wrote the alert: `EvaluatorWorker`, `SilenceWatchdogWorker`,
+`IngestOutcomeRecorder` (the clock-skew entry and the sensor fault, whose producers return moves on their outcomes
+instead of holding a hub) and `AlertService` itself.
+
+**The readings this build settles**, each stated in the document that owns it rather than only in the code:
+
+1. **A hand resolution re-arms the dwell key.** Closing a threshold alert clears the `EvaluationState` window for
+   `(terrarium, metric, phase)` without touching the watermark. Without that step a value that never came back inside
+   its band would satisfy a dwell that had already expired and re-open the alert on the very next sample — a keeper
+   who chose `Accepted` would be told the same thing one interval later. Deliberate, longer suppression is the
+   silence window's job (`ADR-023`), and the two mechanisms stay explicitly different: a resolve ends an episode, a
+   silence stops the telling.
+2. **A silence suppresses notification, not detection.** Alerts are still raised, touched and resolved during one;
+   what a window removes is the telling (`02-design/05` §4's `silenced_metric`), which the dispatcher of 3.5 reads
+   through the same `IsActiveAt`/`Covers` pair the list endpoint renders.
+3. **The keeper's note lives on the audit entry.** `{reason, note?}`: the reason is a column the report groups by, the
+   note is prose the alert row has no column for — `Alert.Message` is reserved for render-time notification text.
+4. **A second acknowledgement is `409 alert_not_open`**, the same answer a resolved alert gives: in both cases the
+   request changed nothing, and one code is one thing for a client to handle.
+5. **`GET /alerts` is the first endpoint to implement the documented paging convention** (`?cursor=&pageSize=`,
+   default 50, max 200, `nextCursor`), ordered `TriggeredAt DESC, Id DESC` with an opaque `triggeredAt|id` cursor, so
+   paging over a table that keeps receiving rows neither repeats nor skips one.
+6. **The detail carries no snapshot reference**, although §4.5 lists one: `Alert.ThresholdSnapshotId` is a sketch that
+   no built table has (`07-appendices/02` §3.8 now says so) and the band the alert denormalised is what explains it
+   today.
+7. **`MetricSilence.Id` is a `Guid`** rather than an identity column, because the key is known before the insert and
+   that is what lets the audit row name the window in the same unit of work.
+8. **`alertChanged` speaks the REST vocabulary** (`Open`, `Warning`, `tempC`) with lower-case move names
+   (`opened`, `escalated`, `acknowledged`, `resolved`), and a *touch* is not announced at all — the documented event
+   reports lifecycle moves, and once per sample would be noise rather than news.
+
+**Deliberately not built.** Notification delivery (3.5), the audit query endpoint (3.7) and every export: this task
+writes the trail, it does not read it. Escalation entries are absent from the timeline for the design's own reason —
+§02-design/05 §6 records escalations as `NotificationLog` rows, so they arrive with 3.5 — and the alert row keeps no
+escalation instant because escalation edits it in place (DI-01 keeps one row per episode). **Built on 2026-10-16**:
+3.5 landed, so the timeline now carries the `notified` entries this block deferred to it (see the 3.5 block below).
+
+**Evidence.** 638 unit tests (50 new: 9 lifecycle transitions, 11 silence-window rules, 18 alert-service, 13
+silence-service, plus the assertions the new outcome fields made necessary), five new integration cases over real SQL
+Server — EF scoping across accounts, the soft-delete filter reaching an alert through its terrarium, the cursor
+predicate, one transaction that leaves row + re-arm + audit together, and the silence round trip — a `Release` build
+with no warnings and `dotnet format --verify-no-changes --severity error` clean on both projects.
+
+**Live checks (2026-10-10; the API started headlessly against no SQL Server, which is what makes these route checks
+rather than data checks).** `GET /api/v1/alerts` without a token → `401 unauthenticated`. With a **Viewer** token,
+`POST /alerts/1/ack`, `POST /alerts/1/resolve`, `POST /terrariums/{id}/silences` and
+`DELETE /terrariums/{id}/silences/{id}` all answer `403 insufficient_role` — the RBAC half of `TC-U-36`, measured
+rather than assumed. A bad `state` filter, a made-up cursor and an unknown resolve reason answer `400`
+(`validation_failed`, `invalid_cursor`, `validation_failed`) **before** any database call, which is why they are
+provable without one. With a Technician token every handler runs and fails only on the absent SQL Server
+(`500 internal_error`, not the `404` a missing route would give). `swagger.json` now carries **35 operations, 22 of
+them requiring the bearer scheme** — the 14 that already did plus all eight new ones — and the seven new paths are
+documented with the right verbs. The data halves of `TC-I-07` (ack, then resolve, then a second ack refused, with the
+audit rows) need SQL Server and join the 3.3 live runs as the next thing to record.
+
+---
+
+## M3 task 3.5 — the notification layer (built 2026-10-16)
+
+M3's DoD is one induced excursion producing "exactly one alert **and one notification**"; the alert half has been
+real since 3.2, and this is the half that tells a keeper. It was built as two pure functions plus one sweep, because
+"why was I not told" is a question about rules and the sweep is the only part that can be wrong in a way rules cannot
+see.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `NotificationPolicy.Judge` — §4's whole matrix as one static function: recovery notice, silence, maintenance, severity floor, quiet hours (Critical bypasses), the cap | `Domain/Notifications/NotificationPolicy.cs` | 13 `NotificationPolicyTests` cases |
+| `NotificationCadence` — the 60-minute repeat cooldown, the 10-per-hour cap, BR-13.5's 5 s / 30 s / 2 min backoff, §6's 30 / 60 / 120 minute ladder | same file | 11 more cases, including the `t, t+5, t+35, t+155` schedule |
+| `NotificationDigest.Summarise` — "8 alerts (7 warnings, 1 critical), worst temperature 34.2 °C" | same file | `TC-U-45` |
+| `NotificationLog` — one row per dispatch attempt, which is the delivery record *and* the in-app inbox | `Domain/Notifications/NotificationLog.cs` | the store round trip + the live run |
+| `NotificationText` — §7's content contract in two decks (`Resources/NotificationStrings{,.vi}.resx`, ADR-013), rendered for the recipient's language | `Application/Notifications/NotificationText.cs` | `TC-U-42`, plus the live run's Vietnamese entry |
+| `NotificationDispatcher` — one pass over the alerts that could owe a message: verdict, step, channel, retry, digest | `Application/Notifications/NotificationDispatcher.cs` | 22 cases |
+| `INotificationStore` / `INotificationChannel` — the two seams, so the policy runs with no SQL Server and no network (§02-design/05 §8) | `Application/Abstractions/` | the fakes and the EF adapter's own integration cases |
+| `EfNotificationStore` — candidates, the hourly tally, the digest's grouping, the inbox, the two `ExecuteUpdate` writes | `Infrastructure/Notifications/EfNotificationStore.cs` | 5 integration cases over real SQL Server |
+| `FcmNotificationChannel` — HTTP v1, `ServiceAccountAssertion` (RS256), `UNREGISTERED` switching the channel off | `Infrastructure/Notifications/` | the assertion's signature test; the delivery path needs a credential and a device token |
+| `SmtpNotificationChannel` — the out-of-band channel, off by default, on against Mailpit in the development stack | `Infrastructure/Notifications/SmtpNotificationChannel.cs` | the 120-minute step's channel selection; a live relay needs Compose |
+| `NotificationDispatcherWorker` — a 15 s `PeriodicTimer`, counters, a throwing sweep logged and left for the next tick | `Infrastructure/Notifications/NotificationDispatcherWorker.cs` | the live run below |
+| `NotificationInboxService` + three routes: `GET /notifications`, `POST /notifications/{id}/read`, `POST /notifications/read-all` | `Api/Endpoints/NotificationEndpoints.cs` | the live run below |
+
+**Six readings of the design settled here, each stated where it belongs.**
+
+1. **The dispatcher sweeps; it does not subscribe.** §4's flowchart starts from an "alert event", but four writers
+   move an alert — `SampleEvaluator`, `SilenceWatchdogWorker`, `DeviceSignalRecorder` and `AlertService` — and they
+   live in three layers, so an event bus would mean every one of them learning about notifications. The database is
+   the only place that sees all four, and a sweep is idempotent in a way an event is not: whatever a crash lost, the
+   next pass re-derives from the same rows. The price is latency, bounded by the 15 s interval — far inside the 90 s
+   `TC-E2E-03` allows.
+2. **One row per attempt, not one row per notification.** `07-appendices/02` §1 says "one dispatch attempt per row"
+   and `TC-I-12` says "rows per attempt", so a refused push leaves three rows and the *spacing* is the evidence that
+   BR-13.5's backoff happened. A sending *state* is therefore derived, not stored: "already sent", "retry due" and
+   "the schedule is over" are all read off the rows.
+3. **`NotificationLog.Step` is a column the design sketch did not have.** §6 wants "the full response timeline of one
+   incident" out of these rows, and the alert row keeps no escalation instant by design; without the step, a
+   30-minute escalation and an hourly repeat are both just "a second `Sent` row", so a timeline could not be
+   assembled and the ladder could not advance exactly once. The column is the smallest thing that makes §6's own
+   sentence possible, and the timeline now reads it: `GET /alerts/{id}/timeline` gained a `notified` entry carrying
+   the channel, the step or the suppression, and what was actually said.
+4. **The hourly cap rations the noise, not the record.** §5 asks the eleventh notification of an hour to become a
+   digest entry **and** the alert to stay visible in the inbox, so the cap is applied per push and email channel and
+   the in-app row is exempt. Counting inbox rows against the budget would let a screen nobody can hear spend it.
+5. **Quiet hours are judged in the recipient's zone** (`User.TimeZoneId`), and a window whose ends are equal is no
+   window at all: the profile route already refuses half a pair, so `22:00–22:00` can only be a typo, and reading it
+   as "never notify" would turn that typo into a silent alarm system. A send that bypassed the window keeps
+   `bypassed_quiet_hours` on its own row, which is what `TC-U-38` asks the record to show.
+6. **The digest's identity is the instant it records** — the top of the hour it covers — so "has this hour been
+   digested" is an equality test rather than a second table or a scan through a window. A digest names no alert
+   (`AlertId` is null), which is exactly what distinguishes it from the rows it summarises.
+
+**The 2026-10-07 decision is settled: the development stack runs Mailpit.** `ADR-021` dropped Telegram, which left
+`R-13` without an out-of-band channel on demo day, and 3.5's note deliberately deferred the choice between adding a
+local SMTP sink and accepting the inbox as the only proof. `docker-compose.yml` now runs **Mailpit** beside the API
+(the UI on the host's loopback, port 8025), the API points at `mailpit:1025` when `EMAIL_ENABLED=true`, and
+`appsettings.Development.json` switches it on for a local run. That is what `TC-I-12` means by "a local SMTP sink",
+and it makes §6's 120-minute step demonstrable offline. FCM stays off until a service-account file is mounted
+read-only at `/secrets` — the push channel is real code and a registered-but-uncredentialed deployment records
+`no Fcm channel is configured` rather than pretending it delivered.
+
+**What is still open in 3.5, named rather than implied.** Real FCM device receipt is now verified, but the observed
+delivery took 113 s after the dispatcher recorded `Sent`; the ≤90 s timing in `TC-E2E-03` is not yet demonstrated.
+That end-to-end case also still needs the full excursion, critical escalation and recovery sequence. Two product
+gaps stay as they are: escalation step 2 and 3 notify the owner only, because the product has one account per
+enclosure and §6's "notify them" for a Technician is satisfied by the 30-minute step; and a recovery notice is
+always withheld with `preference`, because v1 has no opt-in column for one — the record says so rather than
+pretending the notice was attempted.
+
+**Evidence.** 882 unit tests (37 new: 24 domain, 12 dispatcher, 1 assertion signature), a `Release` build with no
+warnings, and **5 integration cases** over real SQL Server for the store's joins, window and writes (41 of the suite's
+42 green at the time — the one red case was the cursor-paging expectation `TASKS_2026-10-14` recorded as pre-existing
+on 2026-10-15, corrected 2026-10-17; the suite of 55 is now green).
+`dotnet ef migrations add AddNotificationLog` produced `20261016143949_AddNotificationLog`, and it was applied to a
+scratch database through the application's own `DatabaseInitializer`.
+
+**Live run (2026-10-16, API headless against SQL Server Express, database created by the run itself).** The API came
+up with **four workers**, including `Notification dispatcher started; sweeping every 15s`, and applied all twelve
+pending migrations plus `AddNotificationLog`. A registered Owner created a terrarium named "Linh's gecko box" and an
+open temperature alert was seeded directly (33.4 °C triggering, 34.2 °C peak, band 28–32 °C, opened ten minutes
+earlier). Within one sweep the dispatcher wrote exactly one row and `GET /api/v1/notifications` answered with it:
+`unread: 1`, `title: "Linh's gecko box · Nhiệt độ quá cao"`, `body: "34,20 °C (ngưỡng 28,00–32,00 °C), vượt ngưỡng
+10 phút"`, `deepLink: smartreptile://alerts/1` — the Vietnamese satellite deck, the peak rather than the trigger,
+and the band, which is §7's contract measured rather than asserted. `GET /api/v1/alerts/1/timeline` then carried
+`{"event":"notified","reason":"InApp: sent"}` beside the `opened` entry, and `/metrics` reported
+`notifications_sent_total: 1`. `POST /notifications/1/read` answered `204` (and a second call `204` again, so the
+idempotence holds against the real `ExecuteUpdate`), an id that is not the caller's answered `404 not_found`,
+`POST /notifications/read-all` answered `{markedRead: 0}` once nothing was unread, and a second full sweep left the
+table at **one row** — the sweep's idempotence, measured. Two runs of this pass also found and fixed a real defect:
+the worker's *first* sweep ran before `DatabaseInitializer` had created the schema and logged a failed query, which
+is why the first tick now waits one interval, the same shape the silence watchdog uses.
+
+---
+
+## M3 task 3.6 — the summary pipeline and the two SHOULD signals (built 2026-10-19)
+
+The milestone's last functional gap. The pipeline itself landed earlier the same day — rollups, daily summaries and
+the exposure maths — and this pass closed the three acceptance holes the first pass had named rather than implied.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| Hourly rollups and local-date summaries, rebuilt from raw readings | `Domain/Summaries/{TelemetryHourlyRollup,DailyEnvironmentalSummary,MetricGridSummary,ExposureCalculator}.cs`, `Infrastructure/Summaries/{SummaryRecomputer,SummaryWorker}.cs` | `TC-U-46…50` (24 cases) + `SummaryRecomputationTests` |
+| `GradientWarning` — `SurfaceTempC − TempC > 12 °C`, decided per sample because the evidence is one instant's pair of readings | `Domain/Signals/GradientWarningPolicy.cs`, `Application/Signals/HabitatSignalAlertWriter.cs`, called from `SampleEvaluator` | `TC-U-30`: 6 policy cases + 5 evaluator cases |
+| `LightDeficit` — accumulated light-hours against the profile requirement, judged once per local day at 21:00 | `Domain/Signals/LightDeficitPolicy.cs`, `Application/Signals/{LightDeficitMonitor,ILightDeficitStore}.cs`, `Infrastructure/Signals/{EfLightDeficitStore,LightDeficitWorker}.cs` | `TC-U-31`: 6 policy cases + 7 monitor cases |
+| The `daily` fixture through evaluator **and** summariser under one fake clock | `tests/SmartReptile.Tests.Integration/EvaluationThroughPipelineTests.cs` | `TC-I-06`: one alert, back-dated, with its peak; rollup `33.667 °C` / `1.666667 °C·h`; day `27.152 °C` / `1.6667 °C·h`, one counted episode |
+
+**Three readings settled here, recorded so they are not rediscovered.**
+
+1. **A derived signal's dedupe key names its source.** `Alert.DedupeKeyFor` gained an optional `AlertSource`, and the
+   four derived signals pass it, so a `GradientWarning` on `SurfaceTempC` and a surface *band* alert can both be open
+   for one severity and phase. The band alerts' three-segment key is unchanged byte-for-byte, so no stored row is
+   rewritten and no migration is needed. This also closed a pre-existing collision: a humidity `SensorFault` and a
+   humidity band alert wanted the same key on the seeded `Any`-phase band, and the second insert would have been
+   refused by the filtered unique index.
+2. **The light rule is an accumulation, not an instantaneous limit.** It is judged from 21:00 local — inclusive, so
+   the boundary is decidable — over the minutes from local midnight, and it raises no per-sample light alert. The
+   hours come from the same `MetricGridSummarizer` pass the daily summary uses, and the deficit is rounded to the
+   stored column's `decimal(8,3)` scale, so the alert and `DailyEnvironmentalSummary.LightDeficitHours` cannot
+   disagree about the number a keeper is shown.
+3. **The fixture is the whole local day, not just the excursion.** The reference dataset says "otherwise in range,
+   no gaps", and taking that literally is what makes the daily average hand-computable: a boundary-only fixture is
+   averaged together with the minute grid's three-minute hold-over, and the night phase needs its own in-range value
+   because 30 °C is out of band under the 22–27 °C night rule.
+
+**Evidence.** 977 unit tests (25 new: 6 + 6 policy, 7 monitor, 5 evaluator, minus the three dedupe-key assertions
+the source suffix changed) and 55 of 57 integration cases green — the two red ones are the pre-existing
+species-citation gate failures (`BandsAwaitingVerification` 19 vs 16 and the `your-org` placeholder links), which are
+tasks 1.8 and 3.8 and untouched here. `dotnet format --verify-no-changes` clean on every new and changed file, and
+`dotnet ef migrations has-pending-model-changes` reports no model change: this task added rules, not columns.
+
+---
+
+## The re-framing — the permission matrix as data, the two alert families, and the administrator's dashboard (built 2026-10-17)
+
+The 2026-10-14 review's last three items were one request in three parts: **two separate alert families** (the
+enclosure's humidity and light versus the animal's temperature), **a `Role` table** that says which data a role
+reaches, and **an administrator dashboard** with get-all, account CRUD and the API wired into it. The first two are
+model changes and the third is the surface they make possible, so they were built together.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| `Permissions` — the sixteen codes the software implements, in six groups, with `CrossesAccounts` marking the two that reach past an account | `Domain/Identity/Permissions.cs` | `AlertFamilyTests`' dictionary cases, `RoleAdminServiceTests`, the live token's claim set |
+| `Role` / `Permission` / `RolePermission` + `SystemRoles` with the four ids fixed in code and the shipped grants | `Domain/Identity/Role.cs` | `IdentitySeederTests` (integration) |
+| `AddPermissionPolicies()` — one policy **per permission code**, named by every route; `PrincipalExtensions.HasPermission` | `Api/Security/{AuthorizationPolicies,PrincipalExtensions}.cs` | the live run: 16 claims for `Admin`, 11 for `Owner`, `403` for a `Viewer` on every write |
+| `IdentitySeeder` — reconciles the catalogue and the four roles on every start-up, writes a grant **only** when it creates the role | `Infrastructure/Persistence/IdentitySeeder.cs` | 4 integration cases, including "a grant an administrator removed is not restored" |
+| `UserAdminService` rewrite — create, edit, reset-password, change role, disable, enable, soft and hard delete, with the two guards | `Application/Identity/UserAdminService.cs` | 21 `UserAdminServiceTests` cases; the live CRUD round trip |
+| `RoleAdminService` + `/api/v1/admin/roles` + `/api/v1/admin/permissions` — the matrix as an editable surface | `Application/Identity/RoleAdminService.cs`, `Api/Endpoints/RoleEndpoints.cs` | 25 `RoleAdminServiceTests` cases; live: create → edit → delete, and `409` for a system role |
+| `AdminService` / `EfAdminStore` / `AdminEndpoints` — the get-all dashboard, four routes | `Application/Admin/*`, `Infrastructure/Admin/EfAdminStore.cs`, `Api/Endpoints/AdminEndpoints.cs` | 13 `AdminServiceTests` cases and 6 `AdminStoreTests` integration cases; the live overview |
+| `AlertFamily` — the family on the metric dictionary, persisted on `Alert`, exposed on every alert and on `alertChanged`, filterable with `?family=` | `Domain/Alerts/AlertFamily.cs`, `Domain/Metrics/MetricDictionary.cs`, migration `20261016162814_AddAlertFamily` | 24 `AlertFamilyTests` cases, the evaluator case, and the live filter |
+| Web: `AdminOverview` / `AdminAccounts` / `AdminRoles` + `hasPermission` in the session, and the three `role === 'Owner'` gates replaced by permission checks | `web/src/pages/`, `web/src/state/session.tsx` | `tsc`, `vite build` and the project's i18n gate |
+| App: the admin hub, overview, accounts and roles screens, gated on permission codes | `app/lib/screens/{admin_hub,admin_overview,accounts,roles,admin_lists}_screen.dart` | `flutter analyze`, `flutter test` |
+
+**Six decisions, each stated where it belongs.**
+
+1. **The catalogue stays in code and the mapping becomes data.** A permission the software does not implement cannot
+   be granted by inserting a row, so the sixteen codes are constants; the *assignment* of codes to roles is a
+   deployment's policy decision, so it lives in `RolePermission` where an administrator can edit it and an audit row
+   can record who did. This is the line the reframing draws, and it is why the console can offer a new custom role
+   with no release.
+2. **Own-data versus any-data is two permissions, not a scope column.** "Admin sees everything" is expressed as
+   `data.read.any`/`data.write.any`, which the `Admin` seed holds and no other role does. A scope flag on the role
+   would have been one bit with no room for the case the product actually has — `species.read` is cross-account for
+   every role while `terrarium.read` is not — and it would have made the answer to "which data does this role map
+   to" a sentence in a service instead of a property of the set.
+3. **There is still no membership table** (the user's `dataScope=global` answer, and `L-07` in `05-release/03`).
+   Ownership is `Terrarium.UserId` and every keeper query is scoped to it; the cross-account case is a *separate*
+   store with no owner parameter rather than a flag on the keeper's own query, so a widened read has to be written
+   somewhere a reader can see it. `TerrariumAccessRequirement` from the design's sketch is therefore still not
+   needed, and `OwnerOrAdmin` is deleted: `Admin`'s seed is a superset of `Owner`'s by construction.
+4. **Permissions travel in the token; staleness is bounded and documented.** One `perm` claim per code, plus `role`
+   for display only, and `ver` bumped to `2`. A role change, a password reset and a delete end the account's refresh
+   tokens; an edit to a role's *permission set* does not, so a revocation takes effect within one access-token
+   lifetime (15 min) and the console says so rather than implying it is instant.
+5. **The seeder is asymmetric on purpose.** A missing role is created **with** its shipped grants and an existing
+   grant is never re-applied, because an administrator who removed `audit.read` from `Technician` has made a
+   decision a restart must not undo. A permission added in a later release is inserted so the console can show it and
+   is granted to nobody, since widening a role's reach is not a decision a start-up may take.
+6. **The family is a property of the metric, and it is stored.** `MetricDefinition.Family` is the one place the split
+   is written down; `Alert.Family` is denormalised for the same reason `BandMin`/`BandMax` are, and for one more:
+   silence, a sensor fault and a clock skew have no metric, and the board's condition is the enclosure's business
+   rather than the animal's. A client routes its two views off the stored column, not off a table of metric keys it
+   would otherwise have to carry.
+
+**One implementation lesson worth keeping.** A projection into a **record constructor** cannot be ordered or filtered
+by the query provider — it inlines the constructor into the `WHERE`/`ORDER BY` and then fails to translate, which is
+what the first version of `EfAdminStore` did, and the failure is a runtime `InvalidOperationException` rather than a
+compile error. Every cross-account query now selects an **anonymous type** and maps to the response record after
+materialisation, and the filtering happens on the entity before the projection. `EfAdminStore`'s own header says so,
+because the next person to add a column will otherwise repeat it.
+
+**Evidence.** **947 unit tests** (up from 882 when 3.5 landed: the new suites are `RoleAdminServiceTests`,
+`AdminServiceTests`, `AlertFamilyTests`, plus cases added to `UserAdminServiceTests`, `JwtAccessTokenServiceTests`,
+`AuthServiceTests`, `AuditEntityTests` and `SampleEvaluatorTests`) and **55 integration cases** (up from 42:
+`IdentitySeederTests`, `AdminStoreTests`, `AccountReadTests`). `Release` builds with no warnings and both
+`dotnet format --verify-no-changes --severity error` gates are clean. Two migrations were added —
+`20261016161825_AddRolesAndPermissions` and `20261016162814_AddAlertFamily` — and both were applied from scratch,
+plus reverted and re-applied, against real SQL Server Express; a restored copy of the pre-change database showed the
+back-fill holding (`0→Owner, 1→Technician, 2→Viewer, 3→Admin`, identical after a `Down`/`Up` round trip).
+
+**Live run (2026-10-17, API headless, a database created by the run itself).** All **14** migrations applied on a
+fresh database and the seeded administrator came back as `role Admin`. `POST /auth/register` produced an `Owner`,
+whose token carried **11** permission claims against the administrator's **16**; `/auth/me` returned `roleId` and the
+same list. `/admin/overview` answered `accounts 3, terrariums 1 (1 with a board), devices 1 online, alertsOpen 2 (1
+enclosure + 1 species), 1 critical, speciesProfiles 4`, with each account's holdings and both families' metric keys
+beside their open counts. `/admin/terrariums`, `/admin/devices` and `/admin/alerts?family=` answered the enclosure
+with its owner, the board with its health, and the alert rows split correctly (`?family=species` returned the two
+`tempC` rows only, `?family=habitat` was `400 family_invalid`). A keeper's token got `403` on all five
+administrative routes. The account surface round-tripped end to end: create → `201` with the role's permission set,
+`PATCH role` → the set changed, `PATCH role=NoSuchRole` → `400 role_invalid`, disable → login `401`, enable → login
+`200`, reset-password → the new password worked, soft delete → `200`, `?purge=true` → `200` and a later read `404`,
+self-edit → `409 self_change_refused`. The role surface: create → `201`, edit → `200` with the grant set replaced,
+delete a system role → `409`, delete a custom role → `200`, delete it again → `404`.
+
+**Two defects the live run found, both fixed here.** The account list answered **zero permissions** for every row —
+`EfUserStore` loaded `Role` but not its grants, so `UserSummary.Permissions` was empty for every account, which a
+client reads as "this account can do nothing"; `Filtered`, `FindUserAsync` and `FindUserByIdAsync` now load both, and
+`AccountReadTests` pins it against real SQL Server. And the role list reported **0 holders** for every role, because
+the list deliberately passed no count at all; `IUserStore.CountUsersByRoleAsync` now reads them in one grouped query,
+so the figure an administrator uses to decide whether a role can be deleted is real.
 
 ---
 
@@ -686,11 +1117,57 @@ the mock data does, not before.
 | 4.13 | Decide the prototype's fate in an ADR: wire TERRAGUARD to the real API and retire `web/legacy/`, or keep it as a mock-data reference and finish the static dashboard | web/doc | ADR appended; `02-design/04` §1.2, `05-release/01` §5 and this table agree with the decision |
 | 4.14 | Prototype honesty and single-source pass: mark the UI as mock data, reconcile `web/src/index.css`'s status→colour palette with `02-design/04` §3 (or state why it differs), and decide the Vietnamese-only copy | web | `TC-I-15` either covers the prototype or its exclusion is written into `04-quality/01`; no second palette is left undocumented |
 | 4.15 | **Promotion, stage 1 — API client, session and auth screens** (`ADR-019`): an `api` module owning the base URL, token storage, refresh-on-401 and typed errors; `Login.tsx` plus both recovery forms wired to `/auth/*`; a route guard on the shell | web | **Done 2026-10-07.** `web/src/api/{client,endpoints,types}.ts` (single-flight refresh-on-401, `ApiError` carrying `code`/`status`/`detail`/`errors[]`), `state/session.tsx` (profile re-read from `GET /auth/me`, not trusted from storage), the four auth modes in one `Login.tsx`, and `RequireSession` around the shell. Every refusal renders from a code via `lib/messages.ts`; a session the transport could not rotate reports `sessionExpired` instead of bouncing silently; the three invented statistics and the `alert()` "contact an administrator" placeholder are gone |
-| 4.16 | **Promotion, stage 2 — wire the read surface**: `Dashboard.tsx`, `History.tsx`, `Terrariums.tsx`, `TerrariumDetail.tsx` against `/terrariums`, `/terrariums/{id}`, `readings/latest`, `readings` and `coverage`, polling until 2.9; delete `mockData.ts`'s `Terrarium`/`Device`/`HistoryDataPoint` shapes | web | **Done 2026-10-07** for the four screens, verified live: 5 metric cards, coverage `0.42%` (6 of 1440 expected) and a gap-aware history chart, all from the API on a terrarium created and fed through `/ingest/http` for the check. `mockData.ts` keeps `Device`/`AlertItem` for the three 4.20 screens; its `Terrarium`/`ThresholdConfig`/`HistoryDataPoint` shapes are deleted. **Create is not wired**: `POST /terrariums` needs a `speciesProfileId` and the species-profile catalogue route does not exist, so the list says so rather than inventing one |
+| 4.16 | **Promotion, stage 2 — wire the read surface**: `Dashboard.tsx`, `History.tsx`, `Terrariums.tsx`, `TerrariumDetail.tsx` against `/terrariums`, `/terrariums/{id}`, `readings/latest`, `readings` and `coverage`, polling until 2.9; delete `mockData.ts`'s `Terrarium`/`Device`/`HistoryDataPoint` shapes | web | **Done 2026-10-07** for the four screens, verified live: 5 metric cards, coverage `0.42%` (6 of 1440 expected) and a gap-aware history chart, all from the API on a terrarium created and fed through `/ingest/http` for the check. `mockData.ts` keeps `Device`/`AlertItem` for the three 4.20 screens; its `Terrarium`/`ThresholdConfig`/`HistoryDataPoint` shapes are deleted — the last of them on 2026-10-13, when `Settings.tsx`'s mock threshold form (the only remaining consumer of `initialTerrariums`, and of `generateHistoryData` through `HistoryDataPoint`) was deleted rather than left beside the real editor. **Create was not wired until 2026-10-13** — `POST /terrariums` needs a `speciesProfileId` and no route listed one, so the list said so rather than inventing an id. With the catalogue built (3.9) the panel is wired: `Terrariums.tsx` opens an Owner-only form whose species picker is filled from `GET /species-profiles`, sends `name`/`speciesProfileId`/`location`, and reloads the list on success. Verified in a real browser against the running API and SQL Server: the panel listed the four seeded profiles by name and scientific name, the create answered `201`, the new card appeared with its species and location, and the row carried the chosen `SpeciesProfileId` and the deployment's default zone |
 | 4.17 | **Promotion, stage 3 — the verdict comes from the server, not the screen (ADR-005)**: card status and band from `readings/latest`; no threshold comparison anywhere in TSX | web | **Done 2026-10-07.** `components/MetricCard.tsx` renders `status`, `target` and `capturedAt` as sent; `lib/status.ts` maps the five API values to a label and a colour and holds the only vocabulary. `grep -rn "target\|status" web/src --include=*.tsx` finds no comparison of a value against a bound; the one comparison left is §6's staleness age against `3 × samplingIntervalSec`, which is a comparison of *ages* |
 | 4.18 | **Promotion, stage 4 — make it shippable**: vi+en key set shared with the app, `02-design/04` §3 tokens at ≥ 4.5:1, `tsc`/`vite build`/key-parity in CI, and `MockDataNotice` removed | web | **Done 2026-10-07, with one part deferred and said so.** Both clients now read `app/lib/l10n/app_{en,vi}.arb` (164 keys, vi+en identical, checked by `web/scripts/check-strings.mjs` in the new CI `web` job with `tsc` and `vite build`); the palette is §3's four roles with hues measured on this client's surfaces (`web/src/index.css` records both sets, including §3's failing 3.30/3.01/2.73); the notice is rendered only on the three screens still on mock data. "The notice is gone because no screen renders mock data" cannot be true while 4.20 is blocked by missing endpoints — it goes when the mock data does |
 | 4.19 | **Promotion, stage 5 — switch the surface and retire `web/legacy/`**: single nginx mount, wallboard rebuilt as a React route, BUG-03 regression pair replaced, `web/legacy/` and its compose mount deleted | web | **Done 2026-10-07.** `web/nginx.conf` serves one mount (`/srv/app`) with the SPA fallback; `docker-compose.yml` mounts only `web/dist`; `web/legacy/` (8 files) is deleted; `web/dist` is rebuilt and committed. Verified through the real nginx config: `/` 200 with the hashed bundle, `/wallboard` 200 and `/dashboard` 200 through the fallback, assets 200, and no runtime error on any page. **The wallboard page was new work** (W1 was not one of the prototype's eight screens) and the legacy `health.html` diagnosis became `/system`, because a retirement that loses a function is a regression |
-| 4.20 | **Promotion, stage 6 — wire the remaining screens as their endpoints land**: `Devices.tsx` (device read routes), `Alerts.tsx` (3.4), the threshold editor (3.1 — its read half landed 2026-10-09, so the editor can now show the effective band per metric and where it came from; saving still waits for the write half), `Settings.tsx` (`PATCH /auth/me`), report/export (3.6), and the live subscription of 2.9 | web | Each screen's acceptance is the matching M2/M3 task's; no screen is wired ahead of its endpoint, and a screen still on mock data carries the notice |
+| 4.20 | **Promotion, stage 6 — wire the remaining screens as their endpoints land**: `Devices.tsx` (device read routes), `Alerts.tsx` (3.4), the threshold editor (3.1 — both halves built as of 2026-10-13, so the editor shows the effective band per metric, where it came from, and can change it), `Settings.tsx` (`PATCH /auth/me`), report/export (3.6), and the live subscription of 2.9 | web | Each screen's acceptance is the matching M2/M3 task's; no screen is wired ahead of its endpoint, and a screen still on mock data carries the notice. **The threshold editor was wired 2026-10-13**, the day 3.1's write half landed: `TerrariumDetail.tsx` gains a `ThresholdsSection` that reads `GET /terrariums/{id}/thresholds` and, for an Owner, writes `PUT /terrariums/{id}/thresholds` and `DELETE /terrariums/{id}/thresholds/{metric}`; every row renders the band, its `source` (`profile` / `override` / `default`), the phase it applies to and `capturedAt`. Two readings were settled there and belong to the client, not the API: **there is no phase picker** — a row *is* the band in force, so a write is addressed to the phase the row displays — and **an empty critical cell means "not configured" (`null`), not `0`**. Verified live in a real browser against the running API and SQL Server: the form pre-filled from the profile's band, an override save came back with `source: override` and a new band, an incoherent band was refused with the API's own field sentence rendered at the offending input, and "Bỏ ghi đè" gave the profile's band back (the draft then shows no `override` rows and the database holds no `ThresholdOverride` for that metric). The mock threshold form in `Settings.tsx` was deleted in the same change and the section now links to the terrarium list: its Save button only ever mutated local state, which teaches the opposite of what the editor does |
+| 4.21 | **The catalogue's screen** (FR-10): `SpeciesProfiles.tsx` — the built-ins and the account's own profiles with their bands, and, for an **Admin**, create, edit, duplicate and delete | web | Every write is one of 3.9's own routes, and a refusal is rendered from its code. **Built 2026-10-13**, the day the routes landed, because they had one caller — the terrarium picker — so a keeper could choose a profile and not author one, and every band that did not match a built-in had to become a per-terrarium override. **The gate moved from `Owner` to `Admin` the same day** (the routes went with it; `02-design/06` §3, 3.17 in `04-quality/03`): the catalogue is shared data, so the keeper who may re-band their own enclosure may not rewrite the built-ins every terrarium is judged against, and the screen's `canWrite` follows the routes rather than the other way round. Three readings, recorded here because they are the client's, not the API's: **a built-in offers only *Duplicate*** (`403 builtin_immutable` is the server's answer and FR-10 A2 is the rule, so the hint that says to copy it is more honest than a button whose only outcome is a refusal); **an emptied scientific name or note clears the field** — the patch travels `''`, never `null`, because a `null` member and an absent one are the same thing once the body is bound and both mean "leave it alone"; and **the metric and climate-zone lists are the client's copy of the contract's own** (the dictionary's seven keys, §4.3's four zones), because no route publishes either, while the server stays the one that judges them (`metric_invalid`, `climate_zone_invalid`). Verified live in a real browser against the running API and SQL Server: the four seeded profiles rendered as *Hồ sơ gốc* with their bands and husbandry fields; a create landed with the chosen zone, photoperiod and light hours and one band; an edit moved a band and added a second (`2 dải`); a duplicate appeared beside its source and a delete removed it; deleting a profile a terrarium uses rendered *Đang có bể nuôi dùng hồ sơ này nên chưa xoá được.* from `409 profile_in_use`; an inverted band was refused with the server's own field sentences and the offending input outlined and `aria-invalid`; and a **Viewer** saw the list with no create button and no per-card write control at all |
+
+**The species picture — a profile may carry one (requested 2026-10-14, built the same day).** The catalogue's
+create and edit forms gained a picture section, and a profile gained three nullable columns plus one file behind
+them: `POST /species-profiles/{id}/image` (Admin, `multipart/form-data`, one part named `file`, PNG/JPEG/WebP at
+most 2 MB), `GET /species-profiles/{id}/image` (any authenticated caller who may see the profile) and
+`DELETE /species-profiles/{id}/image` (Admin, idempotent). It is the first file storage in the repo:
+`Application/Abstractions/IFileStore` with a filesystem adapter under `Storage:RootPath`, which is the `uploads`
+volume `docker-compose.yml` already mounted — the layer FR-15's snapshots and FR-17's exports will reuse rather
+than invent. Four readings, recorded because each one could reasonably have gone the other way:
+
+- **The bytes decide, not the uploader.** The part's declared `Content-Type` is checked and then discarded; the
+  stored media type is sniffed from the file's signature, and the extension follows it. A specific declared type
+  outside the three is `400 image_type_unsupported`, bytes that are not one of the three are `400 image_invalid`,
+  and `application/octet-stream` counts as no claim at all — which is what a command-line upload sends when it does
+  not know its own file's type. The size limit is enforced by a bounded read, so an oversized upload costs 2 MB of
+  buffering rather than its own size.
+- **The file is written before anything is committed, and the replaced file is deleted after.** The row can
+  therefore never point at a file that was never written; the reverse — a failed commit leaving an unreferenced
+  file — is possible, costs disk and nothing else, and is stated in the port's contract rather than papered over.
+- **The item carries `imageUrl`, not the storage key**, plus `imageUpdatedAt` as the cache-busting value, because
+  replacing a picture does not change its URL. `null` is the ordinary state: three of the four built-ins have none,
+  and both clients show the words for that rather than an empty frame.
+- **The image route needs the token, so the client fetches the bytes.** The web client asks for them with the
+  session it already has and hands the browser an object URL (`apiBlob` in `web/src/api/client.ts`), which is what
+  keeps the route out of the query-string-token exception `/hubs` holds alone. `404 image_not_set` says "nothing to
+  show" and `404 not_found` says "no such profile", so a client can tell a reload from an empty panel.
+
+Evidence, two levels. **27 assertions by `curl` against a live API and a scratch database**: a create answers
+`imageUrl: null`; an upload answers `200` with the URL and a new timestamp and puts exactly one file under the
+storage root; the read answers `image/png` with the bytes unchanged and `Cache-Control: private, max-age=300`; a
+second account's read is `404`, an anonymous one `401` and a non-admin write `403`; a replacement answers a new
+timestamp, is served as `image/jpeg` and leaves exactly one file — the old one discarded; a text file labelled
+`image/png` is `image_invalid`, a PNG labelled `text/html` is `image_type_unsupported`, 2 MB + 10 bytes is
+`image_too_large`, a body with no `file` part is `image_required`, and a built-in is `403 builtin_immutable`, with
+the stored picture surviving every refusal; `GET` on a pictureless profile is `404 image_not_set`; the audit trail
+holds exactly two `profile.updated` rows for a set-and-replace; `DELETE` clears the columns and the file, a second
+`DELETE` is still `200`, and the read then answers `image_not_set`; and `swagger.json` carries the three routes with
+the upload documented as `multipart/form-data`. **Then the screen, driven in a real browser** against that API:
+creating a profile with a picture chosen in the form landed both calls, the notice read *Đã tạo hồ sơ.*, and the new
+card showed the picture fetched from the API (an 8×8 PNG read back as 8×8); editing and choosing another file
+replaced it (12×12 JPEG) with *Đã lưu hồ sơ.* and the editor closed; choosing a `.txt` rendered *Hình phải là PNG,
+JPEG hoặc WebP.* at the picker with `aria-invalid` on the input while the field edits still saved — the documented
+"keep the paperwork, lose the photograph" order; and *Xoá hình* dropped both the stored picture and a file chosen but
+not yet saved, with the section returning to *Chưa có hình*. `SHOULD`-level work, not a roadmap task: `01-product/03`
+FR-10 names the picture as a profile field, and `04-quality/03` gains 3.19 as its walkthrough.
 
 **DoD:** the demo can be given entirely from the phone, with the wallboard on a second screen; every screen
 shows real data; no screen renders a value without a timestamp. 4.13 is closed (`ADR-018`, since revoked by
@@ -717,14 +1194,38 @@ exist, and not before.
 | `Login.tsx` | `/auth/{register,login,refresh,logout,me,change-password,recover,forgot-password,reset-password}` | **Yes — all nine** (FR-01; the three recovery routes added 2026-10-06) | 4.15 |
 | `Dashboard.tsx` | `/terrariums`, `readings/latest`; live push | **Read: yes** (2.8). Push is task 2.9 — the hub is mapped but the broadcaster is a placeholder — so polling until then | 4.16 |
 | `History.tsx` | `/terrariums/{id}/readings` (bucketed, gap-aware) | **Yes** (2.8) | 4.16 |
-| `Terrariums.tsx`, `TerrariumDetail.tsx` | `GET`/`POST /terrariums`, `GET {id}`, `readings` | **Read + create: yes** (2.8). `PATCH`/`DELETE` and the thresholds routes are not built | 4.16 / 4.20 |
+| `Terrariums.tsx`, `TerrariumDetail.tsx` | `GET`/`POST /terrariums`, `GET {id}`, `readings`, `GET`/`PUT`/`DELETE` `{id}/thresholds` | **Read, create and thresholds: yes** (2.8; the three thresholds routes landed 2026-10-13 with 3.1's write half). `PATCH`/`DELETE /terrariums` are still unbuilt | 4.16 / 4.20 (editor wired 2026-10-13) |
 | `Alerts.tsx` | `/alerts`, `GET {id}`, `POST {id}/ack`, `POST {id}/resolve` | **No** — task 3.4; nothing evaluates yet, so `alerts` is `[]` | 4.20 |
 | `Devices.tsx` | `GET /devices`, `GET {id}`, `PATCH {id}`, `rebind`, `calibration` | **No** — only the four provisioning routes of 2.2 exist | 4.20 |
-| `Settings.tsx` | `PATCH /auth/me` (language, time zone, quiet hours) | **No** | 4.20 |
+| `Settings.tsx` | `PATCH /auth/me` (language, time zone, quiet hours) | **No** — the profile form still edits local state. Its threshold form was deleted 2026-10-13 and the section now links to the real editor | 4.20 |
 | Wallboard (W1 — not a prototype screen) | `/terrariums` + `readings/latest` on a kiosk route | **Data: yes** (2.8). The page itself does not exist in React; it is 4.19's work | 4.19 |
 
 Three of the eight screens — plus the wallboard's data — are wireable now. That is why 4.15–4.17 and 4.19 can start
 immediately while 4.20 cannot, and why this is a staged plan rather than a rewrite.
+
+### 4.22–4.26 — the 2026-10-13 review's remaining items (built 2026-10-14)
+
+The review produced thirteen items; 1 and 4 were closed on 2026-10-14 (the rows above), 13 and 14 as well (species
+picture, app UI default). The rest are recorded here as five rows, in the order they were built, because each is
+"wire what the endpoint says" work in the same sense as 4.15–4.21.
+
+| # | Task | Owner | Acceptance / notes |
+|---|---|---|---|
+| 4.22 | **Ownership answers three ways, and the deletion is a state** (items 3, 6): `TerrariumStatus` column + back-filling migration, `FindAnyAsync`, service refusals and endpoint status mapping | backend | `404` missing, `403 forbidden_terrarium` foreign, `410 terrarium_deleted` — on every terrarium route, and only on terrarium routes. `BR-02.2`'s uniform `404` survives everywhere else and in the realtime hub. Settled: the state column is the source of truth and `DeletedAt` is only *when*, because every read asks the question and a nullable timestamp answers it two ways at once |
+| 4.23 | **The administrator reaches any enclosure** (item 5, `A2`): `OwnerOrAdmin` policy, `principal.IsAdmin()`, `ownerUserId` on the administrator's answers, two new audit verbs and `AuditEntity.Terrarium` | backend | `Admin` is a superset of `Owner` **on terrariums and `/users/*` only**; claim/rotate/revoke stay `Owner`-gated. Settled: a cross-account change is audited with the administrator as actor, the ordinary owner edit is not — `BR-18.4` names the former, and the vocabulary gained verbs rather than a free-text action |
+| 4.24 | **A board can be paired by the address printed on it, and bound while its enclosure is created** (items 8, 2): `POST /devices/claim-by-mac`, `MacAddress.TryNormalise`, `IsClaimableByMac`, `POST /terrariums` gaining `deviceId`/`macAddress`, `DeviceProvisioningService.StageBinding` shared by all three entry points | backend | The MAC path is lower-trust and says so in the contract; one `device_not_found` for unknown/bound/revoked; the audit row names the method. Binding at creation is a claim, so the response carries the one-time secret, and the board is resolved before anything is written |
+| 4.25 | **Accounts and boards get a management surface** (items 9, 12): `PATCH`/`DELETE /auth/me`, `GET /users` + role/disable/enable, `GET/PATCH/DELETE /devices` | backend | Two guards protect the last administrator (no self-change, no last-admin demotion or disable) and every change is audited. `DELETE /devices/{id}` revokes **and detaches**; `DELETE /auth/me` disables and ends sessions, because a purge is a retention decision. Coordinates, calibration, commands and snapshots stay unbuilt and are named as such |
+| 4.26 | **The time-zone catalogue** (item 11, `A4` revised): `TimeZone` table keyed by IANA id, seeded from a curated 113-zone list, `GET /time-zones`, and both stored zones validated against it | backend | The catalogue is what validates; the platform database still decides which offset applies at an instant (ADR-015). Revised from the item's first reading (a province list) at the requester's direction, because one country with one offset could only repeat a row |
+
+Row 4.20's remaining screens (`Devices.tsx`, `Alerts.tsx`, `Settings.tsx`) now have their endpoints, and 4.27's
+account screen has its group. **The web half of these items was wired as far as the create form on 2026-10-14**:
+`Terrariums.tsx`'s create panel gained the time-zone picker (the catalogue's `ianaId` and its formatted offset), a
+board picker offering only boards with no enclosure — the rest would be refused by the server — and the one-time
+`deviceSecret` panel, which is the only moment that value exists outside the board; `api/endpoints.ts` gained
+`listTimeZones`, `listDevices`, `patchDevice`, `deleteDevice` and `claimDeviceByMac`, and `api/types.ts` the four
+shapes. Six deck keys were added to both locales (291 total). **Still on mock data and tracked as open**:
+`Devices.tsx` (item 9b), the account-management screen (item 12) and `Settings.tsx`'s preference form (item 9a) —
+their routes exist, so each is a wiring job rather than a design one.
 
 ---
 

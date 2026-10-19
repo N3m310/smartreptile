@@ -31,6 +31,14 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
         db.Devices.FirstOrDefaultAsync(device => device.ChipId == chipId, cancellationToken);
 
     /// <inheritdoc />
+    public Task<Device?> FindDeviceByMacAddressAsync(string macAddress, CancellationToken cancellationToken) =>
+        // No lower-casing in the predicate: SQL Server's default collation is already case-insensitive, and a
+        // function call around the column would stop the index on MacAddress from being used.
+        db.Devices
+            .Include(device => device.Credentials)
+            .FirstOrDefaultAsync(device => device.MacAddress == macAddress, cancellationToken);
+
+    /// <inheritdoc />
     public Task<Device?> FindDeviceByClaimCodeAsync(string claimCode, CancellationToken cancellationToken) =>
         db.Devices.FirstOrDefaultAsync(device => device.ClaimCode == claimCode, cancellationToken);
 
@@ -55,7 +63,7 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
         db.Terrariums.FirstOrDefaultAsync(
             terrarium => terrarium.Id == terrariumId
                          && terrarium.UserId == ownerUserId
-                         && terrarium.DeletedAt == null,
+                         && terrarium.Status != TerrariumStatus.Deleted,
             cancellationToken);
 
     /// <inheritdoc />
@@ -63,6 +71,18 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
         db.Devices.AnyAsync(
             device => device.TerrariumId == terrariumId && device.Status != DeviceStatus.Revoked,
             cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken) =>
+        // The terrarium is included for its name, which the fleet screen shows beside the board. No credentials: a
+        // list has no use for them, and the fewer queries that materialise a hash the better.
+        await db.Devices
+            .Where(device => device.UserId == ownerUserId)
+            .Include(device => device.Terrarium)
+            .OrderBy(device => device.DeviceName)
+            .ThenBy(device => device.PublicId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);

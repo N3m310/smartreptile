@@ -13,9 +13,10 @@ public static class AuthEndpoints
     /// <summary>Maps register, login, refresh, logout, me and change-password.</summary>
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
+        // Two budgets, attached per route rather than to the group: guessing a password or a code and holding a
+        // token already are not the same kind of caller (`auth` and `authSession` in `Program.cs`).
         var group = app.MapGroup("/api/v1/auth")
-            .WithTags("auth")
-            .RequireRateLimiting("auth");
+            .WithTags("auth");
 
         group.MapPost("/register", async (RegisterRequest request, AuthService auth, CancellationToken ct) =>
         {
@@ -29,6 +30,7 @@ public static class AuthEndpoints
                     statusCode: StatusCodes.Status202Accepted)
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Create an account")
         .WithDescription("Anonymous. Answers 202 with a backup recovery code to store, or 409 registration_conflict "
                        + "naming the identifier that is already in use (ADR-020).");
@@ -47,6 +49,7 @@ public static class AuthEndpoints
                 ? Results.Ok(new { recoveryCode = outcome.RecoveryCode })
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Replace a forgotten password with the backup recovery code")
         .WithDescription("Anonymous and rate-limited. Consumes the stored code, issues a replacement and ends every "
                        + "existing session. A wrong code and an unknown identifier answer identically.");
@@ -65,6 +68,7 @@ public static class AuthEndpoints
             // an address has an account — is recorded in the ADR rather than left implicit.
             return outcome.Succeeded ? Results.Accepted() : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Request a password-reset code")
         .WithDescription("Anonymous and rate-limited. Answers 202 when a code was issued, and 404 identifier_unknown "
                        + "when no account uses the identifier (ADR-020).");
@@ -83,6 +87,7 @@ public static class AuthEndpoints
                 ? Results.Ok(new { recoveryCode = outcome.RecoveryCode })
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
         .WithSummary("Set a new password with a server-issued reset code")
         .WithDescription("Anonymous and rate-limited. Consumes the code, issues a new backup recovery code and ends "
                        + "every existing session.");
@@ -94,8 +99,15 @@ public static class AuthEndpoints
                 ? Results.Ok(SessionBody(outcome.Session!))
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("auth")
+        // The session body is an anonymous object, so without this the document says only "200 OK" and the page
+        // that hands out the credential never names the field holding it (BUG-10).
+        .Produces<AuthSession>(StatusCodes.Status200OK)
         .WithSummary("Start a session")
-        .WithDescription("Returns a 15-minute access token and a single-use refresh token.");
+        .WithDescription("Returns a 15-minute access token and a single-use refresh token. The authenticated routes "
+                       + "below need the accessToken: copy that field — not refreshToken — into the Authorize dialog, "
+                       + "without a 'Bearer ' prefix. The refresh token is accepted only in the body of "
+                       + "POST /api/v1/auth/refresh and POST /api/v1/auth/logout.");
 
         group.MapPost("/refresh", async (RefreshRequest request, AuthService auth, CancellationToken ct) =>
         {
@@ -104,14 +116,19 @@ public static class AuthEndpoints
                 ? Results.Ok(SessionBody(outcome.Session!))
                 : Problem(outcome.Problem!);
         })
+        .RequireRateLimiting("authSession")
+        .Produces<AuthSession>(StatusCodes.Status200OK)
         .WithSummary("Rotate the session")
-        .WithDescription("Consumes the refresh token. Reuse of a consumed token revokes the whole family.");
+        .WithDescription("Consumes the refresh token. Reuse of a consumed token revokes the whole family. Answers the "
+                       + "same body as login: the returned accessToken is what the Authorize dialog wants, and the "
+                       + "returned refreshToken replaces the one just consumed.");
 
         group.MapPost("/logout", async (RefreshRequest request, AuthService auth, CancellationToken ct) =>
         {
             await auth.LogoutAsync(request.RefreshToken, ct);
             return Results.NoContent();
         })
+        .RequireRateLimiting("authSession")
         .WithSummary("End a session")
         .WithDescription("Idempotent: an unknown or already-revoked token is still a success.");
 
@@ -123,8 +140,12 @@ public static class AuthEndpoints
 
             return profile is null ? Results.Unauthorized() : Results.Ok(profile);
         })
-        .RequireAuthorization()
-        .WithSummary("The signed-in account");
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
+        .RequireRateLimiting("authSession")
+        .Produces<UserProfile>(StatusCodes.Status200OK)
+        .WithSummary("The signed-in account")
+        .WithDescription("The account the bearer token names, so this is the route to prove a pasted token works "
+                       + "before blaming it for a 401 elsewhere.");
 
         group.MapPost("/change-password", async (
             ChangePasswordRequest request,
@@ -135,9 +156,60 @@ public static class AuthEndpoints
             var outcome = await auth.ChangePasswordAsync(principal.GetUserId() ?? Guid.Empty, request, ct);
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
+        .RequireRateLimiting("auth")
         .WithSummary("Change the password")
-        .WithDescription("Re-proves the current password and ends every existing session.");
+        .WithDescription("Re-proves the current password and ends every other session of the account, keeping the one "
+                       + "whose refresh token the request names.");
+
+        group.MapPatch("/me", async (
+            UpdateProfileRequest request,
+            ClaimsPrincipal principal,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            var outcome = await auth.UpdateProfileAsync(
+                principal.GetUserId() ?? Guid.Empty,
+                request,
+                ct);
+
+            if (!outcome.Succeeded)
+            {
+                return Problem(outcome.Problem!);
+            }
+
+            var profile = await auth.GetProfileAsync(principal.GetUserId() ?? Guid.Empty, ct);
+
+            return profile is null ? Results.Unauthorized() : Results.Ok(profile);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
+        .RequireRateLimiting("authSession")
+        .WithSummary("Edit the signed-in account's preferences")
+        .WithDescription("A patch: an omitted field keeps its current value. `preferredLanguage` is `vi` or `en`, "
+                       + "`timeZoneId` must come from `GET /api/v1/time-zones`, and quiet hours are a pair of "
+                       + "`HH:mm` values (an empty pair clears them). `fcmToken` is an empty string to clear. "
+                       + "Username, email and password are not editable here. Answers the updated profile.");
+
+        group.MapDelete("/me", async (
+            ClaimsPrincipal principal,
+            HttpContext context,
+            AuthService auth,
+            CancellationToken ct) =>
+        {
+            var outcome = await auth.DeleteAccountAsync(
+                principal.GetUserId() ?? Guid.Empty,
+                RequestActor.From(context),
+                ct);
+
+            return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
+        })
+        .RequireAuthorization(AuthorizationPolicies.Authenticated)
+        .RequireRateLimiting("auth")
+        .WithSummary("Delete the signed-in account")
+        .WithDescription("Disables the account and ends every session it holds, so it can no longer be signed into. "
+                       + "The row is kept: the terrariums, alerts, readings and audit rows that name it stay, which "
+                       + "is why this is not a purge. A later sign-in attempt answers a refusal.");
 
         return app;
     }
@@ -153,6 +225,7 @@ public static class AuthEndpoints
         {
             "account_locked" or "ip_blocked" => StatusCodes.Status429TooManyRequests,
             "registration_invalid" or "password_policy_violation" => StatusCodes.Status400BadRequest,
+            "profile_invalid" => StatusCodes.Status400BadRequest,
             "registration_conflict" => StatusCodes.Status409Conflict,
             "identifier_unknown" => StatusCodes.Status404NotFound,
             _ => StatusCodes.Status401Unauthorized,

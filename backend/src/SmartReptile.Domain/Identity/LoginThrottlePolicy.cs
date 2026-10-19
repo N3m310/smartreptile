@@ -18,8 +18,8 @@ public sealed record LoginThrottleDecision(bool IsLocked, string? Code)
 /// </summary>
 public static class LoginThrottlePolicy
 {
-    /// <summary>Failed logins per identifier inside the window before the identifier is locked.</summary>
-    public const int MaxFailuresPerUsername = 5;
+    /// <summary>Failed logins per identifier inside the window before the identifier is locked (BR-01.4).</summary>
+    public const int MaxFailuresPerUsername = 10;
 
     /// <summary>Window for the per-identifier counter, in minutes.</summary>
     public const int UsernameWindowMinutes = 15;

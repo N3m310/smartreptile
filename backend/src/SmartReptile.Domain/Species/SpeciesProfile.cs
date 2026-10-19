@@ -47,6 +47,25 @@ public class SpeciesProfile
     /// <summary>Husbandry summary and caveats (e.g. the humid-hide distinction for semi-arid species).</summary>
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// Key of this profile's picture in the file store, null when it has none. The bytes live outside the database
+    /// (a picture is not a column the catalogue is queried by), and the key is opaque so the file is addressable
+    /// only through the row that holds it.
+    /// </summary>
+    public string? ImageStorageKey { get; set; }
+
+    /// <summary>
+    /// Media type of the stored picture, e.g. <c>image/png</c>, sniffed from the bytes when they arrived — never
+    /// the type the caller declared, because that claim decides how a browser later interprets the file.
+    /// </summary>
+    public string? ImageContentType { get; set; }
+
+    /// <summary>
+    /// When the picture was last set, replaced or removed. It is also the cache-busting value in the image URL, so
+    /// a replaced picture is not served from a cache that still holds the old one.
+    /// </summary>
+    public DateTimeOffset? ImageUpdatedAt { get; set; }
+
     /// <summary>Owner for custom profiles; null for seeded profiles.</summary>
     public Guid? CreatedByUserId { get; set; }
 

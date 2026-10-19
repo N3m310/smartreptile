@@ -109,8 +109,9 @@ State = {
 `IEvaluationQueue` drained by an `EvaluatorWorker` into a `SampleEvaluator`. Two of the fields are written today and
 the rest are written by 3.2:
 
-- `LastEvaluatedSampleId` is advanced per sample, and **only forward** — a re-delivered or back-filled sample
-  carries a lower id than the evaluator has already seen, and taking it would make the next pass re-read history.
+- `LastEvaluatedSampleId` keeps the highest database identity seen, while `LastEvaluatedAtUtc` and
+  `LastEvaluatedSequence` are the event-time idempotency watermark. Database identity order is not used as a proxy
+  for device event order.
 - The key is resolved the way §4.2's `phase` line says, using the same `ThresholdPhaseResolver` the read surface
   uses, and against the same configured bands (profile + enabled overrides) — so the evaluator cannot track a key
   no band covers, nor miss one a card is already colouring.
@@ -205,11 +206,13 @@ push `alertChanged` over SignalR either — that arrives with the lifecycle API 
 resolve an alert (3.4), so an event nobody can act on is not emitted. And the device-level signals of §4.3 are
 3.3's.
 
-**One ordering guarantee is not built.** The per-device reorder window of §7 (a 30-second buffer ordered by
-`RecordedAt`) is not in this milestone: samples are evaluated in ingest order, which is per-device publish order
-and therefore `RecordedAt` order for one node, but an out-of-order delivery from a second publisher or a broker
-redelivery would reach the engine out of order. Recorded as open in `03-implementation/07` rather than implied by
-the `EvaluationState` watermark, which is an id watermark and cannot see a `RecordedAt` that regressed.
+**The live ordering guarantee is built (2026-10-19).** `InProcessEvaluationQueue` holds committed samples for a
+30-second event-time window and releases them in `(RecordedAt, device sequence)` order per device. The persisted
+`EvaluationState` event-time watermark makes retries idempotent and prevents a late sample from recovering or
+reopening an alert after newer evidence has already been evaluated. Such a late sample remains in telemetry
+history and summaries and is logged when skipped by live evaluation. The queue itself is in memory: automatic
+replay of committed-but-unprocessed samples after a process restart remains open and is not claimed as part of
+this guarantee.
 
 
 ### 4.3 Derived signals beyond per-metric bands
@@ -222,7 +225,67 @@ the `EvaluationState` watermark, which is an id watermark and cannot see a `Reco
 | `GradientWarning` (SHOULD) | `SurfaceTempC − TempC > 12 °C` when both exist | A basking spot far hotter than air is a burn risk; a genuinely useful extra the sensors make cheap |
 | `LightDeficit` (SHOULD) | accumulated `LightLux > profile.lightThresholdLux` < `profile.minLightHoursPerDay` by 21:00 local | Detects a failed lamp/timer without any actuator integration |
 
-`GradientWarning` and `LightDeficit` are marked SHOULD: they are implemented if M4 finishes early.
+`GradientWarning` and `LightDeficit` are marked SHOULD. **Both are built (2026-10-19, roadmap 3.6)** — see the
+as-built block at the end of this section.
+
+**As built (2026-10-10, roadmap 3.3) — the three device-health signals.**
+The rule is `DeviceSilencePolicy` (pure): `3 × samplingInterval` → Warning, 30 minutes → Critical, and `>` rather
+than `>=` so that the online/offline badge `TerrariumService.DeriveStatus` renders from the same threshold and the
+alert the watchdog opens cannot disagree at the boundary — both call one `SilenceThreshold`. The sweep is
+`DeviceSilenceMonitor` (Application) driven by `SilenceWatchdogWorker` on a 30-second timer, because silence is the
+*absence* of messages and nothing arrives to trigger a pass; it is the mirror image of §4.2's engine, which is
+queue-driven precisely because readings do arrive. Four readings of the design are settled here rather than left to
+the code: the alert is a **device-level row** (`Metric`, band, `TriggeringValue` and `PeakValue` all null — silence
+is not a reading, and inventing a number for it is how a dashboard ends up charting one nobody measured); it is
+**back-dated** to the instant the device should have been heard from, so its duration measures the outage rather
+than the sweep interval; escalation changes the open row's severity and dedupe key and keeps its original
+`TriggeredAt`, which is the same rule §4.2 note 4 applies to a band excursion; and resolution happens at the instant
+the device spoke again, not at the instant a sweep noticed. Two things it deliberately does not do: a device in
+`Maintenance` is not judged (that state exists so routine servicing does not create false alerts) and nothing is
+sent — delivery is the dispatcher's (3.5), the same boundary the band engine keeps.
+
+**The other two signals, same day.** `SensorFault` is decided where its evidence arrives — the `events` channel,
+from the parsed payload's failure count — through `SensorFaultPolicy` (BR-07.1's three consecutive failures; an
+event carrying no count is taken at its word, because the device only raises it after its own threshold). It opens
+one Warning per **metric**, where §02-design/02 §3.14 sketches `MetricId` as null for `SensorFault` alongside
+`DeviceSilent`: the sketch fits silence, which is a property of the board, but a fault names a probe, the dedupe key
+has a slot for it, and a device-level row would collapse "the humidity probe died" and "the light sensor died" into
+one entry that names neither. `sensor_recovered` closes the row with `Recovered` rather than
+`ResolvedReason.SensorFault` — that label is the opposite direction (a *band* alert closed because the probe, not
+the habitat, was wrong) and blurring the two would cost the v2 dataset its negative examples (BR-12.5). A faulted
+metric reading `Unavailable` needs no new code either: a faulted reading carries quality bit 1, `TerrariumService`
+already maps the non-evaluable bits to that status, and `QualityRules.IsEvaluable` is what makes the band engine
+skip it — which is exactly what the requirement's "no alerts raised while faulted" means.
+`DeviceClockSkew` is decided on the sample path from `QualityFlags.ClockUnsynced` — the flag V-09 sets, which also
+carries V-08's deliberate exclusion of a long back-fill — and raises an **Info** entry, one per episode: while it is
+open, later skewed batches move its `LastObservedAt`; a *new* entry waits the hour V-09 asks for, and the entry
+closes when a trusted sample arrives. That is the reading of "one Info signal per hour" this build takes: an hourly
+*row* would read as a new problem every hour, when what it reports is that one problem is still there.
+
+**The two SHOULD signals, built (2026-10-19, roadmap 3.6).** Both had their `AlertSource` members and their
+localised notification strings since 3.5; what 3.6 added is the rule that raises them.
+
+- **`GradientWarning`** is `GradientWarningPolicy` (Domain, pure): `SurfaceTempC − TempC > 12 °C`, strictly greater
+  so 12.1 raises and 11.9 does not, and **null when either reading is missing** — the rule needs both numbers, and
+  closing an open episode on absent evidence would report a recovery nobody observed. It is decided inside
+  `SampleEvaluator`, because the evidence is a pair of readings from one instant and a sweep would have to guess
+  which surface reading belonged with which air reading. The row names `SurfaceTempC` and the species family, so it
+  sits beside that probe's own band alerts rather than replacing them, and carries the difference as its triggering
+  and peak value instead of a band, because no band was compared.
+- **`LightDeficit`** is `LightDeficitPolicy` (Domain, pure) plus `LightDeficitMonitor`, swept every 15 minutes by
+  `LightDeficitWorker`. It is an **accumulation**, so no single sample can violate it: the sweep judges one closed
+  local day at a time, from 21:00 local (`EvaluationLocalTime`, inclusive), over the minutes from local midnight to
+  that instant. The hours come from the same `MetricGridSummarizer` pass the daily summary uses, so the alert and
+  `DailyEnvironmentalSummary.LightDeficitHours` cannot disagree; the deficit is rounded to the column's
+  `decimal(8,3)` scale for the same reason. It raises **one** row per terrarium per day, dated from the instant the
+  day closed, touches it while the shortfall stands, and closes it either when back-filled readings meet the
+  requirement or when the local date rolls over. No per-sample light alert is raised: a dark minute at noon is not
+  a failure, and the instantaneous value is already the per-metric band's business.
+- **One deviation, recorded rather than implied.** A derived signal now appends its `AlertSource` to
+  `Alert.DedupeKey`, so a gradient row on `SurfaceTempC` and a surface-band row can both be open for the same
+  severity and phase. Without the suffix the filtered unique index would refuse the second one with a 2601 error.
+  Band alerts keep the documented three-segment key byte-for-byte, so nothing already stored is rewritten; the four
+  derived signals all name themselves. §02-design/02 §3.8 records the two shapes.
 
 ## 5. Alert state machine and notification handoff
 
@@ -249,10 +312,13 @@ an alert?" is answerable from data — a question every real alerting system eve
 
 | Trigger | Job | Output |
 |---|---|---|
-| Every minute (in-memory accumulate) | HourlyRollupWorker | Upsert `TelemetryHourlyRollup` for the current hour; recompute the last 48 h hourly once per night to absorb back-fill |
-| Local midnight + 5 min per terrarium | DailySummaryWorker | `DailyEnvironmentalSummary` for the day that just ended, plus `IsLowConfidence` if coverage < 80% |
+| Every 15 min after startup | `SummaryWorker` | Recompute hourly rollups for the last 48 h and daily summaries for today and yesterday in each terrarium's timezone |
 | Nightly 02:00 local | RetentionSweeper | Purge raw > 90 d, snapshots > 7 d, expired export files; yearly: purge rollups > 24 months |
-| On ingest of back-fill | RollupWorker (targeted) | Recompute only the affected hours/days (idempotent upsert) |
+| Back-fill arrives | `SummaryWorker`'s next sweep | Recompute from raw telemetry and upsert affected existing hours/days; corrections are reflected within 15 min and never double-counted |
+
+The summary worker deliberately reads persisted raw telemetry rather than maintaining a running accumulator. That
+makes retries and back-fills use the same calculation path. A current local day is summarized only through its
+completed minute; yesterday is computed over its full timezone-aware day, including DST-length days.
 
 Exposure index computation (used by the daily summary and shown in the report):
 
@@ -268,8 +334,8 @@ in hours. Worked examples are in `03-implementation/06-threshold-and-species-pro
 | Concern | Mechanism | Guarantee |
 |---|---|---|
 | Duplicate delivery (QoS 1 / retry) | Unique `(DeviceId, Sequence)` + upsert path | At-most-once persistence, at-least-once delivery |
-| Out-of-order back-fill | Queries order by `RecordedAt`; evaluation runs on a per-device **ordered queue** keyed by `RecordedAt` with a 30 s reorder window | A late sample cannot retroactively "recover" an alert before its cause |
-| Server restart mid-batch | Insert + evaluation in one transaction; evaluation jobs rebuilt from `LastEvaluatedSampleId` on start-up | No samples skipped |
+| Out-of-order delivery within the live window | Per-device evaluation buffer ordered by `(RecordedAt, Sequence)` with a 30 s window; persistent event-time state watermark | Late samples do not change live alert state; they remain available for history and summaries |
+| Server restart mid-batch | Evaluation buffer is in memory; durable replay of committed-but-unprocessed samples is not implemented | **Open:** a process restart can leave a committed sample unevaluated |
 | Threshold changed mid-episode | `ThresholdSnapshot` recorded; open alert keeps its band | History stays explainable |
 | Rollup recomputation | Upsert with `ComputedAt` | Recomputable, never double-counted |
 | Client mutation retries | `Idempotency-Key` on `POST` endpoints, 24 h dedupe window | No duplicate terrariums/devices from flaky mobile networks |

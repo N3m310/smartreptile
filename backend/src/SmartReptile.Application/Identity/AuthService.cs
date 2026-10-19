@@ -1,11 +1,16 @@
+using System.Globalization;
+using System.Text.Json;
 using SmartReptile.Application.Abstractions;
+using SmartReptile.Application.Reference;
+using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Application.Identity;
 
 /// <summary>
-/// The FR-01 use cases: register, log in, refresh, log out, read the profile, change the password, and recover a
-/// forgotten one with the account's backup code.
+/// The FR-01 use cases: register, log in, refresh, log out, read and edit the profile, change the password, delete
+/// the account, and recover a forgotten password with the account's backup code.
 /// </summary>
 /// <remarks>
 /// Two properties are deliberate and load-bearing:
@@ -21,6 +26,7 @@ namespace SmartReptile.Application.Identity;
 /// </remarks>
 public sealed class AuthService(
     IUserStore store,
+    ITimeZoneStore timeZones,
     IPasswordHasher passwordHasher,
     IAccessTokenService accessTokens,
     ISecretGenerator secrets,
@@ -91,7 +97,7 @@ public sealed class AuthService(
             RecoveryCodeHash = recoveryHash.Hash,
             RecoveryCodeSalt = recoveryHash.Salt,
             RecoveryCodeIssuedAt = clock.UtcNow,
-            Role = UserRole.Owner,
+            RoleId = SystemRoles.OwnerId,
             PreferredLanguage = NormaliseLanguage(request.PreferredLanguage),
         });
 
@@ -152,7 +158,9 @@ public sealed class AuthService(
         user.LastLoginAt = now;
         throttle.ResetUsername(identifier);
 
-        return await IssueSessionAsync(user, request.DeviceInfo, familyId: null, cancellationToken);
+        // The login body is {username, password} (§4.1), so a new session records no device label; a refresh keeps
+        // whatever the session it rotates was issued with.
+        return await IssueSessionAsync(user, deviceInfo: null, familyId: null, cancellationToken);
     }
 
     /// <summary>
@@ -221,8 +229,16 @@ public sealed class AuthService(
     }
 
     /// <summary>
-    /// Changes the password of the signed-in account, after re-proving the current one. Ends every session.
+    /// Changes the password of the signed-in account, after re-proving the current one. Ends every session of the
+    /// account except the caller's own, which the request names.
     /// </summary>
+    /// <remarks>
+    /// Ending *every* session is the simpler rule and it is the wrong one here: the caller has just typed the very
+    /// credential the change is about, so evicting them buys no security and costs a sign-out — while the sessions a
+    /// keeper actually wants gone are the others (the browser left open on a shared machine, the phone that was
+    /// lost). A caller who does not name a session, or names one this account does not hold, keeps none: an
+    /// unnamed session is not the caller's, and revoking everything is the reading that fails safely.
+    /// </remarks>
     public async Task<AuthOutcome> ChangePasswordAsync(
         Guid userId,
         ChangePasswordRequest request,
@@ -254,10 +270,37 @@ public sealed class AuthService(
         user.PasswordSalt = hashed.Salt;
         user.PasswordIterations = hashed.Iterations;
 
-        await store.RevokeAllUserTokensAsync(user.Id, clock.UtcNow, cancellationToken);
+        var survives = await LiveFamilyAsync(user.Id, request.RefreshToken, cancellationToken);
+
+        if (survives is { } familyId)
+        {
+            await store.RevokeUserTokensExceptFamilyAsync(user.Id, familyId, clock.UtcNow, cancellationToken);
+        }
+        else
+        {
+            await store.RevokeAllUserTokensAsync(user.Id, clock.UtcNow, cancellationToken);
+        }
+
         await store.SaveChangesAsync(cancellationToken);
 
         return AuthOutcome.Success();
+    }
+
+    /// <summary>
+    /// The rotation family the presented refresh token belongs to, when that token is this account's and still
+    /// live. A consumed-but-not-revoked token still counts: rotation keeps the family id, so a client that rotated
+    /// its token a moment before changing the password is still the caller of the change.
+    /// </summary>
+    private async Task<Guid?> LiveFamilyAsync(Guid userId, string? refreshToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return null;
+        }
+
+        var token = await store.FindRefreshTokenAsync(secrets.Sha256(refreshToken), cancellationToken);
+
+        return token is not null && token.UserId == userId && token.RevokedAt is null ? token.FamilyId : null;
     }
 
     /// <summary>
@@ -488,8 +531,267 @@ public sealed class AuthService(
     public async Task<UserProfile?> GetProfileAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var user = await store.FindUserByIdAsync(userId, cancellationToken);
-        return user is null ? null : ToProfile(user);
+
+        return user is null
+            ? null
+            : ToProfile(user, await store.ListPermissionsAsync(user.RoleId, cancellationToken).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Edits the signed-in account's own preferences (FR-01, TASKS 2026-10-14, item 9a).
+    /// </summary>
+    /// <remarks>
+    /// A patch, like the terrarium update: an omitted member keeps its value. The two fields with a closed
+    /// vocabulary are checked against it — the language against <c>vi|en</c> (ADR-013) and the zone against the
+    /// catalogue the picker offers — because a stored value neither client can render is worse than a refusal.
+    /// <para>
+    /// Quiet hours are validated as a pair. One half of a window says nothing about when notifications are
+    /// suppressed, so a body that leaves exactly one end set is refused rather than completed by guesswork.
+    /// </para>
+    /// </remarks>
+    /// <param name="userId">Authenticated caller.</param>
+    /// <param name="request">The preferences to change; omitted members are left alone.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<AuthOutcome> UpdateProfileAsync(
+        Guid userId,
+        UpdateProfileRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var user = await store.FindUserByIdAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            return AuthOutcome.Failure("unauthenticated", SessionEndedMessage);
+        }
+
+        var violations = new List<IdentityViolation>();
+
+        // ---- language -------------------------------------------------------------------------------
+        if (request.PreferredLanguage is not null)
+        {
+            var language = request.PreferredLanguage.Trim().ToLowerInvariant();
+
+            if (language is not ("vi" or "en"))
+            {
+                violations.Add(new IdentityViolation(
+                    "preferredLanguage",
+                    "language_unsupported",
+                    "The supported languages are vi and en."));
+            }
+            else
+            {
+                user.PreferredLanguage = language;
+            }
+        }
+
+        // ---- time zone ------------------------------------------------------------------------------
+        if (request.TimeZoneId is not null)
+        {
+            if (await Reference.ReferenceService.FindAsync(timeZones, request.TimeZoneId, cancellationToken)
+                is not { } zone)
+            {
+                violations.Add(new IdentityViolation(
+                    "timeZoneId",
+                    "timezone_invalid",
+                    $"'{request.TimeZoneId}' is not one of the catalogue's time zones; read the list from "
+                    + "GET /api/v1/time-zones."));
+            }
+            else
+            {
+                // The catalogue's spelling, so `asia/ho_chi_minh` cannot become a second way to name one zone.
+                user.TimeZoneId = zone.IanaId;
+            }
+        }
+
+        // ---- quiet hours ----------------------------------------------------------------------------
+        var start = request.QuietHoursStart is null
+            ? user.QuietHoursStart
+            : ParseTimeOfDay(request.QuietHoursStart, violations, "quietHoursStart");
+
+        var end = request.QuietHoursEnd is null
+            ? user.QuietHoursEnd
+            : ParseTimeOfDay(request.QuietHoursEnd, violations, "quietHoursEnd");
+
+        if (violations.Count == 0)
+        {
+            if ((start is null) != (end is null))
+            {
+                violations.Add(new IdentityViolation(
+                    "quietHoursStart",
+                    "quiet_hours_incomplete",
+                    "Quiet hours are a window: send both ends, or an empty start and end to clear it."));
+            }
+            else if (start is { } from && end is { } to && from == to)
+            {
+                // A zero-length window suppresses nothing, which is not what the caller asked for.
+                violations.Add(new IdentityViolation(
+                    "quietHoursEnd",
+                    "quiet_hours_empty",
+                    "A quiet-hours window has to be longer than nothing."));
+            }
+            else
+            {
+                user.QuietHoursStart = start;
+                user.QuietHoursEnd = end;
+            }
+        }
+
+        // ---- notification floor and channels --------------------------------------------------------
+        if (request.MinNotifySeverity is not null)
+        {
+            if (TryParseSeverity(request.MinNotifySeverity, out var severity))
+            {
+                user.MinNotifySeverity = severity;
+            }
+            else
+            {
+                violations.Add(new IdentityViolation(
+                    "minNotifySeverity",
+                    "severity_invalid",
+                    "The severities are info, warning and critical."));
+            }
+        }
+
+        if (request.ChannelFcmEnabled is { } fcmEnabled)
+        {
+            user.ChannelFcmEnabled = fcmEnabled;
+        }
+
+        if (request.ChannelEmailEnabled is { } emailEnabled)
+        {
+            user.ChannelEmailEnabled = emailEnabled;
+        }
+
+        if (request.FcmToken is not null)
+        {
+            var token = request.FcmToken.Trim();
+
+            if (token.Length > FcmTokenMaxLength)
+            {
+                violations.Add(new IdentityViolation(
+                    "fcmToken",
+                    "fcm_token_too_long",
+                    $"A push token may be at most {FcmTokenMaxLength} characters."));
+            }
+            else
+            {
+                // Empty clears it: the app calls this when a keeper signs out or the platform rotates the token.
+                user.FcmToken = token.Length == 0 ? null : token;
+            }
+        }
+
+        if (violations.Count > 0)
+        {
+            return AuthOutcome.Invalid("profile_invalid", "The profile changes were refused.", violations);
+        }
+
+        await store.SaveChangesAsync(cancellationToken);
+
+        return AuthOutcome.Success();
+    }
+
+    /// <summary>
+    /// Deletes the signed-in account (FR-01, TASKS 2026-10-14, item 9a) — as far as v1 can honestly go.
+    /// </summary>
+    /// <remarks>
+    /// <b>What this does and does not do.</b> The account is disabled and every one of its sessions is revoked, so it
+    /// can no longer be signed into and no token it issued still works. The row is <b>not</b> removed: its
+    /// terrariums, alerts, readings and audit rows reference it, and a hard delete would either fail on those foreign
+    /// keys or take a keeper's history with it — a data-retention decision with a purge policy attached, which is
+    /// deliberately not a button (item 12's note, and `02-design/02` §3.18's rule that the trail outlives what it
+    /// names). Documented as such so nobody reads a 204 as "the data is gone".
+    /// </remarks>
+    /// <param name="userId">Authenticated caller.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<AuthOutcome> DeleteAccountAsync(
+        Guid userId,
+        AuditActor? actor = null,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await store.FindUserByIdAsync(userId, cancellationToken);
+
+        if (user is null)
+        {
+            return AuthOutcome.Failure("unauthenticated", SessionEndedMessage);
+        }
+
+        var now = clock.UtcNow;
+
+        // Already disabled: nothing changes, so nothing is written and no second audit row appears — the same rule
+        // the device revoke follows.
+        if (user.DisabledAt is null)
+        {
+            user.DisabledAt = now;
+
+            store.AddAuditEntry(AuditLog.ForUser(
+                AuditAction.AccountDisabled,
+                user.Id,
+                user.Id,
+                actor ?? AuditActor.Unknown,
+                now,
+                afterJson: JsonSerializer.Serialize(new { reason = "self_deleted", disabledAt = now })));
+        }
+
+        await store.RevokeAllUserTokensAsync(user.Id, now, cancellationToken);
+        await store.SaveChangesAsync(cancellationToken);
+
+        return AuthOutcome.Success();
+    }
+
+    /// <summary>An <c>HH:mm</c> time of day, or a violation naming the field when it is not one.</summary>
+    private static TimeOnly? ParseTimeOfDay(
+        string value,
+        List<IdentityViolation> violations,
+        string field)
+    {
+        if (value.Trim().Length == 0)
+        {
+            return null;
+        }
+
+        if (TimeOnly.TryParseExact(
+                value.Trim(),
+                ["H:mm", "HH:mm"],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed))
+        {
+            return parsed;
+        }
+
+        violations.Add(new IdentityViolation(
+            field,
+            "quiet_hours_invalid",
+            "Quiet hours are a time of day, written HH:mm."));
+
+        return null;
+    }
+
+    /// <summary>The severity a request named, case-insensitively, in the vocabulary the alert engine uses.</summary>
+    private static bool TryParseSeverity(string value, out AlertSeverity severity)
+    {
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "info":
+                severity = AlertSeverity.Info;
+                return true;
+            case "warning":
+                severity = AlertSeverity.Warning;
+                return true;
+            case "critical":
+                severity = AlertSeverity.Critical;
+                return true;
+            default:
+                severity = AlertSeverity.Warning;
+                return false;
+        }
+    }
+
+    /// <summary>Column width of <c>User.FcmToken</c>, checked here so an over-long token is a 400 rather than a 500.</summary>
+    private const int FcmTokenMaxLength = 256;
 
     /// <summary>Lazily built hash of a fixed non-password, used to equalise the login failure path's cost.</summary>
     private PasswordHash? _dummyHash;
@@ -503,7 +805,13 @@ public sealed class AuthService(
         CancellationToken cancellationToken)
     {
         var now = clock.UtcNow;
-        var access = accessTokens.Issue(user);
+
+        // The permission set is read once, here, and travels in both the token and the profile. Re-reading it per
+        // request is what the token exists to avoid, and the two operations that change it — a role assignment and a
+        // matrix edit — end the account's sessions so this answer cannot go stale behind its back.
+        var permissions = await store.ListPermissionsAsync(user.RoleId, cancellationToken).ConfigureAwait(false);
+
+        var access = accessTokens.Issue(user, permissions);
         var plaintext = secrets.NewOpaqueToken();
         var expiresAt = now.AddDays(settings.RefreshTokenDays);
 
@@ -519,11 +827,30 @@ public sealed class AuthService(
 
         await store.SaveChangesAsync(cancellationToken);
 
-        return AuthOutcome.Success(new AuthSession(ToProfile(user), access.Value, access.ExpiresAtUtc, plaintext, expiresAt));
+        return AuthOutcome.Success(
+            new AuthSession(ToProfile(user, permissions), access.Value, access.ExpiresAtUtc, plaintext, expiresAt));
     }
 
-    private static UserProfile ToProfile(User user) =>
-        new(user.Id, user.Username, user.Email, user.Role.ToString(), user.PreferredLanguage, user.TimeZoneId);
+    private static UserProfile ToProfile(User user, IReadOnlyList<string> permissions) =>
+        new(
+            user.Id,
+            user.Username,
+            user.Email,
+            user.Role?.Code ?? SystemRoles.CodeOf(user.RoleId) ?? string.Empty,
+            user.RoleId,
+            permissions,
+            user.PreferredLanguage,
+            user.TimeZoneId,
+            FormatTimeOfDay(user.QuietHoursStart),
+            FormatTimeOfDay(user.QuietHoursEnd),
+            user.MinNotifySeverity.ToString().ToLowerInvariant(),
+            user.ChannelFcmEnabled,
+            user.ChannelEmailEnabled,
+            HasFcmToken: !string.IsNullOrEmpty(user.FcmToken));
+
+    /// <summary>Renders a stored quiet-hours end as <c>HH:mm</c>, which is how it was sent and how it is stored.</summary>
+    private static string? FormatTimeOfDay(TimeOnly? value) =>
+        value?.ToString("HH:mm", CultureInfo.InvariantCulture);
 
     private static string NormaliseLanguage(string? language) =>
         string.Equals(language?.Trim(), "en", StringComparison.OrdinalIgnoreCase) ? "en" : "vi";

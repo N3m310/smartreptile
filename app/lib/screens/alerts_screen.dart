@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../state/app_data_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -263,9 +264,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                     data.resolveAlert(alert.id);
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
+                                        // The alert closes on this screen only: `POST /alerts/{id}/resolve` is the
+                                        // route that will make it true everywhere (FR-12).
                                         content: Text(
-                                            'Đã xử lý cảnh báo ${alert.id}'),
-                                        backgroundColor: AppColors.primary,
+                                          AppLocalizations.of(context)
+                                              .mockDataLocalChangeNotice,
+                                        ),
+                                        backgroundColor: AppColors.bgCardHover,
                                       ),
                                     );
                                   },

@@ -5,9 +5,14 @@ stretch. Every requirement has acceptance criteria in Given/When/Then form and, 
 matters, business rules with ids (`BR-xx`). Test coverage is mapped in
 `04-quality/04-requirements-traceability-matrix.md`.
 
-**Actors.** `Owner` (account holder, full rights) · `Technician` (operate + acknowledge) ·
-`Viewer` (read-only) · `Device` (authenticated ESP32 node) · `Scheduler` (internal background
-workers: ingest, evaluator, notifier, rollup, retention).
+**Actors.** `Admin` (the seeded system administrator: every permission, every account's data) · `Owner` (account
+holder, full rights over their own data) · `Technician` (operate + acknowledge) · `Viewer` (read-only) · `Device`
+(authenticated ESP32 node) · `Scheduler` (internal background workers: ingest, evaluator, notifier, rollup,
+retention).
+
+> **Revised 2026-10-17.** The four names above are the **system roles** the product ships, each a row in `Role`
+> holding a set of permission codes, not an enumeration in the build. FR-02 defines them; `02-design/06` §3 is the
+> matrix. Where a requirement below says "the `Admin` role", read it as "an account holding that permission".
 
 ---
 
@@ -24,11 +29,12 @@ session, and log out.
   frequently used passwords; hashed with PBKDF2-HMAC-SHA256 (≥ 210 000 iterations, 16-byte salt) or
   Argon2id (m=64 MiB, t=3, p=1).
 - `BR-01.3` Access token JWT lifetime 15 min; refresh token 30 days, single-use with rotation.
-- `BR-01.4` After 5 failed logins for one username within 15 min, that username is throttled for 15 min.
+- `BR-01.4` After 10 failed logins for one username within 15 min, that username is throttled for 15 min.
 
 **Acceptance criteria**
 - **Given** a valid registration payload, **when** the user submits it, **then** the account is
-  created with role `Owner`, a password hash is stored (never the plaintext), and `201` is returned.
+  created holding the `Owner` role, a password hash is stored (never the plaintext), and `201` is returned.
+  Registration cannot produce an `Admin`: the one administrator is seeded from configuration (FR-19).
 - **Given** an existing account, **when** the user logs in with the correct password, **then**
   access + refresh tokens are returned and `LastLoginAt` is updated.
 - **Given** an expired access token and a valid refresh token, **when** the app calls
@@ -42,22 +48,37 @@ session, and log out.
 ## FR-02 — Role-based access control on every resource
 **Priority** MUST · **Actors** all
 
-All terrarium-scoped data MUST be filtered by ownership, and role MUST gate privileged actions.
+All terrarium-scoped data MUST be filtered by ownership, and a permission MUST gate every privileged action.
 
 **Rules**
-- `BR-02.1` Roles: `Owner` (manage terrariums, thresholds, devices, users) ·
-  `Technician` (acknowledge/resolve alerts, silence metrics, view everything) ·
-  `Viewer` (read-only: dashboard, history, exports).
-- `BR-02.2` A user MUST NOT be able to read or write a terrarium they are not a member of,
-  even with a valid token. Cross-tenant reads return `404`, not `403`.
+- `BR-02.1` **Roles and permissions are data.** A role is a named set of permission codes (`Role` +
+  `RolePermission`); the sixteen codes the software implements are a catalogue in code (`Permissions`). The four
+  system roles ship as rows and can be re-granted by an administrator without a release, and a custom role grants
+  whatever an administrator gives it. The matrix — which role holds which code, and which data each role therefore
+  reaches — is `02-design/06` §3.
+- `BR-02.1a` The shipped seed: `Admin` holds all sixteen codes, `Owner` eleven, `Technician` seven, `Viewer` five.
+  Each step up the ladder adds the writes a reader would expect, and `Admin`'s set is a superset of `Owner`'s.
+- `BR-02.1b` **Cross-account reach is a permission, not a role.** `data.read.any` and `data.write.any` are the only
+  two codes that answer with another account's data; the roles below `Admin` hold neither. An endpoint MUST name the
+  permission it needs and MUST NOT test a role name.
+- `BR-02.2` A user MUST NOT be able to read or write a terrarium they do not own, even with a valid token, unless
+  they hold `data.read.any` / `data.write.any`. Cross-tenant reads return `404`, not `403` — except on the terrarium
+  routes, where the review of 2026-10-14 accepted `403 forbidden_terrarium` / `410 terrarium_deleted` for this one
+  resource so a mistyped id and somebody else's enclosure are distinguishable (`02-design/06` §3, `05-release/03` §5).
+- `BR-02.3` The permission set travels in the access token (one claim per code) and is returned by `GET /auth/me`, so
+  a client gates its own screens on codes rather than on a role name. Changing an account's role, resetting its
+  password or deleting it MUST end its refresh tokens; editing a role's permission set need not, and takes effect
+  within one access-token lifetime.
 
 **Acceptance criteria**
 - **Given** user A and a terrarium owned by user B, **when** A requests
-  `GET /terrariums/{B.terrariumId}`, **then** the response is `404`.
-- **Given** a `Viewer` token, **when** the user calls `POST /alerts/{id}/ack`, **then** the
-  response is `403` with problem code `insufficient_role`.
-- **Given** a `Technician` token, **when** the user deletes a terrarium, **then** the response
-  is `403`.
+  `GET /terrariums/{B.terrariumId}`, **then** the response is `403 forbidden_terrarium`.
+- **Given** an account holding `Viewer` (no `alert.write`), **when** it calls `POST /alerts/{id}/ack`, **then** the
+  response is `403`, and the same call succeeds for an account holding `alert.write`.
+- **Given** an account holding `Viewer` (no `terrarium.write`), **when** it deletes a terrarium, **then** the
+  response is `403`.
+- **Given** an account holding `data.read.any`, **when** it reads the administrative dashboard, **then** it sees
+  every account's enclosures, boards and alerts (FR-19) — and the same request from a `Viewer` is `403`.
 
 ---
 
@@ -254,10 +275,12 @@ The system MUST serve range queries and chart data for 1 h, 24 h, 7 d, 30 d and 
 ---
 
 ## FR-10 — Species profiles and threshold configuration
-**Priority** MUST · **Actors** Owner
+**Priority** MUST · **Actors** Owner (the terrariums' own thresholds) · Admin (the shared catalogue)
 
 The system MUST ship built-in species profiles and allow custom profiles and per-terrarium
-overrides.
+overrides. A keeper configures the thresholds of their own terrariums (overrides); the shared catalogue of built-in
+and custom profiles is authored by the `Admin` role — the system administrator seeded from configuration — because
+those bands are what every terrarium is judged against (`02-design/06` §3).
 
 **Rules**
 - `BR-10.1` Seeded profiles: `Tropical (humid forest)`, `SemiArid (semi-desert)`,
@@ -273,14 +296,23 @@ overrides.
 - `BR-10.4` Editing a profile or override MUST be audited (`who`, `when`, `before`, `after`).
 - `BR-10.5` The system MUST warn (non-blocking) if a band contradicts the profile's climate zone
   baked-in sanity ranges (e.g. a "desert" profile with `TargetMax < 20 °C`).
+- `BR-10.6` A profile MAY carry one picture — PNG, JPEG or WebP, at most 2 MB — set and removed by the
+  catalogue's author (the `Admin` role) from the create and edit forms. The system MUST determine the file's
+  type from its content rather than from the uploader's declaration, MUST store the bytes outside the database,
+  and MUST NOT show a picture the profile does not have: a profile without one is rendered without an image,
+  never as an empty frame. *(Added 2026-10-14 on request; the picture is descriptive, so nothing in the
+  evaluation path reads it.)*
 
 **Acceptance criteria**
 - **Given** the seeded leopard gecko profile, **when** a terrarium is assigned to it, **then** the
   `effectiveThresholds` endpoint returns 5 metrics with bands and a `source` of `profile`.
-- **Given** `TargetMin = 40`, `TargetMax = 30`, **when** the Owner saves, **then** validation fails
+- **Given** `TargetMin = 40`, `TargetMax = 30`, **when** the Admin saves, **then** validation fails
   with a field-level error and a `400`.
 - **Given** a terrarium override for humidity, **when** the effective thresholds are read, **then**
   that metric reports `source: override` and the others report `source: profile`.
+- **Given** a custom profile and a 1 MB PNG, **when** the Admin saves the picture, **then** the profile answers
+  with an image URL and every client shows the picture; **and given** a 3 MB file or one that is not really an
+  image, **then** nothing is stored and the refusal names the file (`BR-10.6`).
 
 ---
 
@@ -328,7 +360,12 @@ hysteresis, dedupe and phase rules. *The engine runs server-side only — the si
 - `BR-12.2` Acknowledge records `AcknowledgedByUserId` + `AcknowledgedAt`.
 - `BR-12.3` Manual resolve requires a reason (`resolvedReason`: `Recovered`, `FalsePositive`,
   `SensorFault`, `Accepted`).
-- `BR-12.4` Alert list supports filters: severity, metric, state, date range; default sort newest first.
+- `BR-12.4` Alert list supports filters: severity, metric, state, **family**, date range; default sort newest first.
+- `BR-12.4a` **Every alert belongs to one of two families** (added 2026-10-17). `enclosure` covers the enclosure's
+  own condition — humidity, light, and the board itself (silence, sensor fault, clock skew). `species` covers the
+  animal the enclosure holds — temperature and UV, judged against its species profile's bands. The family is a
+  property of the metric, persisted on the row, returned on every alert (REST and the realtime payload) and
+  filterable with `?family=enclosure|species`; the design is `02-design/05` §2.
 - **`BR-12.5`** `FalsePositive` and `SensorFault` outcomes MUST be retained as labelled data for the
   v2 model (this is the label source described in `07-appendices/06`).
 - `BR-12.6` Silence: `POST /terrariums/{id}/silences { metric, untilUtc, reason }`, max 24 h,
@@ -341,6 +378,9 @@ hysteresis, dedupe and phase rules. *The engine runs server-side only — the si
   **then** the alert appears with both `TriggeredAt` and `ResolvedAt`.
 - **Given** a resolved alert, **when** the same excursion recurs, **then** a new alert row is created
   with a new id (history is never mutated).
+- **Given** one `tempC` alert and one `humidityPct` alert open on the same enclosure, **when** the user
+  requests `GET /alerts?family=species`, **then** only the `tempC` alert is returned, and
+  `?family=enclosure` returns only the humidity one; `?family=habitat` is `400 family_invalid`.
 
 ---
 
@@ -490,6 +530,58 @@ hysteresis, dedupe and phase rules. *The engine runs server-side only — the si
 
 ---
 
+## FR-19 — Administrator: account management and the deployment dashboard
+**Priority** MUST · **Actors** Admin
+
+**Added 2026-10-17.** The administrator's surface: manage accounts, see the whole deployment at once, and edit the
+role matrix. It is a requirement of its own rather than a clause of FR-18 because it is the only place the product
+reads data across accounts, and because the guarantees about who may do it are the point of the feature.
+
+**Rules**
+- `BR-19.1` **Account management** at `/api/v1/users` (MUST): list with search and paging, create, read, edit
+  preferences, reset a password, change a role, disable, re-enable, and delete. Reads require `user.read`, every
+  write `user.manage`. Registration is unchanged and still produces an `Owner`; a created account may be given any
+  role code, defaulting to `Owner`.
+- `BR-19.2` **Deletion is two verbs.** The default `DELETE /users/{id}` **disables** the account (its data is kept,
+  it cannot sign in, its sessions end); `?purge=true` erases the row and MUST be refused with `409 account_in_use`
+  when enclosures, boards, alerts or audit rows still name the account. An account that owns things is disabled, not
+  deleted, because a board whose owner no longer exists is worse than an account that is merely disabled.
+- `BR-19.3` **Two guards.** An administrator MUST NOT act on their own account (`409 self_change_refused`), and a
+  change MUST NOT leave the deployment with nobody able to manage accounts (`409 last_administrator_refused`). The
+  second is evaluated by counting accounts whose role grants `user.manage`, not by comparing role names.
+- `BR-19.4` **Every account action is audited** (`account.created`, `account.updated`, `account.password_reset`,
+  `account.role_changed`, `account.disabled`, `account.enabled`, `account.deleted`), with the actor and, for a
+  purge, what the account held.
+- `BR-19.5` **The deployment dashboard** at `/api/v1/admin/*` (MUST) requires `data.read.any` and MUST be the only
+  read surface that reaches other accounts' data. It answers: the counts a reviewer asks for (accounts, enclosures,
+  boards online, open alerts split by family and severity, species profiles), every account with its holdings,
+  every enclosure with its owner and open-alert count, every board including unclaimed ones, and every alert with
+  its owner, enclosure and family. Each list is paged and searchable.
+- `BR-19.6` **The role matrix is editable** (MUST): `/api/v1/admin/roles` lists roles with their grants, the
+  cross-account codes they hold, and how many accounts hold them; `/api/v1/admin/permissions` is the catalogue a
+  console offers for granting. A custom role may be created, re-granted and deleted; a system role's grants may be
+  edited but it MUST NOT be deleted (`409 system_role_immutable`), and a role an account holds MUST NOT be deleted
+  (`409 role_in_use`). Editing a role requires `user.manage`; reading the matrix requires `user.read`.
+- `BR-19.7` **Nothing in FR-19 changes what a keeper sees.** A keeper's own lists stay scoped to their account, and
+  the two `data.*.any` codes are held by no role below `Admin`.
+
+**Acceptance criteria**
+- **Given** an account holding `data.read.any`, **when** it calls `GET /api/v1/admin/overview`, **then** it receives
+  the deployment counts, every account with its holdings, and both alert families with their metric keys and open
+  counts.
+- **Given** an account holding `Viewer` (no `data.read.any`), **when** it calls any `/admin/*` route, **then** the
+  response is `403`.
+- **Given** the administrator's own account, **when** it tries to disable or demote itself, **then** the response is
+  `409 self_change_refused`; **and given** it is the only account holding `user.manage`, **when** its role is
+  changed, **then** the response is `409 last_administrator_refused`.
+- **Given** an account that owns one enclosure, **when** `DELETE /users/{id}?purge=true` is called, **then** the
+  response is `409 account_in_use` and the account is untouched; **when** the same account owns nothing, **then** the
+  row is erased and a later read of it is `404`.
+- **Given** the `Viewer` role, **when** an administrator removes `notification.read` from it, **then** the change is
+  stored, the audit entry records the set before and after, and a subsequent start-up does not restore the grant.
+
+---
+
 ## Requirement index
 
 | Id | Title | Priority | Primary docs |
@@ -512,3 +604,4 @@ hysteresis, dedupe and phase rules. *The engine runs server-side only — the si
 | FR-16 | Device fleet management | MUST | `02-design/02` |
 | FR-17 | Manual camera snapshot | MAY | `02-design/04` |
 | FR-18 | Operational visibility and audit | MUST | `03/03`, `05/02` |
+| FR-19 | Administrator: account management and the deployment dashboard | MUST | `02-design/06`, `07/03` |

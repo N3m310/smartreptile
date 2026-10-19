@@ -2,8 +2,11 @@ using System.Text;
 using FluentAssertions;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Application.Identity;
+using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure.Security;
+using SmartReptile.Tests.Unit.Terrariums;
 
 namespace SmartReptile.Tests.Unit.Application;
 
@@ -24,6 +27,7 @@ public class AuthServiceTests
 
     private readonly TestClock _clock = new();
     private readonly FakeUserStore _store = new();
+    private readonly FakeTimeZoneStore _zones = new();
     private readonly FakeLoginThrottleStore _throttle = new();
     private readonly FakeSecretGenerator _secrets = new();
     private readonly FakeRecoveryCodeGenerator _recoveryCodes = new();
@@ -33,6 +37,7 @@ public class AuthServiceTests
     public AuthServiceTests() =>
         _auth = new AuthService(
             _store,
+            _zones,
             new FakePasswordHasher(),
             new FakeAccessTokenService(_clock),
             _secrets,
@@ -58,7 +63,7 @@ public class AuthServiceTests
         var user = _store.Users.Should().ContainSingle().Subject;
         user.Username.Should().Be("linh");
         user.Email.Should().Be("linh@example.com");
-        user.Role.Should().Be(UserRole.Owner);
+        user.RoleId.Should().Be(SystemRoles.OwnerId, "registration always produces the owner role (BR-18.2)");
         user.PasswordIterations.Should().Be(FakePasswordHasher.TargetIterations);
         user.PasswordHash.Should().HaveCount(32);
         user.PasswordSalt.Should().HaveCount(16);
@@ -155,7 +160,7 @@ public class AuthServiceTests
             PasswordHash = stale.Hash,
             PasswordSalt = stale.Salt,
             PasswordIterations = stale.Iterations,
-            Role = UserRole.Owner,
+            RoleId = SystemRoles.OwnerId,
         });
 
         var outcome = await LoginAsync();
@@ -301,18 +306,40 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task ChangePassword_switches_the_password_and_ends_every_session()
+    public async Task ChangePassword_switches_the_password_and_ends_every_other_session()
+    {
+        var caller = await RegisterAndLoginAsync();
+        var elsewhere = (await LoginAsync()).Session!;
+
+        var outcome = await _auth.ChangePasswordAsync(
+            caller.User.Id,
+            new ChangePasswordRequest(Password, NewPassword, caller.RefreshToken));
+
+        outcome.Succeeded.Should().BeTrue();
+
+        // The session that made the change survives — the caller has just proved the credential the change is
+        // about — and the one that did not is gone.
+        (await _auth.RefreshAsync(caller.RefreshToken)).Succeeded.Should().BeTrue();
+        (await _auth.RefreshAsync(elsewhere.RefreshToken)).Problem!.Code.Should().Be("refresh_token_invalid");
+
+        (await LoginAsync(password: NewPassword)).Succeeded.Should().BeTrue();
+        (await LoginAsync()).Problem!.Code.Should().Be("invalid_credentials");
+    }
+
+    [Fact]
+    public async Task ChangePassword_without_a_named_session_ends_them_all()
     {
         var session = await RegisterAndLoginAsync();
+        await LoginAsync();
 
         var outcome = await _auth.ChangePasswordAsync(
             session.User.Id,
             new ChangePasswordRequest(Password, NewPassword));
 
         outcome.Succeeded.Should().BeTrue();
-        _store.Tokens.Should().OnlyContain(token => token.RevokedAt != null);
-        (await LoginAsync(password: NewPassword)).Succeeded.Should().BeTrue();
-        (await LoginAsync()).Problem!.Code.Should().Be("invalid_credentials");
+        _store.Tokens.Should().OnlyContain(
+            token => token.RevokedAt != null,
+            "a session the caller did not name is not the caller's to keep");
     }
 
     // ---- profile ------------------------------------------------------------------------------------
@@ -327,6 +354,273 @@ public class AuthServiceTests
         profile.Should().NotBeNull();
         profile!.Username.Should().Be("linh");
         (await _auth.GetProfileAsync(Guid.NewGuid())).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetProfile_carries_the_notification_preferences_the_clients_render()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var profile = await _auth.GetProfileAsync(session.User.Id);
+
+        // Defaults from the entity, in the wire spelling both clients compare against.
+        profile!.PreferredLanguage.Should().Be("vi");
+        profile.TimeZoneId.Should().Be("Asia/Ho_Chi_Minh");
+        profile.QuietHoursStart.Should().BeNull();
+        profile.QuietHoursEnd.Should().BeNull();
+        profile.MinNotifySeverity.Should().Be("warning");
+        profile.ChannelFcmEnabled.Should().BeFalse();
+        profile.ChannelEmailEnabled.Should().BeFalse();
+        profile.HasFcmToken.Should().BeFalse();
+    }
+
+    // ---- profile edit (TASKS 2026-10-14, item 9a) ----------------------------------------------------
+
+    [Fact]
+    public async Task UpdateProfile_is_a_patch_that_leaves_omitted_fields_alone()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(
+                null, null, null, null, null, ChannelFcmEnabled: null, ChannelEmailEnabled: true, FcmToken: null));
+
+        outcome.Succeeded.Should().BeTrue();
+
+        var profile = await _auth.GetProfileAsync(session.User.Id);
+        profile!.ChannelEmailEnabled.Should().BeTrue();
+        profile.PreferredLanguage.Should().Be("vi", "a field the body did not mention keeps its value");
+        profile.TimeZoneId.Should().Be("Asia/Ho_Chi_Minh");
+    }
+
+    [Fact]
+    public async Task UpdateProfile_accepts_the_catalogues_zone_and_its_spelling()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, "europe/paris", null, null, null, null, null, null));
+
+        outcome.Succeeded.Should().BeTrue();
+        (await _auth.GetProfileAsync(session.User.Id))!.TimeZoneId.Should().Be("Europe/Paris");
+    }
+
+    [Fact]
+    public async Task UpdateProfile_refuses_a_zone_outside_the_catalogue()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, "Mars/Olympus_Mons", null, null, null, null, null, null));
+
+        outcome.Problem!.Code.Should().Be("profile_invalid");
+
+        var violation = outcome.Problem.Errors.Should().ContainSingle().Subject;
+        violation.Field.Should().Be("timeZoneId");
+        violation.Code.Should().Be("timezone_invalid");
+        _store.Users.Single().TimeZoneId.Should().Be("Asia/Ho_Chi_Minh", "a refused change writes nothing");
+    }
+
+    [Theory]
+    [InlineData("fr")]
+    [InlineData("")]
+    [InlineData("english")]
+    public async Task UpdateProfile_refuses_a_language_neither_client_speaks(string language)
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(language, null, null, null, null, null, null, null));
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("language_unsupported");
+    }
+
+    [Fact]
+    public async Task UpdateProfile_stores_a_quiet_hours_window_that_crosses_midnight()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, "22:00", "07:00", null, null, null, null));
+
+        outcome.Succeeded.Should().BeTrue();
+
+        var profile = await _auth.GetProfileAsync(session.User.Id);
+        profile!.QuietHoursStart.Should().Be("22:00");
+        profile.QuietHoursEnd.Should().Be("07:00");
+    }
+
+    [Fact]
+    public async Task UpdateProfile_refuses_half_a_quiet_hours_window()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, "22:00", null, null, null, null, null));
+
+        // One end of a window says nothing about when notifications are suppressed, so it is refused rather than
+        // completed by guesswork.
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("quiet_hours_incomplete");
+        _store.Users.Single().QuietHoursStart.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateProfile_clears_a_quiet_hours_window_with_an_empty_pair()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        (await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, "22:00", "07:00", null, null, null, null))).Succeeded.Should().BeTrue();
+
+        (await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, string.Empty, string.Empty, null, null, null, null)))
+            .Succeeded.Should().BeTrue();
+
+        var profile = await _auth.GetProfileAsync(session.User.Id);
+        profile!.QuietHoursStart.Should().BeNull();
+        profile.QuietHoursEnd.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateProfile_refuses_a_time_that_is_not_a_time()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, "ten at night", "07:00", null, null, null, null));
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("quiet_hours_invalid");
+    }
+
+    [Theory]
+    [InlineData("info", AlertSeverity.Info)]
+    [InlineData("CRITICAL", AlertSeverity.Critical)]
+    public async Task UpdateProfile_accepts_the_severity_vocabulary(string value, AlertSeverity expected)
+    {
+        var session = await RegisterAndLoginAsync();
+
+        (await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, null, null, value, null, null, null))).Succeeded.Should().BeTrue();
+
+        _store.Users.Single().MinNotifySeverity.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task UpdateProfile_refuses_a_severity_outside_the_vocabulary()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, null, null, "urgent", null, null, null));
+
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("severity_invalid");
+    }
+
+    [Fact]
+    public async Task UpdateProfile_stores_and_clears_a_push_token_without_echoing_it()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        (await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, null, null, null, ChannelFcmEnabled: true, null, "fcm-token-1")))
+            .Succeeded.Should().BeTrue();
+
+        var stored = (await _auth.GetProfileAsync(session.User.Id))!;
+        stored.HasFcmToken.Should().BeTrue("the client learns whether a token is stored, not what it is");
+        _store.Users.Single().FcmToken.Should().Be("fcm-token-1");
+
+        (await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, null, null, null, null, null, string.Empty)))
+            .Succeeded.Should().BeTrue();
+
+        _store.Users.Single().FcmToken.Should().BeNull();
+        (await _auth.GetProfileAsync(session.User.Id))!.HasFcmToken.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UpdateProfile_refuses_a_token_longer_than_the_column()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            session.User.Id,
+            new UpdateProfileRequest(null, null, null, null, null, null, null, new string('x', 257)));
+
+        // Checked here so an over-long token is a 400 rather than a truncated column or a 500.
+        outcome.Problem!.Errors.Should().ContainSingle().Which.Code.Should().Be("fcm_token_too_long");
+    }
+
+    [Fact]
+    public async Task UpdateProfile_refuses_a_session_whose_account_is_gone()
+    {
+        await RegisterAndLoginAsync();
+
+        var outcome = await _auth.UpdateProfileAsync(
+            Guid.NewGuid(),
+            new UpdateProfileRequest(null, null, null, null, null, null, null, null));
+
+        outcome.Problem!.Code.Should().Be("unauthenticated");
+    }
+
+    // ---- account deletion (TASKS 2026-10-14, item 9a) ------------------------------------------------
+
+    [Fact]
+    public async Task DeleteAccount_disables_the_account_and_ends_every_session()
+    {
+        var session = await RegisterAndLoginAsync();
+
+        var outcome = await _auth.DeleteAccountAsync(session.User.Id, new AuditActor("203.0.113.7", "curl", "c1"));
+
+        outcome.Succeeded.Should().BeTrue();
+
+        var user = _store.Users.Single();
+        user.DisabledAt.Should().Be(_clock.UtcNow, "the row is kept — its terrariums and history name it");
+        _store.Tokens.Should().OnlyContain(token => token.RevokedAt != null);
+
+        // The account cannot sign in afterwards, which is what "deleted" means here.
+        (await LoginAsync()).Problem!.Code.Should().Be("invalid_credentials");
+
+        var entry = _store.AuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.AccountDisabled);
+        entry.EntityName.Should().Be(AuditEntity.User);
+        entry.EntityId.Should().Be(user.Id.ToString());
+        entry.AfterJson.Should().Contain("self_deleted");
+    }
+
+    [Fact]
+    public async Task DeleteAccount_twice_changes_nothing_and_records_nothing()
+    {
+        var session = await RegisterAndLoginAsync();
+        await _auth.DeleteAccountAsync(session.User.Id);
+        var firstDisable = _store.Users.Single().DisabledAt;
+
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        var again = await _auth.DeleteAccountAsync(session.User.Id);
+
+        again.Succeeded.Should().BeTrue();
+        _store.Users.Single().DisabledAt.Should().Be(firstDisable);
+        _store.AuditEntries.Should().ContainSingle("a repeat changes nothing, so there is no change to record");
+    }
+
+    [Fact]
+    public async Task DeleteAccount_refuses_a_session_whose_account_is_gone()
+    {
+        var outcome = await _auth.DeleteAccountAsync(Guid.NewGuid());
+
+        outcome.Problem!.Code.Should().Be("unauthenticated");
     }
 
     // ---- recovery (BR-01.5) -------------------------------------------------------------------------
@@ -437,7 +731,7 @@ public class AuthServiceTests
             PasswordHash = legacy.Hash,
             PasswordSalt = legacy.Salt,
             PasswordIterations = legacy.Iterations,
-            Role = UserRole.Owner,
+            RoleId = SystemRoles.OwnerId,
         });
 
         var outcome = await RecoverAsync("DEM2DEM2DEM2DEM2DEM2", identifier: "legacy");
@@ -692,7 +986,7 @@ public class AuthServiceTests
         _auth.RegisterAsync(new RegisterRequest(username, email, password, null));
 
     private Task<AuthOutcome> LoginAsync(string identifier = "linh", string password = Password) =>
-        _auth.LoginAsync(new LoginRequest(identifier, password, "unit-test"), Ip);
+        _auth.LoginAsync(new LoginRequest(identifier, password), Ip);
 
     private Task<AuthOutcome> ForgotPasswordAsync(string identifier = "linh") =>
         _auth.ForgotPasswordAsync(new ForgotPasswordRequest(identifier), Ip);

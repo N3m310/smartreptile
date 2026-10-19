@@ -1,13 +1,49 @@
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
+using SmartReptile.Domain.Reference;
 using SmartReptile.Domain.Species;
 using SmartReptile.Domain.Terrariums;
 using SmartReptile.Domain.Thresholds;
+using SmartReptile.Infrastructure.Persistence;
 
 namespace SmartReptile.Tests.Unit.Terrariums;
+
+/// <summary>
+/// In-memory <see cref="ITimeZoneStore"/>. Seeded from the real catalogue
+/// (<c>ReferenceDataSeeder.Catalogue</c>) rather than from a short list of its own, so a test that creates a
+/// terrarium is validating against exactly the ids a deployment offers — and so the catalogue's own shape can be
+/// asserted without a database.
+/// </summary>
+internal sealed class FakeTimeZoneStore : ITimeZoneStore
+{
+    private readonly List<TimeZoneReference> _zones;
+
+    public FakeTimeZoneStore()
+    {
+        _zones = [.. ReferenceDataSeeder.Catalogue.Select((seed, index) => new TimeZoneReference
+        {
+            IanaId = seed.IanaId,
+            DisplayName = seed.DisplayName,
+            CountryCode = seed.CountryCode,
+            StandardUtcOffsetMinutes = seed.StandardUtcOffsetMinutes,
+            SortOrder = index,
+        })];
+    }
+
+    public IReadOnlyList<TimeZoneReference> Zones => _zones;
+
+    public Task<IReadOnlyList<TimeZoneReference>> ListAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<TimeZoneReference>>([.. _zones.OrderBy(zone => zone.SortOrder)]);
+
+    /// <summary>Mirrors the adapter's case-insensitive lookup (SQL Server's default collation).</summary>
+    public Task<TimeZoneReference?> FindAsync(string ianaId, CancellationToken cancellationToken) =>
+        Task.FromResult(_zones.FirstOrDefault(
+            zone => string.Equals(zone.IanaId, ianaId, StringComparison.OrdinalIgnoreCase)));
+}
 
 /// <summary>
 /// In-memory <see cref="ITerrariumStore"/>. Same rule as the other fakes in this suite: no database, no clock, and
@@ -25,11 +61,17 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
     private readonly List<TelemetrySample> _samples = [];
     private readonly List<Alert> _alerts = [];
     private readonly List<SpeciesProfile> _profiles = [];
+    private readonly List<ThresholdSnapshot> _snapshots = [];
+    private readonly List<AuditLog> _auditEntries = [];
+    private readonly HashSet<Guid> _users = [];
 
     /// <summary>How many times the store was committed — asserted so "nothing was written" is a real assertion.</summary>
     public int SaveCount { get; private set; }
 
     public IReadOnlyList<Terrarium> Terrariums => _terrariums;
+
+    /// <summary>Snapshots staged by the threshold change path, newest last.</summary>
+    public IReadOnlyList<ThresholdSnapshot> ThresholdSnapshots => _snapshots;
 
     /// <summary>A species profile the create path will accept.</summary>
     public SpeciesProfile AddProfile(string name = "Test species", TimeOnly? lightsOn = null, decimal photoperiodHours = 12m)
@@ -112,6 +154,16 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
         return terrarium;
     }
 
+    /// <summary>
+    /// Marks a terrarium as soft-deleted, the way <c>DeleteAsync</c> does: the state column is the source of truth
+    /// and the timestamp beside it is only the detail of when.
+    /// </summary>
+    public static void SoftDelete(Terrarium terrarium, DateTimeOffset at)
+    {
+        terrarium.Status = TerrariumStatus.Deleted;
+        terrarium.DeletedAt = at;
+    }
+
     /// <summary>A device bound to <paramref name="terrarium"/>.</summary>
     public static Device AddDevice(
         Terrarium terrarium,
@@ -180,9 +232,17 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
     public Task<IReadOnlyList<Terrarium>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<Terrarium>>(
             [.. _terrariums
-                .Where(terrarium => terrarium.UserId == ownerUserId)
+                .Where(terrarium => terrarium.UserId == ownerUserId && terrarium.Status == TerrariumStatus.Active)
                 .OrderBy(terrarium => terrarium.Name)
                 // The profile is always present once attached: every stored terrarium names a seeded profile.
+                .Select(terrarium => AttachProfile(terrarium)!)]);
+
+    /// <summary>Everything active, whatever account owns it — the administrator's list.</summary>
+    public Task<IReadOnlyList<Terrarium>> ListAllAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Terrarium>>(
+            [.. _terrariums
+                .Where(terrarium => terrarium.Status == TerrariumStatus.Active)
+                .OrderBy(terrarium => terrarium.Name)
                 .Select(terrarium => AttachProfile(terrarium)!)]);
 
     public Task<Terrarium?> FindOwnedAsync(
@@ -192,7 +252,14 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
         Task.FromResult(AttachProfile(_terrariums.FirstOrDefault(
             terrarium => terrarium.Id == terrariumId
                          && terrarium.UserId == ownerUserId
-                         && terrarium.DeletedAt == null)));
+                         && terrarium.Status == TerrariumStatus.Active)));
+
+    /// <summary>
+    /// The unscoped lookup. Mirrors the adapter's <c>IgnoreQueryFilters</c>: a soft-deleted row is returned, because
+    /// telling it apart from a missing one is what the query is for.
+    /// </summary>
+    public Task<Terrarium?> FindAnyAsync(Guid terrariumId, CancellationToken cancellationToken) =>
+        Task.FromResult(AttachProfile(_terrariums.FirstOrDefault(terrarium => terrarium.Id == terrariumId)));
 
     /// <summary>
     /// Fixes up the profile navigation the way EF Core's <c>Include</c> does, so a terrarium the store just
@@ -216,7 +283,27 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
     public Task<bool> SpeciesProfileExistsAsync(Guid speciesProfileId, CancellationToken cancellationToken) =>
         Task.FromResult(_profiles.Any(profile => profile.Id == speciesProfileId));
 
+    /// <summary>Registers an account, so the create path's caller check accepts it.</summary>
+    public void AddUser(Guid userId) => _users.Add(userId);
+
+    public Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken) =>
+        Task.FromResult(_users.Contains(userId));
+
     public void AddTerrarium(Terrarium terrarium) => _terrariums.Add(terrarium);
+
+    public void AddThresholdOverride(ThresholdOverride row) => Owner(row.TerrariumId)?.ThresholdOverrides.Add(row);
+
+    public void RemoveThresholdOverride(ThresholdOverride row) => Owner(row.TerrariumId)?.ThresholdOverrides.Remove(row);
+
+    public void AddThresholdSnapshot(ThresholdSnapshot snapshot) => _snapshots.Add(snapshot);
+
+    /// <summary>Audit rows staged for the next save, in order (BR-18.4).</summary>
+    public IReadOnlyList<AuditLog> AuditEntries => _auditEntries;
+
+    public void AddAuditEntry(AuditLog entry) => _auditEntries.Add(entry);
+
+    /// <summary>The stored terrarium a child row belongs to, so staging a child mirrors the adapter's fix-up.</summary>
+    private Terrarium? Owner(Guid terrariumId) => _terrariums.FirstOrDefault(terrarium => terrarium.Id == terrariumId);
 
     public Task<IReadOnlyDictionary<Guid, TerrariumActivity>> SummariseActivityAsync(
         IReadOnlyCollection<Guid> terrariumIds,

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
+using SmartReptile.Infrastructure.Security;
 
 namespace SmartReptile.Tests.Integration;
 
@@ -45,6 +46,17 @@ public sealed class DatabaseFixture : IAsyncLifetime
         var initializer = new DatabaseInitializer(
             db,
             new ReferenceDataSeeder(db, NullLogger<ReferenceDataSeeder>.Instance),
+            // The matrix is seeded by the migration, so this step finds the catalogue and the four roles already
+            // present and writes nothing — which is what a real deployment's second start-up does too.
+            new IdentitySeeder(db, NullLogger<IdentitySeeder>.Instance),
+            // No administrator: this fixture drives a shared database that the suite's own tests insert rows into,
+            // and an account created here would outlive the test that needed it. The seeder has its own test,
+            // which configures it explicitly and removes the row it creates.
+            new SystemAdminAccountSeeder(
+                db,
+                new Pbkdf2PasswordHasher(),
+                Options.Create(new AdminAccountOptions()),
+                NullLogger<SystemAdminAccountSeeder>.Instance),
             Options.Create(new StartupOptions()),
             NullLogger<DatabaseInitializer>.Instance);
 
@@ -53,6 +65,8 @@ public sealed class DatabaseFixture : IAsyncLifetime
         // Kept on the fixture so tests can assert what start-up actually did rather than inferring it.
         MigrationsAppliedAtStartup = outcome.MigrationsApplied;
         ProfilesCreatedAtStartup = outcome.ProfilesSeeded;
+        TimeZonesCreatedAtStartup = outcome.TimeZonesSeeded;
+        AdminCreatedAtStartup = outcome.AdminSeeded;
     }
 
     /// <inheritdoc />
@@ -63,6 +77,13 @@ public sealed class DatabaseFixture : IAsyncLifetime
 
     /// <summary>Profiles created by the fixture's own seeding run — 0 when already seeded.</summary>
     public int ProfilesCreatedAtStartup { get; private set; }
+
+    /// <summary>Time-zone catalogue rows created by the fixture's own seeding run — 0 when already seeded.</summary>
+    public int TimeZonesCreatedAtStartup { get; private set; }
+
+    /// <summary>True when the fixture's start-up created the system administrator. Always false here: the fixture
+    /// configures none, so the shared database keeps no account the suite did not ask for.</summary>
+    public bool AdminCreatedAtStartup { get; private set; }
 }
 
 /// <summary>Serialises the integration tests, so they share one initialised database.</summary>

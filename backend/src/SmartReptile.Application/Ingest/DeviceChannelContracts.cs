@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 
@@ -25,8 +26,17 @@ public enum DeviceChannel
 /// <summary>An event as it arrived, before it is stored.</summary>
 /// <param name="Type">Event the device reported.</param>
 /// <param name="Metric">Metric involved, for a sensor fault or its recovery.</param>
+/// <param name="ConsecutiveFailures">
+/// Failures the payload reported, for <c>sensor_fault</c> only — the count BR-07.1's device rule waits for. Read
+/// here rather than out of <paramref name="DetailJson"/> later because this is the adapter that knows the payload's
+/// shape; the payload is still kept whole, so a changed rule can be replayed by re-parsing the stored rows.
+/// </param>
 /// <param name="DetailJson">The event's own fields, kept verbatim as JSON.</param>
-public sealed record DeviceEventDraft(DeviceEventType Type, MetricCode? Metric, string? DetailJson);
+public sealed record DeviceEventDraft(
+    DeviceEventType Type,
+    MetricCode? Metric,
+    int? ConsecutiveFailures,
+    string? DetailJson);
 
 /// <summary>
 /// One parsed non-telemetry message. The channel says which members matter, which is why they are all optional on
@@ -90,6 +100,12 @@ public sealed record DeviceChannelOutcome
     /// <summary>Set when the message was stored.</summary>
     public DeviceStatusChanged? StatusChanged { get; init; }
 
+    /// <summary>
+    /// Alerts the message's own evidence opened or closed — the sensor fault of 3.3 — for the fan-out to push after
+    /// the commit that gave them their identities.
+    /// </summary>
+    public IReadOnlyList<AlertChange> AlertChanges { get; init; } = [];
+
     /// <summary>Set when the message was refused.</summary>
     public IngestProblem? Problem { get; init; }
 
@@ -97,8 +113,10 @@ public sealed record DeviceChannelOutcome
     public bool Succeeded => Problem is null;
 
     /// <summary>A stored message, with the transition to broadcast when there was one.</summary>
-    public static DeviceChannelOutcome Stored(DeviceStatusChanged? statusChanged = null) =>
-        new() { StatusChanged = statusChanged };
+    public static DeviceChannelOutcome Stored(
+        DeviceStatusChanged? statusChanged = null,
+        IReadOnlyList<AlertChange>? alertChanges = null) =>
+        new() { StatusChanged = statusChanged, AlertChanges = alertChanges ?? [] };
 
     /// <summary>A refusal.</summary>
     public static DeviceChannelOutcome Rejected(string code, string message) =>

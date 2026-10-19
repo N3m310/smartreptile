@@ -1,3 +1,4 @@
+using SmartReptile.Application.Alerts;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Readings;
 
@@ -123,7 +124,18 @@ public interface ITelemetryBroadcaster
     /// `07-appendices/03` §6). Separate from <see cref="BroadcastAsync"/> because a status message commits no
     /// samples: there is nothing to carry, only the new state.
     /// </summary>
+    /// <param name="statusChanged">The transition as the channel pipeline reported it.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task BroadcastStatusAsync(DeviceStatusChanged statusChanged, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Broadcasts alert lifecycle moves that are already committed (the <c>alertChanged</c> event of
+    /// `07-appendices/03` §6). A batch rather than one call per alert: one sample can open two metrics at once, and
+    /// a client should receive the moves in the order they were decided.
+    /// </summary>
+    /// <param name="changes">Moves to push, oldest decision first.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task BroadcastAlertsAsync(IReadOnlyList<AlertChangedPayload> changes, CancellationToken cancellationToken);
 }
 
 /// <summary>

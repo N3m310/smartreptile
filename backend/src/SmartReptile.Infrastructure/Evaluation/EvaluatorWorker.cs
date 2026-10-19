@@ -1,17 +1,18 @@
 using Microsoft.Extensions.DependencyInjection;
+using SmartReptile.Application.Alerts;
 using SmartReptile.Application.Evaluation;
+using SmartReptile.Application.Ingest;
 using SmartReptile.Infrastructure.Observability;
 
 namespace SmartReptile.Infrastructure.Evaluation;
 
 /// <summary>
-/// Reads batches of committed samples off <see cref="InProcessEvaluationQueue"/> and hands them to
+/// Reads per-device ordered samples released by <see cref="InProcessEvaluationQueue"/> and hands them to
 /// <see cref="SampleEvaluator"/>.
 /// </summary>
 /// <remarks>
-/// One batch at a time, single reader, ordered: the same shape as <see cref="Ingest.IngestWorker"/>, and for the
-/// same reason. Evaluation is stateful per <c>(terrarium, metric, phase)</c>, so a batch must be applied in ingest
-/// order or a dwell window would be measured against the wrong predecessor.
+/// One batch at a time, single reader: evaluation is stateful per <c>(terrarium, metric, phase)</c>, so released
+/// samples must be applied in event-time order or a dwell window would be measured against the wrong predecessor.
 /// <para>
 /// A batch that throws is logged and the loop continues. Nothing is acknowledged here — the samples are already
 /// committed, so there is nothing to un-ack — and the design's rule that "the next sample retries" is what keeps a
@@ -28,6 +29,7 @@ public sealed class EvaluatorWorker(
     InProcessEvaluationQueue queue,
     IServiceScopeFactory scopes,
     SmartReptileMetrics metrics,
+    ITelemetryBroadcaster broadcaster,
     ILogger<EvaluatorWorker> logger) : BackgroundService
 {
     /// <inheritdoc />
@@ -47,6 +49,7 @@ public sealed class EvaluatorWorker(
                     var outcome = await evaluator.EvaluateAsync(batch, stoppingToken).ConfigureAwait(false);
 
                     Record(outcome);
+                    await PushAlertsAsync(outcome, stoppingToken).ConfigureAwait(false);
 
                     logger.LogDebug(
                         "Evaluated {Count} sample(s): {Advanced} reading(s) advanced a state key, {Skipped} skipped, "
@@ -79,6 +82,33 @@ public sealed class EvaluatorWorker(
         }
 
         logger.LogInformation("Evaluator worker stopped");
+    }
+
+    /// <summary>
+    /// Pushes the alerts this pass moved, best-effort and after the commit — the same rule the ingest fan-out
+    /// follows: the rows exist, so a SignalR outage is a lost push and never a lost alert.
+    /// </summary>
+    /// <param name="outcome">What the pass did.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private async Task PushAlertsAsync(EvaluationOutcome outcome, CancellationToken cancellationToken)
+    {
+        if (outcome.AlertChanges.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await broadcaster
+                .BroadcastAlertsAsync(
+                    outcome.AlertChanges.Select(AlertChangedPayload.From).ToArray(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Broadcasting {Count} alert move(s) failed", outcome.AlertChanges.Count);
+        }
     }
 
     private void Record(EvaluationOutcome outcome)

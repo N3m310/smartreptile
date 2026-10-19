@@ -1,10 +1,12 @@
 using FluentAssertions;
+using SmartReptile.Application.Devices;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Ingest;
 using SmartReptile.Tests.Unit.Application;
+using SmartReptile.Tests.Unit.Devices;
 
 namespace SmartReptile.Tests.Unit.Application.Ingest;
 
@@ -32,7 +34,11 @@ public class DeviceChannelPipelineTests
         var store = _store;
         var updater = new DeviceStateUpdater(store);
 
-        _pipeline = new DeviceChannelPipeline(new JsonDeviceChannelParser(), store, updater);
+        _pipeline = new DeviceChannelPipeline(
+            new JsonDeviceChannelParser(),
+            store,
+            updater,
+            new DeviceSignalRecorder(new FakeDeviceSignalStore()));
 
         _device = new Device
         {

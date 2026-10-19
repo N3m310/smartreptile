@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    The neutral (English) deck of the notification text contract (§02-design/05 §7). ADR-013 keeps user-facing text
+    out of the database, so these strings live here and in NotificationStrings.vi.resx, and nothing about a
+    notification's content is stored per language.
+  -->
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AlertTitle" xml:space="preserve">
+    <value>{0} · {1} {2}</value>
+  </data>
+  <data name="DirectionHigh" xml:space="preserve">
+    <value>high</value>
+  </data>
+  <data name="DirectionLow" xml:space="preserve">
+    <value>low</value>
+  </data>
+  <data name="AlertBody" xml:space="preserve">
+    <value>{0} {1} (band {2}–{3} {1}), out of range {4} min</value>
+  </data>
+  <data name="AlertBodyNoBand" xml:space="preserve">
+    <value>Reported for {0} min</value>
+  </data>
+  <data name="AlertBodyCritical" xml:space="preserve">
+    <value>{0} {1} — critical band exceeded</value>
+  </data>
+  <data name="AlertTitleSilent" xml:space="preserve">
+    <value>{0} · sensor silent</value>
+  </data>
+  <data name="AlertTitleSensorFault" xml:space="preserve">
+    <value>{0} · {1} sensor fault</value>
+  </data>
+  <data name="AlertTitleClockSkew" xml:space="preserve">
+    <value>{0} · device clock off</value>
+  </data>
+  <data name="AlertTitleGradient" xml:space="preserve">
+    <value>{0} · surface too hot</value>
+  </data>
+  <data name="AlertTitleLightDeficit" xml:space="preserve">
+    <value>{0} · not enough light today</value>
+  </data>
+  <data name="AlertBodySilent" xml:space="preserve">
+    <value>No reading since {0}, which is {1} min at the configured interval</value>
+  </data>
+  <data name="AlertBodySkew" xml:space="preserve">
+    <value>The device clock is {0} min away from the server time</value>
+  </data>
+  <data name="EscalationBody" xml:space="preserve">
+    <value>{0} Not acknowledged for {1} min</value>
+  </data>
+  <data name="DigestTitle" xml:space="preserve">
+    <value>{0} · alerts summary</value>
+  </data>
+  <data name="DigestBody" xml:space="preserve">
+    <value>{0} alerts in the last hour ({1} warnings, {2} critical), worst {3} {4}</value>
+  </data>
+  <data name="DigestBodyNoPeak" xml:space="preserve">
+    <value>{0} alerts in the last hour ({1} warnings, {2} critical)</value>
+  </data>
+  <data name="Metric_tempC" xml:space="preserve">
+    <value>Temperature</value>
+  </data>
+  <data name="Metric_humidityPct" xml:space="preserve">
+    <value>Humidity</value>
+  </data>
+  <data name="Metric_lightLux" xml:space="preserve">
+    <value>Light</value>
+  </data>
+  <data name="Metric_uvIndex" xml:space="preserve">
+    <value>UV index</value>
+  </data>
+  <data name="Metric_surfaceTempC" xml:space="preserve">
+    <value>Surface temperature</value>
+  </data>
+  <data name="Metric_batteryPct" xml:space="preserve">
+    <value>Battery</value>
+  </data>
+  <data name="Metric_rssiDbm" xml:space="preserve">
+    <value>Wi-Fi signal</value>
+  </data>
+</root>

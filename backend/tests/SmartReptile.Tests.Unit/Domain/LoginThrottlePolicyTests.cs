@@ -44,7 +44,7 @@ public class LoginThrottlePolicyTests
     [Fact]
     public void Defaults_match_the_documented_windows()
     {
-        LoginThrottlePolicy.MaxFailuresPerUsername.Should().Be(5);
+        LoginThrottlePolicy.MaxFailuresPerUsername.Should().Be(10);
         LoginThrottlePolicy.UsernameWindowMinutes.Should().Be(15);
         LoginThrottlePolicy.MaxFailuresPerIp.Should().Be(20);
         LoginThrottlePolicy.IpWindowMinutes.Should().Be(15);
