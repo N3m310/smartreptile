@@ -14,6 +14,10 @@ import {
 import { initialAlerts, AlertItem } from '../data/mockData';
 
 export const Alerts: React.FC = () => {
+  return <MockAlerts />;
+};
+
+const MockAlerts: React.FC = () => {
   const [alerts, setAlerts] = useState<AlertItem[]>(initialAlerts);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'resolved'>('all');
 
@@ -116,10 +120,6 @@ export const Alerts: React.FC = () => {
           >
             Đã xử lý ({alerts.length - pendingCount})
           </button>
-        </div>
-
-        <div className="text-xs text-[#8e9e8f] hidden sm:block pr-2">
-          Quy tắc: <code className="text-[#4a9e6a] font-mono">if (value &gt; max || value &lt; min) trigger</code>
         </div>
       </div>
 
@@ -237,4 +237,3 @@ export const Alerts: React.FC = () => {
     </div>
   );
 };
-

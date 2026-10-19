@@ -215,4 +215,3 @@ export const Devices: React.FC = () => {
     </div>
   );
 };
-
