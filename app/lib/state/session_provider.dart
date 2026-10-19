@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../core/problem.dart';
 import '../data/api_client.dart';
 import '../data/token_store.dart';
 import '../models/session_models.dart';
+import '../services/push_registration_service.dart';
 
 /// Who is signed in, and therefore what the app may show.
 ///
@@ -17,13 +20,18 @@ import '../models/session_models.dart';
 /// has to be stored at all.
 class SessionProvider extends ChangeNotifier {
   /// Creates the provider and wires the client's renewal hook.
-  SessionProvider({required this._api, TokenStore? store})
-    : _store = store ?? TokenStore.secure() {
+  SessionProvider({
+    required this._api,
+    TokenStore? store,
+    PushRegistrationService? pushRegistration,
+  }) : _store = store ?? TokenStore.secure() {
+    _pushRegistration = pushRegistration;
     _api.onUnauthorized = _renew;
   }
 
   final ApiClient _api;
   final TokenStore _store;
+  late final PushRegistrationService? _pushRegistration;
 
   AccountProfile? _user;
   String? _refreshToken;
@@ -78,6 +86,7 @@ class SessionProvider extends ChangeNotifier {
       );
       _apply(AuthSession.fromJson(payload));
       await _writeRefreshToken(_refreshToken);
+      unawaited(_pushRegistration?.signedIn());
     } on AppFailure catch (failure) {
       if (failure.isNetworkFailure) {
         _lastFailure = failure;
@@ -106,6 +115,7 @@ class SessionProvider extends ChangeNotifier {
       );
       _apply(AuthSession.fromJson(payload));
       await _writeRefreshToken(_refreshToken);
+      unawaited(_pushRegistration?.signedIn());
       return true;
     } on AppFailure catch (failure) {
       _lastFailure = failure;
@@ -127,6 +137,7 @@ class SessionProvider extends ChangeNotifier {
     final token = _refreshToken;
 
     try {
+      await _pushRegistration?.signedOut();
       if (token != null && token.isNotEmpty) {
         await _api.postJson(
           '/api/v1/auth/logout',

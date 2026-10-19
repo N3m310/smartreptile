@@ -138,6 +138,8 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
 | Readiness with the database **down** | `docker stop smartreptile-db` → `curl /health/ready` | ✅ `503` in **3.0 s** — `database: Unhealthy` ("Database probe timed out after 3 s"), `mqtt-broker: Healthy`; `/health/live`, `/version` and `/metrics` all still `200` (degraded mode, NFR-03). Before the probe was bounded this took 16.1 s — defect 10 below |
 | Recovery without an API restart | `docker start smartreptile-db` → `curl /health/ready` | ✅ back to `200 Healthy` in 7 ms; api `RestartCount` was 0 across the whole drill |
 | Version / metrics / root | `curl /version /metrics /` | ✅ counters + `brokerRunning: true` |
+| M3.6 summaries / back-fill recomputation | `SummaryWorker`; rollup and daily-summary persistence; SQL Server integration cases | ✅ **2026-10-19**: last-48-hour rollups and current/previous local-day summaries are recomputed from raw telemetry; a back-filled reading updates the existing rows without duplicates (`SummaryRecomputationTests`), the `daily` fixture through the real evaluator produces one back-dated alert and summaries matching hand-computed values (`TC-I-06`), and the two SHOULD signals are built (`GradientWarning`, `LightDeficit`). Only the later summary read endpoint is outstanding |
+| M3.7 / `TC-I-15` ops acceptance | 1,000 synthetic MQTT samples; broker-failure probe; `npm run check:strings` | ✅ **2026-10-19**: `ingest_samples_total` **7 → 1,007** (exactly +1,000; 9 batches; all 1,000 rows persisted; rejected stayed 0); broker-failure probe → `/health/ready` **503** (`database: Healthy`, `mqtt-broker: Unhealthy`) while authenticated `/auth/me` remained **200**; 509 shared i18n keys passed. Probe removed and normal API restored Healthy |
 | MQTT rejects anonymous devices | `paho-mqtt` connect without credentials | ✅ `CONNACK: Bad user name or password`, and `mqtt_rejected_connections_total` incremented |
 | MQTT verifies the device secret | `paho-mqtt` over TLS with a real credential, a wrong one and none | ✅ **2.3 done 2026-10-03**: anonymous, wrong-secret and unknown-device connects all answered `Bad user name or password`; a claimed device connected over TLS *and* over plaintext; wildcard and cross-device subscriptions refused; a publish under another device's prefix refused and that session dropped; `POST /devices/{id}/revoke` closed the live session in **0.0 s** and the credential could not reconnect |
 | MQTT topic ACL | `paho-mqtt` subscribe/publish attempts outside the device's own prefix | ✅ **2.3**: own `cmd` granted; `sr/v1/d/+/telemetry` and another device's `cmd` refused; counters `mqtt_refused_subscriptions_total` / `mqtt_refused_publications_total` on `/metrics` |
@@ -189,14 +191,13 @@ Measured on the development machine (Windows, .NET 10.0.112, Flutter 3.47.4, Pla
   Admin; not Viewer), `GET /alerts/{id}/timeline` shows what happened to one alert and who did it, and
   `/api/v1/terrariums/{id}/silences` silences a metric — or the whole box — for at most 24 hours with a reason on
   record. Summaries and exports remain 3.6 and the export task.
-- **Alerts are pushed but not delivered.** An alert that opens, escalates, is acknowledged or is resolved is pushed
-  to the terrarium's group as `alertChanged`, and every lifecycle action writes its audit row in the same
-  transaction — so a dashboard badge can update live. What is still absent is *delivery*: no FCM push, no email, no
-  inbox row, because the notification dispatcher is 3.5, and a silence today suppresses what 3.5 will send rather
-  than anything the system does now. The per-device **reorder window** of
-  `docs/02-design/03` §7 is also unbuilt: samples are evaluated in ingest order, which for one node *is*
-  `RecordedAt` order, but a second publisher or a broker redelivery could arrive out of order and the
-  `EvaluationState` watermark is an id watermark, so it cannot detect that.
+- **Alert delivery is built (M3.5).** The dispatcher writes inbox notifications and sends through FCM HTTP v1;
+  SMTP is available through the local Mailpit sink. A real push was received by the Android 16 emulator on
+  2026-10-19 using a synthetic `DeviceSilent` alert. It arrived 113 s after the dispatcher recorded `Sent`, so the
+  ≤90 s timing and full excursion/escalation/recovery path in `TC-E2E-03` remain unverified. The per-device
+  **reorder window** of `docs/02-design/03` §7 is also unbuilt: samples are evaluated in ingest order, which for
+  one node *is* `RecordedAt` order, but a second publisher or a broker redelivery could arrive out of order and
+  the `EvaluationState` watermark is an id watermark, so it cannot detect that.
 - **No sensor hardware is connected**: `main.cpp` runs with bench mode off and reports placeholder values until
   M2, and no board has ever been flashed from this repository.
 - **The MQTT broker verifies device credentials** (task 2.3, 2026-10-03): `username = deviceId`, `password =
@@ -576,8 +577,10 @@ reported `notifications_sent_total: 1`, a second full sweep left the table at **
 attempt of that run also logged a failed query against a `Alert` table that did not exist yet: the worker's *first*
 sweep ran before `DatabaseInitializer` had applied its migrations, so the first tick now waits one interval — the
 shape the silence watchdog already used, and the reason its own sweep has never shown that error.
-**Still open, stated rather than implied:** a real FCM push (no Google service-account file and no device
-registration token exist on this machine) and therefore `TC-E2E-03`; escalation steps 2 and 3 reach the owner only,
-because the product holds one account per enclosure and §6's Technician joins at the 30-minute step; and a recovery
-notice is always withheld with `preference`, because v1 has no opt-in column for one — the record says a notice was
-withheld rather than pretending it was attempted.
+**Real FCM receipt verified (2026-10-19):** a synthetic `DeviceSilent` alert produced an Android system
+notification on the API 36 emulator using the mounted service-account credential and registered device token.
+The receipt was 113 s after the dispatcher recorded `Sent`, so the ≤90 s timing and full excursion/escalation/
+recovery sequence in `TC-E2E-03` remain open. Escalation steps 2 and 3 reach the owner only, because the product
+holds one account per enclosure and §6's Technician joins at the 30-minute step; a recovery notice is always
+withheld with `preference`, because v1 has no opt-in column for one — the record says a notice was withheld rather
+than pretending it was attempted.

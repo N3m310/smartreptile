@@ -232,7 +232,8 @@ class _RootShellState extends State<_RootShell> {
       // notice, and hiding it there is the same rule read the other way round.
       body: Column(
         children: [
-          if (tabs[index].isMock) const MockDataNotice(),
+          if (tabs[index].isMock && !context.watch<AppDataProvider>().isLive)
+            const MockDataNotice(),
           Expanded(child: tabs[index].screen),
         ],
       ),

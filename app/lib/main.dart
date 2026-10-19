@@ -1,5 +1,9 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -18,6 +22,7 @@ import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
 import 'state/species_profile_provider.dart';
 import 'state/telemetry_provider.dart';
+import 'services/push_registration_service.dart';
 
 /// Composition root of the app (`03-implementation/05` §1).
 ///
@@ -33,14 +38,38 @@ import 'state/telemetry_provider.dart';
 /// The default was the prototype until 2026-10-14: it was the richer UI while the API had nothing to say, and it
 /// became the wrong first impression the moment the app had a shell of its own with the current brand and copy
 /// deck.
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final messaging = Env.prototypeMode
+      ? null
+      : await _initializeFirebaseMessaging();
   final clock = Clock.system();
   final api = ApiClient(baseUrl: Env.apiBase);
   final settings = SettingsProvider();
-  final appData = AppDataProvider();
-  final session = SessionProvider(api: api);
+  final appData = AppDataProvider(api: api);
+  final pushRegistration = messaging == null
+      ? null
+      : PushRegistrationService(
+          api,
+          () async {
+            final result = await messaging.requestPermission(
+              alert: true,
+              badge: true,
+              sound: true,
+            );
+            return result.authorizationStatus ==
+                    AuthorizationStatus.authorized ||
+                result.authorizationStatus == AuthorizationStatus.provisional;
+          },
+          // `register`/`onRegistered` returns a Firebase Installation ID. The backend sends through the
+          // FCM HTTP v1 `message.token` field, so keep using the actual FCM registration token API.
+          // ignore: deprecated_member_use
+          messaging.getToken,
+          // ignore: deprecated_member_use
+          messaging.onTokenRefresh,
+        );
+  final session = SessionProvider(api: api, pushRegistration: pushRegistration);
   final admin = AdminProvider(api: api);
   final accounts = AccountsProvider(api: api);
   final roles = RolesProvider(api: api);
@@ -56,8 +85,15 @@ void main() {
       accounts.clear();
       roles.clear();
       species.clear();
+      appData.resetToMocks();
+    } else {
+      appData.loadAll();
     }
   });
+
+  if (session.isSignedIn) {
+    appData.loadAll();
+  }
 
   runApp(
     MultiProvider(
@@ -93,4 +129,36 @@ void main() {
   // The stored refresh token, on the other hand, decides whether the administration tab exists at all — so the
   // shell shows its restoring state until this answers, rather than flashing a signed-out navigation bar.
   unawaited(session.restore());
+}
+
+Future<FirebaseMessaging?> _initializeFirebaseMessaging() async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    debugPrint('FCM registration is currently supported only on Android.');
+    return null;
+  }
+
+  if (!Env.firebaseConfigured) {
+    debugPrint(
+      'FCM is disabled for this build. Provide FIREBASE_API_KEY, FIREBASE_APP_ID, '
+      'FIREBASE_PROJECT_ID and FIREBASE_MESSAGING_SENDER_ID to enable it.',
+    );
+    return null;
+  }
+
+  try {
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: Env.firebaseApiKey,
+        appId: Env.firebaseAppId,
+        messagingSenderId: Env.firebaseMessagingSenderId,
+        projectId: Env.firebaseProjectId,
+      ),
+    );
+    return FirebaseMessaging.instance;
+  } on FirebaseException catch (error, stackTrace) {
+    debugPrint(
+      'Firebase initialization failed: ${error.message ?? error.code}\n$stackTrace',
+    );
+    return null;
+  }
 }

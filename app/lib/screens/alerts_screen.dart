@@ -90,35 +90,43 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
           // Alerts List
           Expanded(
-            child: filtered.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.check_circle_outline,
-                            size: 48, color: AppColors.primary),
-                        SizedBox(height: 12),
-                        Text(
-                          'Không có cảnh báo nào trong mục này',
-                          style: TextStyle(
-                            color: AppColors.textMain,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
+            child: RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () => data.loadAll(),
+              child: filtered.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 80),
+                        Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_outline,
+                                  size: 48, color: AppColors.primary),
+                              SizedBox(height: 12),
+                              Text(
+                                'Không có cảnh báo nào trong mục này',
+                                style: TextStyle(
+                                  color: AppColors.textMain,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Môi trường vi khí hậu đang trong ngưỡng an toàn.',
+                                style:
+                                    TextStyle(color: AppColors.textMuted, fontSize: 12),
+                              ),
+                            ],
                           ),
                         ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Môi trường vi khí hậu đang trong ngưỡng an toàn.',
-                          style:
-                              TextStyle(color: AppColors.textMuted, fontSize: 12),
-                        ),
                       ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
                       final alert = filtered[index];
                       final isDanger = alert.severity == 'danger';
 
@@ -260,19 +268,25 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                   ),
-                                  onPressed: () {
-                                    data.resolveAlert(alert.id);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        // The alert closes on this screen only: `POST /alerts/{id}/resolve` is the
-                                        // route that will make it true everywhere (FR-12).
-                                        content: Text(
-                                          AppLocalizations.of(context)
-                                              .mockDataLocalChangeNotice,
+                                  onPressed: () async {
+                                    final success = await data.resolveAlert(alert.id);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            data.isLive
+                                                ? (success
+                                                    ? 'Đã xử lý và đóng cảnh báo thành công trên hệ thống.'
+                                                    : 'Không thể đóng cảnh báo trên máy chủ.')
+                                                : AppLocalizations.of(context)
+                                                    .mockDataLocalChangeNotice,
+                                          ),
+                                          backgroundColor: (data.isLive && !success)
+                                              ? AppColors.statusDanger
+                                              : AppColors.primary,
                                         ),
-                                        backgroundColor: AppColors.bgCardHover,
-                                      ),
-                                    );
+                                      );
+                                    }
                                   },
                                   icon: const Icon(Icons.check, size: 16),
                                   label: const Text(
@@ -289,6 +303,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       );
                     },
                   ),
+            ),
           ),
         ],
       ),

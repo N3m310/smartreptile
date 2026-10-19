@@ -20,7 +20,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { apiBaseUrl, ApiError, readSession } from '../api/client';
+import { ApiError, readSession } from '../api/client';
 import * as auth from '../api/endpoints';
 import { PERMISSION_CODES } from '../api/types';
 import type { PermissionCode } from '../api/types';
@@ -39,13 +39,11 @@ import { MockDataNotice } from './MockDataNotice';
  * defensively, because a session can be dropped from inside a request (a rotation failure) while the shell is
  * mounted.
  *
- * The three screens still on `data/mockData.ts` — Devices, Alerts, Settings — keep the mock-data notice. They
- * cannot be wired yet (roadmap 4.20: their endpoints do not exist), and the honest thing to do with a screen that
- * renders invented values is to say so on that screen. The notice therefore follows the route instead of being
- * rendered globally, so a wired screen never apologises for data it did not invent.
+ * Devices, Alerts and Settings still render mock data. Only Settings carries the mock-data notice; the device and
+ * alert screens keep their demo content without an extra banner in the way.
  */
 
-const MOCK_ROUTES = ['/devices', '/alerts', '/settings'];
+const MOCK_ROUTES = ['/settings'];
 
 /**
  * One entry of the sidebar. `permission` is what the signed-in account's role must grant for the entry to appear —
@@ -122,6 +120,7 @@ export const Layout: React.FC = () => {
       <NavLink
         key={item.path}
         to={item.path}
+        end={item.path === '/admin'}
         onClick={() => setSidebarOpen(false)}
         className={({ isActive }) =>
           `flex items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-medium transition-all ${
@@ -324,7 +323,6 @@ export const Layout: React.FC = () => {
                 aria-hidden="true"
               />
               <span className="text-muted">{t('navLive')}</span>
-              <span className="font-mono text-[11px] text-muted">{apiBaseUrl}</span>
             </div>
 
             <div className="flex items-center gap-1">

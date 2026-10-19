@@ -5,10 +5,8 @@ import { useI18n } from '../i18n';
 /**
  * Honesty notice for the screens that still render `data/mockData.ts` (ADR-017, task 4.14).
  *
- * It is no longer global. Task 4.16 wired the dashboard, the terrarium screens and history to the API, so those
- * screens have nothing to apologise for; Devices, Alerts and Settings cannot be wired yet (roadmap 4.20 — their
- * endpoints do not exist), and the shell renders this notice on exactly those routes. A screen therefore shows it
- * if and only if it is still inventing its numbers.
+ * It is no longer global. Task 4.16 wired the dashboard, terrarium screens and history to the API; the shell shows
+ * this notice only on Settings, while Devices and Alerts retain their demo content without the extra banner.
  *
  * The copy moved into the shared deck rather than staying hard-coded Vietnamese, because a bilingual client cannot
  * carry a string only one of its languages can read.

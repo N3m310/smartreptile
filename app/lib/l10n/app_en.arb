@@ -405,6 +405,9 @@
 
   "adminSectionRollup": "Who has what",
   "adminColumnAccount": "Account",
+  "adminColumnUsername": "Username",
+  "adminColumnEmail": "Email",
+  "adminExportCsv": "Export CSV",
   "adminColumnRole": "Role",
   "adminColumnState": "State",
   "adminColumnTerrariums": "Enclosures",
@@ -415,6 +418,16 @@
   "adminBadgeActive": "Active",
   "adminBadgeDisabled": "Disabled",
   "adminRollupEmpty": "No account owns an enclosure yet.",
+  "adminSearchAccountsRollup": "Search by username or email",
+  "adminFilterRoleAll": "All roles",
+  "adminFilterAccountStateAll": "Any account state",
+  "adminFilterResults": "Showing {count}/{total} accounts",
+  "@adminFilterResults": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
 
   "adminListsTitle": "All data",
   "adminTabTerrariums": "Enclosures",

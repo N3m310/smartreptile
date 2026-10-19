@@ -31,9 +31,13 @@ class TerrariumsScreen extends StatelessWidget {
   }
 
   void _showAddTerrariumDialog(BuildContext context) {
+    final data = context.read<AppDataProvider>();
     final nameCtrl = TextEditingController();
     final speciesCtrl = TextEditingController();
     final descCtrl = TextEditingController();
+    String? selectedProfileId = data.speciesProfiles.isNotEmpty
+        ? data.speciesProfiles.first['id']?.toString()
+        : null;
 
     showModalBottomSheet(
       context: context,
@@ -43,96 +47,152 @@ class TerrariumsScreen extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 24,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Thêm Terrarium Mới',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textMain,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Thêm Terrarium Mới',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textMain,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: AppColors.textMuted),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Tên chuồng (Ví dụ: Terrarium #04)',
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: AppColors.textMuted),
-                    onPressed: () => Navigator.pop(ctx),
+                  const SizedBox(height: 12),
+                  if (data.speciesProfiles.isNotEmpty) ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedProfileId,
+                      dropdownColor: AppColors.bgCardHover,
+                      decoration: const InputDecoration(
+                        labelText: 'Hồ sơ loài sinh thái',
+                      ),
+                      items: [
+                        for (final p in data.speciesProfiles)
+                          DropdownMenuItem(
+                            value: p['id']?.toString(),
+                            child: Text(
+                              '${p['name']} (${p['scientificName'] ?? p['climateZone']})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) {
+                        setModalState(() {
+                          selectedProfileId = val;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ] else ...[
+                    TextField(
+                      controller: speciesCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Loài bò sát (Ví dụ: Trăn Cây Xanh)',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  TextField(
+                    controller: descCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Mô tả tập tính / vi khí hậu',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () async {
+                        if (nameCtrl.text.isNotEmpty) {
+                          if (data.isLive && selectedProfileId != null) {
+                            final success = await data.createTerrarium(
+                              name: nameCtrl.text,
+                              speciesProfileId: selectedProfileId!,
+                              description: descCtrl.text,
+                            );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    success
+                                        ? 'Đã tạo chuồng ${nameCtrl.text} thành công trên máy chủ!'
+                                        : (data.errorMessage ?? 'Không thể tạo terrarium'),
+                                  ),
+                                  backgroundColor: success
+                                      ? AppColors.primary
+                                      : AppColors.statusDanger,
+                                ),
+                              );
+                            }
+                          } else {
+                            data.addTerrarium(
+                              name: nameCtrl.text,
+                              species: speciesCtrl.text.isNotEmpty
+                                  ? speciesCtrl.text
+                                  : 'Rồng Úc (Bearded Dragon)',
+                              description: descCtrl.text,
+                            );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    AppLocalizations.of(context)
+                                        .mockDataLocalChangeNotice,
+                                  ),
+                                  backgroundColor: AppColors.primary,
+                                ),
+                              );
+                            }
+                          }
+                        }
+                      },
+                      child: const Text(
+                        'Tạo Terrarium',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Tên chuồng (Ví dụ: Terrarium #04)',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: speciesCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Loài bò sát (Ví dụ: Trăn Cây Xanh)',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: descCtrl,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Mô tả tập tính / vi khí hậu',
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  onPressed: () {
-                    if (nameCtrl.text.isNotEmpty &&
-                        speciesCtrl.text.isNotEmpty) {
-                      context.read<AppDataProvider>().addTerrarium(
-                            name: nameCtrl.text,
-                            species: speciesCtrl.text,
-                            description: descCtrl.text,
-                          );
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            AppLocalizations.of(context)
-                                .mockDataLocalChangeNotice,
-                          ),
-                          backgroundColor: AppColors.primary,
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text(
-                    'Tạo Terrarium',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -151,10 +211,13 @@ class TerrariumsScreen extends StatelessWidget {
         icon: const Icon(Icons.add),
         label: const Text('Thêm chuồng', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: data.terrariums.length,
-        itemBuilder: (context, index) {
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: () => data.loadAll(),
+        child: ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: data.terrariums.length,
+          itemBuilder: (context, index) {
           final item = data.terrariums[index];
           return Card(
             margin: const EdgeInsets.only(bottom: 16),
@@ -316,6 +379,7 @@ class TerrariumsScreen extends StatelessWidget {
             ),
           );
         },
+      ),
       ),
     );
   }
