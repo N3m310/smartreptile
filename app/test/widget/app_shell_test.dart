@@ -227,12 +227,11 @@ void main() {
       reason: 'the get-all lists is behind data.read.any and available',
     );
     expect(
-      find.text('Tài khoản'),
+      find.text('Tạo, sửa, khoá, xoá và đổi vai trò cho tài khoản.'),
       findsNothing,
-      reason: 'accounts needs user.read, which this session does not hold',
     );
     expect(
-      find.text('Vai trò'),
+      find.text('Vai trò và quyền'),
       findsNothing,
       reason: 'roles needs user.read, which this session does not hold',
     );
@@ -249,11 +248,11 @@ void main() {
 
     expect(
       find.text('Tài khoản'),
-      findsOneWidget,
-      reason: 'the accounts list is behind user.read and available',
+      findsNWidgets(2),
+      reason: 'both the session summary card header and the accounts entry card title read Tài khoản',
     );
     expect(
-      find.text('Vai trò'),
+      find.text('Vai trò và quyền'),
       findsOneWidget,
       reason: 'the role matrix is behind user.read and available',
     );
