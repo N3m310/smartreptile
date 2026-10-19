@@ -34,7 +34,7 @@ namespace SmartReptile.Application.Evaluation;
 public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
 {
     /// <summary>Advances the threshold engine for one committed batch.</summary>
-    /// <param name="samples">Samples the ingest pipeline committed, in ingest order.</param>
+    /// <param name="samples">Committed samples released in per-device event-time order.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<EvaluationOutcome> EvaluateAsync(
         IReadOnlyList<PersistedSample> samples,
@@ -125,10 +125,12 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
                     // instead of staging a second one and colliding on the primary key.
                     context.States[key] = state;
                 }
-                else if (sample.SampleId <= state.LastEvaluatedSampleId)
+                else if (state.LastEvaluatedAtUtc is { } lastEvaluatedAt &&
+                         CompareSampleOrder(sample.RecordedAt, sample.Sequence, lastEvaluatedAt, state.LastEvaluatedSequence) <= 0)
                 {
-                    // Already judged. The watermark runs one way only: a replayed sample carries an id the evaluator
-                    // has seen, and judging it again would count one dwell window twice.
+                    // The persisted event-time watermark makes retries idempotent without confusing database identity
+                    // order with device event order.
+                    skipped++;
                     continue;
                 }
 
@@ -194,11 +196,10 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
                         break;
                 }
 
-                if (sample.SampleId > state.LastEvaluatedSampleId)
-                {
-                    state.LastEvaluatedSampleId = sample.SampleId;
-                    advanced++;
-                }
+                state.LastEvaluatedSampleId = Math.Max(state.LastEvaluatedSampleId, sample.SampleId);
+                state.LastEvaluatedAtUtc = sample.RecordedAt;
+                state.LastEvaluatedSequence = sample.Sequence;
+                advanced++;
             }
         }
 
@@ -236,6 +237,16 @@ public sealed class SampleEvaluator(IEvaluationStore store, IClock clock)
         state.OpenAlertId = open is { Id: > 0 } ? open.Id : null;
 
         return open;
+    }
+
+    private static int CompareSampleOrder(
+        DateTimeOffset leftAt,
+        long leftSequence,
+        DateTimeOffset rightAt,
+        long rightSequence)
+    {
+        var timeOrder = leftAt.CompareTo(rightAt);
+        return timeOrder != 0 ? timeOrder : leftSequence.CompareTo(rightSequence);
     }
 
     /// <summary>

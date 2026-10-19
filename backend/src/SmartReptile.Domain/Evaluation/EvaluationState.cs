@@ -12,10 +12,8 @@ namespace SmartReptile.Domain.Evaluation;
 /// singleton per key and a second row for one key would mean two evaluators disagreeing about the same excursion
 /// (§07-appendices/02 §3.9). <see cref="RowVersion"/> is what makes concurrent evaluation of one key impossible.
 /// <para>
-/// <b>Built so far (roadmap 3.2's scaffolding).</b> Only <see cref="LastEvaluatedSampleId"/> is written: the queue's
-/// consumer advances it as samples reach the evaluator, which is what turns the fan-out boundary into a real
-/// hand-off. The decision fields are declared here — and their columns created — so that the decision procedure
-/// itself needs no second migration.
+/// The state also persists the highest database sample identity and the latest event-time tuple evaluated. The
+/// event-time tuple, not the identity, controls ordering and retry idempotency.
 /// </para>
 /// </remarks>
 public class EvaluationState
@@ -44,8 +42,14 @@ public class EvaluationState
     /// <summary>Alert currently open for this key, so the next sample updates it instead of opening a second one.</summary>
     public long? OpenAlertId { get; set; }
 
-    /// <summary>Newest sample handed to the evaluator for this key.</summary>
+    /// <summary>Highest persisted sample identity handed to the evaluator for this key.</summary>
     public long LastEvaluatedSampleId { get; set; }
+
+    /// <summary>Event-time watermark for samples evaluated for this key.</summary>
+    public DateTimeOffset? LastEvaluatedAtUtc { get; set; }
+
+    /// <summary>Device sequence used to order samples that share an event timestamp.</summary>
+    public long LastEvaluatedSequence { get; set; }
 
     /// <summary>When this key last notified, so an episode cannot notify twice inside the policy window.</summary>
     public DateTimeOffset? LastNotificationAt { get; set; }

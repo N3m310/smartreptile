@@ -123,7 +123,8 @@ public class SampleEvaluatorTests
     }
 
     [Fact]
-    public async Task The_watermark_only_moves_forward()
+    [Trait("TestCase", "TC-U-60")]
+    public async Task Sample_identity_watermark_does_not_override_recorded_time_order()
     {
         var context = Context(Band(TestBands.FastDwell()));
         context.States[(MetricCode.TempC, ThresholdPhase.Any)] = new EvaluationState
@@ -136,16 +137,50 @@ public class SampleEvaluatorTests
 
         _store.Add(context);
 
-        // A replayed sample carries an id the evaluator has already seen; judging it again would count one dwell
-        // window twice.
+        // The reorder queue, not the database identity, establishes event order. A later event can have a lower
+        // identity when concurrent commits complete in a different order.
         var outcome = await _evaluator.EvaluateAsync(
-            [Sample(10, [(MetricCode.TempC, 40m)]), Sample(11, [(MetricCode.TempC, 29m)])],
+            [
+                Sample(9, [(MetricCode.TempC, 29m)], recordedAt: Noon.AddSeconds(1)),
+                Sample(11, [(MetricCode.TempC, 29m)], recordedAt: Noon.AddSeconds(2)),
+            ],
             CancellationToken.None);
 
-        outcome.ReadingsAdvanced.Should().Be(1);
+        outcome.ReadingsAdvanced.Should().Be(2);
         context.States[(MetricCode.TempC, ThresholdPhase.Any)].LastEvaluatedSampleId.Should().Be(11);
         _store.Added.Should().BeEmpty();
         _store.AddedAlerts.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-60")]
+    public async Task A_sample_older_than_the_persisted_event_time_watermark_is_skipped()
+    {
+        var context = Context(Band(TestBands.FastDwell()));
+        context.States[(MetricCode.TempC, ThresholdPhase.Any)] = new EvaluationState
+        {
+            TerrariumId = _terrariumId,
+            Metric = MetricCode.TempC,
+            Phase = ThresholdPhase.Any,
+            LastEvaluatedSampleId = 10,
+            LastEvaluatedAtUtc = Noon.AddSeconds(20),
+            LastEvaluatedSequence = 20,
+        };
+
+        _store.Add(context);
+
+        var outcome = await _evaluator.EvaluateAsync(
+            [
+                Sample(11, [(MetricCode.TempC, 40m)], recordedAt: Noon.AddSeconds(19)),
+                Sample(12, [(MetricCode.TempC, 29m)], recordedAt: Noon.AddSeconds(21)),
+            ],
+            CancellationToken.None);
+
+        outcome.ReadingsAdvanced.Should().Be(1);
+        outcome.ReadingsSkipped.Should().Be(1);
+        context.States[(MetricCode.TempC, ThresholdPhase.Any)].LastEvaluatedAtUtc.Should().Be(Noon.AddSeconds(21));
+        context.States[(MetricCode.TempC, ThresholdPhase.Any)].LastEvaluatedSequence.Should().Be(12);
+        context.States[(MetricCode.TempC, ThresholdPhase.Any)].LastEvaluatedSampleId.Should().Be(12);
     }
 
     [Fact]

@@ -550,12 +550,12 @@ covers, which is the same set the read surface resolves a card's band from — a
 | # | Task | Track | Acceptance |
 |---|---|---|---|
 | 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Complete — read half 2026-10-09, write half 2026-10-13** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `PUT`/`DELETE` overrides write a `ThresholdSnapshot` on every change; all of `TC-U-21…26` are green. See the two blocks below |
-| 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` (dwell/hysteresis/escalation matrix) green. **Decision engine done 2026-10-09** — the pure function, the evaluator that writes open/escalate/touch/resolve, and a live excursion through a real broker (see the block after this table); the per-device reorder window of §7 is open |
+| 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` and `TC-U-60` green. **Decision engine done 2026-10-09; live 30-second event-time reorder buffer and persisted watermark added 2026-10-19** — late samples remain available to history/summaries but cannot move live alert state backward. **Still open:** restart recovery for committed samples not yet evaluated; the in-memory queue does not replay them after process restart |
 | 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) belong with 3.6. See the block below |
 | 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36`. **Built 2026-10-10** — the list, the detail, the timeline, ack and resolve, the three silence routes and the `alertChanged` push; `TC-U-36`'s role matrix holds because ack, resolve and both silence writes name the `Technician` policy, and `TC-I-07` is covered from the service side (the project has no HTTP host). See the block below |
-| 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push). **Built 2026-10-16** — the policy matrix, the retry schedule, the escalation ladder, the hourly cap and the digest are the domain's `NotificationPolicy`/`NotificationCadence`; the dispatcher is a 15 s sweep over the alerts that owe somebody a message; the inbox is `GET /notifications` with the two mark-read routes; the channels are FCM HTTP v1 with a service-account assertion (off unless a credential is mounted) and SMTP against the Mailpit sink the development stack now runs. `TC-U-37…45` are green as 22 dispatcher cases plus 24 domain cases, and the whole chain was exercised live: a seeded excursion produced one Vietnamese inbox entry, one `notified` timeline entry and `notifications_sent_total = 1`. **A real FCM push is the one acceptance line still open** — it needs a service-account file and a device token, neither of which this machine has, and the demo's documented fallback is the inbox. See the block below |
-| 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`) |
-| 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15`. **Code built, acceptance not yet recorded** — `/health/live`, `/health/ready`, `/version` and `/metrics` (`OpsEndpoints.cs`, with the counters `SmartReptileMetrics` keeps), the `GET /api/v1/audit` query with its scoping and cursor (`AuditEndpoints.cs`, `AuditService`, `EfAuditStore`, five integration cases) and the correlation-id middleware all exist, and the 2026-10-16 pass added `notifications_sent_total`, `notifications_failed_total` and `notifications_suppressed_total` to the snapshot. What `TC-I-15` still wants is the *measured* half: a scrape of `/metrics` either side of a live ingest run, `/ready` answering `503` while the broker is down, and the i18n key-set comparison after those decks changed. Its audit-query half was built in the 2026-10-14 pass and is only now recorded here |
+| 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push). **Built 2026-10-16; real FCM receipt verified 2026-10-19** — the policy matrix, the retry schedule, the escalation ladder, the hourly cap and the digest are the domain's `NotificationPolicy`/`NotificationCadence`; the dispatcher is a 15 s sweep over the alerts that owe somebody a message; the inbox is `GET /notifications` with the two mark-read routes; the channels are FCM HTTP v1 with a service-account assertion and SMTP against the Mailpit sink the development stack now runs. `TC-U-37…45` are green as 22 dispatcher cases plus 24 domain cases, and the whole chain was exercised live: a seeded excursion produced one Vietnamese inbox entry, one `notified` timeline entry and `notifications_sent_total = 1`. A synthetic `DeviceSilent` alert was also sent through the real backend/FCM path and appeared as an Android system notification on the API 36 emulator. The receipt was 113 s after the dispatcher recorded `Sent`, so it proves device receipt but not the 90 s timing in `TC-E2E-03`. See the block below |
+| 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`). **Core persistence and recomputation built 2026-10-19** — migration `AddEnvironmentalSummaries` adds unique-key hourly rollups and local-date summaries; `SummaryWorker` recomputes the last 48 h plus today/yesterday every 15 min; the SQL Server back-fill test proves an inserted late sample updates existing rows without duplicates. **Not fully closed:** the end-to-end evaluator/alert assertions in `TC-I-06` and the two SHOULD signals `TC-U-30`/`TC-U-31` still need their cases. The summaries read endpoint is a later route item |
+| 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15`. **Complete — acceptance measured 2026-10-19** — `/health/live`, `/health/ready`, `/version` and `/metrics` are verified; 1,000 synthetic MQTT samples increased `ingest_samples_total` from 7 to 1,007 exactly (nine batches, zero rejected), and SQL Server confirmed all 1,000 rows persisted; with the broker forced to fail startup on an unassigned bind address, `/health/ready` returned `503` with `database: Healthy` and `mqtt-broker: Unhealthy`, while authenticated `GET /api/v1/auth/me` remained `200`; the normal API was restored to healthy afterward. `npm run check:strings` passed with 509 keys identical in English and Vietnamese, with every web-referenced key defined. The audit query's scope and cursor were already covered by five integration cases |
 | 3.8 | `07-appendices/05` literature pass 2 — every shipped row cited | doc/report | 100% citation gate met |
 | 3.9 | Species-profile catalogue: `GET`/`POST`/`POST {id}/duplicate`/`PATCH {id}`/`DELETE {id}` on `/api/v1/species-profiles`, built-ins immutable, `409 profile_in_use` on delete | backend | **Built 2026-10-13** — `Application/Species/SpeciesProfileService.cs`, `Abstractions/ISpeciesProfileStore.cs`, `Infrastructure/Species/EfSpeciesProfileStore.cs`, `Api/Endpoints/SpeciesProfileEndpoints.cs`. Bands are validated by the domain's own `ThresholdBand.Validate` (BR-10.2), every write is audited with its before/after state (BR-10.4), and the routes were exercised live against SQL Server: create, duplicate (citation carried over), a patch that replaces the band set, `403 builtin_immutable`, `404` for a foreign profile, `409 profile_in_use`, `409 profile_name_taken`, `204` once the terrarium moved, and `401` for an orphaned token. 19 unit cases. **This is the route 4.16's create form was blocked on** — `POST /terrariums` needs a `speciesProfileId` and nothing exposed one until now |
 
@@ -706,9 +706,10 @@ cannot see.
 |---|---|---|
 | `ThresholdDecision.Decide(band, value, observedAt, state, nowUtc, openAlertSeverity)` — dwell, hysteresis and escalation as one static method with no dependency at all | `Domain/Evaluation/ThresholdDecision.cs` | 19 `ThresholdDecisionTests` cases (the `TC-U-10…20` matrix) |
 | `ThresholdAlertWriter` — the four field-level writes the lifecycle needs, with no I/O | `Application/Evaluation/ThresholdAlertWriter.cs` | the evaluator's tests, which assert the row's fields |
-| `SampleEvaluator` — resolves the band through `ThresholdResolver`, applies the decision, keeps `EvaluationState` and the alert row in step | `Application/Evaluation/SampleEvaluator.cs` | 18 cases, including the pointer/row reconciliation |
+| `SampleEvaluator` — resolves the band through `ThresholdResolver`, applies the decision, keeps `EvaluationState` and the alert row in step | `Application/Evaluation/SampleEvaluator.cs` | 19 cases, including the pointer/row reconciliation and persisted event-time watermark |
 | `IEvaluationStore` extended: the configured bands, the still-open alerts, `AddAlert`, and the dwell window's readings | `Infrastructure/Evaluation/EfEvaluationStore.cs` | 19 integration cases + the live run |
 | `alerts_opened_total` wired, by severity, from the outcome | `Infrastructure/Evaluation/EvaluatorWorker.cs` | the live run's counter assertion |
+| `EvaluationReorderBuffer` — 30-second per-device `(RecordedAt, Sequence)` ordering, late-sample handling | `Infrastructure/Evaluation/EvaluationReorderBuffer.cs`, `InProcessEvaluationQueue.cs` | `TC-U-60` |
 
 **Five readings of the design were settled here, and each is now stated where it belongs** rather than only in the
 code: the dwell is measured against the evaluation instant while everything recorded is the sample's own instant
@@ -720,13 +721,13 @@ the critical window is consecutive, so one reading back inside the critical band
 triggering value and peak are read back from the stored readings of the dwell window instead of being kept in two
 more columns.
 
-**Two pieces of the design are deliberately absent.** Delivery: evaluation writes alerts and the dispatcher sends
-them (3.5), and `alertChanged` arrives with the lifecycle API in 3.4, so nothing is emitted to a client that could
-not act on it. And the per-device reorder window of `03-implementation/03` §5 / `02-design/03` §7 — a 30-second
-buffer ordered by `RecordedAt`: samples are evaluated in ingest order, which for a single node *is* `RecordedAt`
-order, but a second publisher or a broker redelivery could still arrive out of order and the id watermark cannot
-detect it. It is named here as open rather than implied, because building it would delay every evaluation by 30
-seconds and no test case demands it yet.
+**The live ordering window is now built; one durability gap remains.** `InProcessEvaluationQueue` holds samples for
+30 seconds, then releases them in per-device event-time/sequence order. `EvaluationState` persists the event-time
+watermark, so a sample older than the last evaluated event is skipped for live evaluation and remains queryable in
+telemetry history and summaries. Unit cases cover out-of-order arrival, independent device ordering, late samples,
+and event-time idempotency. The queue is still in memory, however: a process restart can discard queued work, and
+there is no startup replay yet. That restart-recovery guarantee remains open; alert delivery and client pushes
+continue to belong to 3.5 and 3.4 respectively.
 
 **Verification.** 545 unit tests (19 + 26 new; the scaffolding's evaluator tests were replaced by the ones that now
 cover the engine), 19 integration tests against SQL Server Express, `dotnet format
@@ -923,13 +924,13 @@ and it makes §6's 120-minute step demonstrable offline. FCM stays off until a s
 read-only at `/secrets` — the push channel is real code and a registered-but-uncredentialed deployment records
 `no Fcm channel is configured` rather than pretending it delivered.
 
-**What is still open in 3.5, named rather than implied.** A **real FCM push** has not been made from this machine:
-it needs a Google service-account file and a device registration token, neither of which exists here, so the push
-path is covered by the assertion test and by the fake-channel cases and stops short of the one line the acceptance
-asks for. Two smaller gaps stay as they are: escalation step 2 and 3 notify the owner only, because the product has
-one account per enclosure and §6's "notify them" for a Technician is satisfied by the 30-minute step; and a recovery
-notice is always withheld with `preference`, because v1 has no opt-in column for one — the record says so rather
-than pretending the notice was attempted.
+**What is still open in 3.5, named rather than implied.** Real FCM device receipt is now verified, but the observed
+delivery took 113 s after the dispatcher recorded `Sent`; the ≤90 s timing in `TC-E2E-03` is not yet demonstrated.
+That end-to-end case also still needs the full excursion, critical escalation and recovery sequence. Two product
+gaps stay as they are: escalation step 2 and 3 notify the owner only, because the product has one account per
+enclosure and §6's "notify them" for a Technician is satisfied by the 30-minute step; and a recovery notice is
+always withheld with `preference`, because v1 has no opt-in column for one — the record says so rather than
+pretending the notice was attempted.
 
 **Evidence.** 882 unit tests (37 new: 24 domain, 12 dispatcher, 1 assertion signature), a `Release` build with no
 warnings, and **5 integration cases** over real SQL Server for the store's joins, window and writes (41 of the suite's

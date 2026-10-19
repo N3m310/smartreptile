@@ -7,13 +7,12 @@ using SmartReptile.Infrastructure.Observability;
 namespace SmartReptile.Infrastructure.Evaluation;
 
 /// <summary>
-/// Reads batches of committed samples off <see cref="InProcessEvaluationQueue"/> and hands them to
+/// Reads per-device ordered samples released by <see cref="InProcessEvaluationQueue"/> and hands them to
 /// <see cref="SampleEvaluator"/>.
 /// </summary>
 /// <remarks>
-/// One batch at a time, single reader, ordered: the same shape as <see cref="Ingest.IngestWorker"/>, and for the
-/// same reason. Evaluation is stateful per <c>(terrarium, metric, phase)</c>, so a batch must be applied in ingest
-/// order or a dwell window would be measured against the wrong predecessor.
+/// One batch at a time, single reader: evaluation is stateful per <c>(terrarium, metric, phase)</c>, so released
+/// samples must be applied in event-time order or a dwell window would be measured against the wrong predecessor.
 /// <para>
 /// A batch that throws is logged and the loop continues. Nothing is acknowledged here — the samples are already
 /// committed, so there is nothing to un-ack — and the design's rule that "the next sample retries" is what keeps a

@@ -27,6 +27,7 @@ using SmartReptile.Infrastructure.Persistence;
 using SmartReptile.Infrastructure.Security;
 using SmartReptile.Infrastructure.Species;
 using SmartReptile.Infrastructure.Storage;
+using SmartReptile.Infrastructure.Summaries;
 using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Infrastructure;
@@ -217,6 +218,11 @@ public static class DependencyInjection
         }
 
         services.AddHostedService<NotificationDispatcherWorker>();
+
+        // Rollups and local-day environmental summaries are derived from raw readings, so each pass can safely
+        // repair back-filled history rather than incrementing a value that would double-count on retry.
+        services.AddScoped<SummaryRecomputer>();
+        services.AddHostedService<SummaryWorker>();
 
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();

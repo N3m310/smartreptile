@@ -19,6 +19,23 @@ class Env {
     return 'http://localhost:8080';
   }
 
+  /// Firebase Android app configuration. These values are public client identifiers, not server credentials.
+  static const firebaseApiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  static const firebaseAppId = String.fromEnvironment('FIREBASE_APP_ID');
+  static const firebaseProjectId = String.fromEnvironment(
+    'FIREBASE_PROJECT_ID',
+  );
+  static const firebaseMessagingSenderId = String.fromEnvironment(
+    'FIREBASE_MESSAGING_SENDER_ID',
+  );
+
+  /// Whether this build has enough Firebase configuration to enable push registration.
+  static bool get firebaseConfigured =>
+      firebaseApiKey.isNotEmpty &&
+      firebaseAppId.isNotEmpty &&
+      firebaseProjectId.isNotEmpty &&
+      firebaseMessagingSenderId.isNotEmpty;
+
   /// Version string shown in the about/diagnostics screen; must match the release build (rubric evidence).
   static const String appVersion = String.fromEnvironment(
     'APP_VERSION',

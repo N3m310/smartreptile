@@ -9,6 +9,7 @@ using SmartReptile.Domain.Notifications;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Domain.Reference;
 using SmartReptile.Domain.Species;
+using SmartReptile.Domain.Summaries;
 using SmartReptile.Domain.Terrariums;
 using SmartReptile.Domain.Thresholds;
 
@@ -62,6 +63,12 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>Metric values inside samples.</summary>
     public DbSet<MetricReading> MetricReadings => Set<MetricReading>();
 
+    /// <summary>Recomputable per-metric UTC-hour statistics.</summary>
+    public DbSet<TelemetryHourlyRollup> TelemetryHourlyRollups => Set<TelemetryHourlyRollup>();
+
+    /// <summary>Computed environmental statistics for one terrarium-local day.</summary>
+    public DbSet<DailyEnvironmentalSummary> DailyEnvironmentalSummaries => Set<DailyEnvironmentalSummary>();
+
     /// <summary>Alerts and their lifecycle.</summary>
     public DbSet<Alert> Alerts => Set<Alert>();
 
@@ -99,6 +106,7 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         ConfigureSpecies(modelBuilder);
         ConfigureDevices(modelBuilder);
         ConfigureTelemetry(modelBuilder);
+        ConfigureSummaries(modelBuilder);
         ConfigureAlerts(modelBuilder);
         ConfigureSilences(modelBuilder);
         ConfigureNotifications(modelBuilder);
@@ -487,6 +495,59 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
         });
     }
 
+    private static void ConfigureSummaries(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TelemetryHourlyRollup>(entity =>
+        {
+            entity.HasKey(rollup => rollup.Id);
+            entity.Property(rollup => rollup.Id).ValueGeneratedOnAdd();
+            entity.Property(rollup => rollup.HourStartUtc).HasPrecision(3);
+            entity.Property(rollup => rollup.MinValue).HasPrecision(9, 3);
+            entity.Property(rollup => rollup.MaxValue).HasPrecision(9, 3);
+            entity.Property(rollup => rollup.AvgValue).HasPrecision(9, 3);
+            entity.Property(rollup => rollup.ExposureValue).HasPrecision(18, 6);
+            entity.Property(rollup => rollup.ComputedAt).HasPrecision(3);
+
+            entity.HasIndex(rollup => new { rollup.TerrariumId, rollup.Metric, rollup.HourStartUtc }).IsUnique();
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(rollup => rollup.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+            // SQL Server rejects a second cascade path from Terrarium through ThresholdSnapshot to this table.
+            entity.HasOne<ThresholdSnapshot>().WithMany()
+                .HasForeignKey(rollup => rollup.ThresholdSnapshotId).OnDelete(DeleteBehavior.NoAction);
+
+            entity.ToTable("TelemetryHourlyRollup");
+        });
+
+        modelBuilder.Entity<DailyEnvironmentalSummary>(entity =>
+        {
+            entity.HasKey(summary => summary.Id);
+            entity.Property(summary => summary.Id).ValueGeneratedOnAdd();
+            entity.Property(summary => summary.TimeZoneId).HasMaxLength(64).IsRequired();
+            entity.Property(summary => summary.CoveragePct).HasPrecision(6, 2);
+            entity.Property(summary => summary.TempMin).HasPrecision(9, 3);
+            entity.Property(summary => summary.TempMax).HasPrecision(9, 3);
+            entity.Property(summary => summary.TempAvg).HasPrecision(9, 3);
+            entity.Property(summary => summary.HumidityMin).HasPrecision(9, 3);
+            entity.Property(summary => summary.HumidityMax).HasPrecision(9, 3);
+            entity.Property(summary => summary.HumidityAvg).HasPrecision(9, 3);
+            entity.Property(summary => summary.LuxAvg).HasPrecision(12, 3);
+            entity.Property(summary => summary.LightHours).HasPrecision(8, 3);
+            entity.Property(summary => summary.UvMax).HasPrecision(9, 3);
+            entity.Property(summary => summary.OutOfRangeMinutesJson).IsRequired();
+            entity.Property(summary => summary.TempExposureDegCHours).HasPrecision(12, 4);
+            entity.Property(summary => summary.HumidityDryExposurePctHours).HasPrecision(12, 4);
+            entity.Property(summary => summary.HumidityWetExposurePctHours).HasPrecision(12, 4);
+            entity.Property(summary => summary.LightDeficitHours).HasPrecision(8, 3);
+            entity.Property(summary => summary.ComputedAt).HasPrecision(3);
+
+            entity.HasIndex(summary => new { summary.TerrariumId, summary.LocalDate }).IsUnique();
+            entity.HasOne<Terrarium>().WithMany()
+                .HasForeignKey(summary => summary.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            entity.ToTable("DailyEnvironmentalSummary");
+        });
+    }
+
     private static void ConfigureAlerts(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Alert>(entity =>
@@ -598,6 +659,7 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.Property(state => state.FirstOutOfBandAt).HasPrecision(3);
             entity.Property(state => state.CriticalSinceAt).HasPrecision(3);
             entity.Property(state => state.LastNotificationAt).HasPrecision(3);
+            entity.Property(state => state.LastEvaluatedAtUtc).HasPrecision(3);
 
             // Two evaluators must not advance one key at the same time.
             entity.Property(state => state.RowVersion).IsRowVersion();

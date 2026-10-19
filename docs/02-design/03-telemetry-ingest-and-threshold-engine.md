@@ -109,8 +109,9 @@ State = {
 `IEvaluationQueue` drained by an `EvaluatorWorker` into a `SampleEvaluator`. Two of the fields are written today and
 the rest are written by 3.2:
 
-- `LastEvaluatedSampleId` is advanced per sample, and **only forward** — a re-delivered or back-filled sample
-  carries a lower id than the evaluator has already seen, and taking it would make the next pass re-read history.
+- `LastEvaluatedSampleId` keeps the highest database identity seen, while `LastEvaluatedAtUtc` and
+  `LastEvaluatedSequence` are the event-time idempotency watermark. Database identity order is not used as a proxy
+  for device event order.
 - The key is resolved the way §4.2's `phase` line says, using the same `ThresholdPhaseResolver` the read surface
   uses, and against the same configured bands (profile + enabled overrides) — so the evaluator cannot track a key
   no band covers, nor miss one a card is already colouring.
@@ -205,11 +206,13 @@ push `alertChanged` over SignalR either — that arrives with the lifecycle API 
 resolve an alert (3.4), so an event nobody can act on is not emitted. And the device-level signals of §4.3 are
 3.3's.
 
-**One ordering guarantee is not built.** The per-device reorder window of §7 (a 30-second buffer ordered by
-`RecordedAt`) is not in this milestone: samples are evaluated in ingest order, which is per-device publish order
-and therefore `RecordedAt` order for one node, but an out-of-order delivery from a second publisher or a broker
-redelivery would reach the engine out of order. Recorded as open in `03-implementation/07` rather than implied by
-the `EvaluationState` watermark, which is an id watermark and cannot see a `RecordedAt` that regressed.
+**The live ordering guarantee is built (2026-10-19).** `InProcessEvaluationQueue` holds committed samples for a
+30-second event-time window and releases them in `(RecordedAt, device sequence)` order per device. The persisted
+`EvaluationState` event-time watermark makes retries idempotent and prevents a late sample from recovering or
+reopening an alert after newer evidence has already been evaluated. Such a late sample remains in telemetry
+history and summaries and is logged when skipped by live evaluation. The queue itself is in memory: automatic
+replay of committed-but-unprocessed samples after a process restart remains open and is not claimed as part of
+this guarantee.
 
 
 ### 4.3 Derived signals beyond per-metric bands
@@ -284,10 +287,13 @@ an alert?" is answerable from data — a question every real alerting system eve
 
 | Trigger | Job | Output |
 |---|---|---|
-| Every minute (in-memory accumulate) | HourlyRollupWorker | Upsert `TelemetryHourlyRollup` for the current hour; recompute the last 48 h hourly once per night to absorb back-fill |
-| Local midnight + 5 min per terrarium | DailySummaryWorker | `DailyEnvironmentalSummary` for the day that just ended, plus `IsLowConfidence` if coverage < 80% |
+| Every 15 min after startup | `SummaryWorker` | Recompute hourly rollups for the last 48 h and daily summaries for today and yesterday in each terrarium's timezone |
 | Nightly 02:00 local | RetentionSweeper | Purge raw > 90 d, snapshots > 7 d, expired export files; yearly: purge rollups > 24 months |
-| On ingest of back-fill | RollupWorker (targeted) | Recompute only the affected hours/days (idempotent upsert) |
+| Back-fill arrives | `SummaryWorker`'s next sweep | Recompute from raw telemetry and upsert affected existing hours/days; corrections are reflected within 15 min and never double-counted |
+
+The summary worker deliberately reads persisted raw telemetry rather than maintaining a running accumulator. That
+makes retries and back-fills use the same calculation path. A current local day is summarized only through its
+completed minute; yesterday is computed over its full timezone-aware day, including DST-length days.
 
 Exposure index computation (used by the daily summary and shown in the report):
 
@@ -303,8 +309,8 @@ in hours. Worked examples are in `03-implementation/06-threshold-and-species-pro
 | Concern | Mechanism | Guarantee |
 |---|---|---|
 | Duplicate delivery (QoS 1 / retry) | Unique `(DeviceId, Sequence)` + upsert path | At-most-once persistence, at-least-once delivery |
-| Out-of-order back-fill | Queries order by `RecordedAt`; evaluation runs on a per-device **ordered queue** keyed by `RecordedAt` with a 30 s reorder window | A late sample cannot retroactively "recover" an alert before its cause |
-| Server restart mid-batch | Insert + evaluation in one transaction; evaluation jobs rebuilt from `LastEvaluatedSampleId` on start-up | No samples skipped |
+| Out-of-order delivery within the live window | Per-device evaluation buffer ordered by `(RecordedAt, Sequence)` with a 30 s window; persistent event-time state watermark | Late samples do not change live alert state; they remain available for history and summaries |
+| Server restart mid-batch | Evaluation buffer is in memory; durable replay of committed-but-unprocessed samples is not implemented | **Open:** a process restart can leave a committed sample unevaluated |
 | Threshold changed mid-episode | `ThresholdSnapshot` recorded; open alert keeps its band | History stays explainable |
 | Rollup recomputation | Upsert with `ComputedAt` | Recomputable, never double-counted |
 | Client mutation retries | `Idempotency-Key` on `POST` endpoints, 24 h dedupe window | No duplicate terrariums/devices from flaky mobile networks |
