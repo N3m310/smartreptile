@@ -117,10 +117,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.bug_report, color: Colors.black, size: 22),
+                child: const Icon(Icons.pets, color: Colors.black, size: 22),
               ),
               title: const Text(
-                'Hồ sơ loài (Profile con bọ)',
+                'Hồ sơ loài & Vi khí hậu',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
@@ -128,7 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               subtitle: const Text(
-                'Chạm để test kết nối API & CRUD Ngày 1',
+                'Tra cứu & quản lý tiêu chuẩn môi trường sống cho bò sát',
                 style: TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
               trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.primary),
