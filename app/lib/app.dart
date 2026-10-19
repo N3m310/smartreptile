@@ -9,6 +9,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/terrariums_screen.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/settings_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
@@ -44,6 +45,7 @@ class SmartReptileApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
+    final session = context.watch<SessionProvider>();
 
     return MaterialApp(
       title: 'VIVARIUMGUARD',
@@ -54,7 +56,9 @@ class SmartReptileApp extends StatelessWidget {
       theme: AppTheme.darkTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
-      home: const _RootShell(),
+      home: session.isSignedIn || session.isGuestMode
+          ? const _RootShell()
+          : const LoginScreen(),
     );
   }
 }
