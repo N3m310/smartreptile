@@ -44,7 +44,7 @@ public static class DeviceSilenceAlertWriter
             Family = AlertFamily.Enclosure,
             Phase = ThresholdPhase.Any,
             Severity = severity,
-            DedupeKey = Alert.DedupeKeyFor(terrariumId, null, severity, ThresholdPhase.Any),
+            DedupeKey = Alert.DedupeKeyFor(terrariumId, null, severity, ThresholdPhase.Any, AlertSource.DeviceSilent),
             State = AlertState.Open,
             Source = AlertSource.DeviceSilent,
             TriggeredAt = silenceStartedAt,
@@ -66,7 +66,12 @@ public static class DeviceSilenceAlertWriter
         ArgumentNullException.ThrowIfNull(alert);
 
         alert.Severity = AlertSeverity.Critical;
-        alert.DedupeKey = Alert.DedupeKeyFor(alert.TerrariumId, alert.Metric, AlertSeverity.Critical, alert.Phase);
+        alert.DedupeKey = Alert.DedupeKeyFor(
+            alert.TerrariumId,
+            alert.Metric,
+            AlertSeverity.Critical,
+            alert.Phase,
+            AlertSource.DeviceSilent);
     }
 
     /// <summary>

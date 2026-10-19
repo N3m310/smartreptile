@@ -11,6 +11,7 @@ using SmartReptile.Application.Devices;
 using SmartReptile.Application.Evaluation;
 using SmartReptile.Application.Ingest;
 using SmartReptile.Application.Notifications;
+using SmartReptile.Application.Signals;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Infrastructure.Admin;
 using SmartReptile.Infrastructure.Alerts;
@@ -223,6 +224,13 @@ public static class DependencyInjection
         // repair back-filled history rather than incrementing a value that would double-count on retry.
         services.AddScoped<SummaryRecomputer>();
         services.AddHostedService<SummaryWorker>();
+
+        // The light-deficit signal (3.6): an accumulated, once-a-day condition, so it is a sweep over a closed local
+        // day rather than a per-sample rule. The gradient warning needs no registration of its own — it is decided
+        // inside SampleEvaluator, where a single sample's surface and air readings are both in hand.
+        services.AddScoped<ILightDeficitStore, SmartReptile.Infrastructure.Signals.EfLightDeficitStore>();
+        services.AddScoped<LightDeficitMonitor>();
+        services.AddHostedService<SmartReptile.Infrastructure.Signals.LightDeficitWorker>();
 
         services.AddSingleton<IngestOutcomeRecorder>();
         services.AddHostedService<IngestWorker>();

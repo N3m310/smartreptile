@@ -708,6 +708,162 @@ public class SampleEvaluatorTests
         existing.LastObservedAt.Should().Be(Noon);
     }
 
+    // ---- the gradient warning (3.6, TC-U-30) ---------------------------------------------------------
+
+    [Fact]
+    [Trait("TestCase", "TC-U-30")]
+    public async Task A_gradient_past_twelve_degrees_opens_one_warning_naming_the_surface_probe()
+    {
+        _store.Add(Context());
+
+        var outcome = await _evaluator.EvaluateAsync(
+            [Sample(1, [(MetricCode.TempC, 31.9m), (MetricCode.SurfaceTempC, 44.0m)])],
+            CancellationToken.None);
+
+        outcome.AlertsOpened.Should().Be(1);
+
+        var alert = _store.AddedAlerts.Should().ContainSingle().Subject;
+        alert.Source.Should().Be(AlertSource.Gradient);
+        alert.Metric.Should().Be(MetricCode.SurfaceTempC);
+        alert.Family.Should().Be(AlertFamily.Species);
+        alert.Severity.Should().Be(AlertSeverity.Warning);
+        alert.TriggeringValue.Should().Be(12.1m);
+        alert.PeakValue.Should().Be(12.1m);
+        alert.TriggeredAt.Should().Be(Noon);
+        alert.BandMin.Should().BeNull("no band was compared");
+        alert.BandMax.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-30")]
+    public async Task A_gradient_under_the_threshold_opens_nothing()
+    {
+        _store.Add(Context());
+
+        var outcome = await _evaluator.EvaluateAsync(
+            [Sample(1, [(MetricCode.TempC, 32.0m), (MetricCode.SurfaceTempC, 43.9m)])],
+            CancellationToken.None);
+
+        outcome.AlertsOpened.Should().Be(0);
+        _store.AddedAlerts.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-30")]
+    public async Task A_continuing_gradient_moves_the_open_row_instead_of_opening_a_second()
+    {
+        _store.Add(Context());
+
+        var outcome = await _evaluator.EvaluateAsync(
+            [
+                Sample(1, [(MetricCode.TempC, 31.9m), (MetricCode.SurfaceTempC, 44.0m)]),
+                Sample(
+                    2,
+                    [(MetricCode.TempC, 31.0m), (MetricCode.SurfaceTempC, 45.5m)],
+                    recordedAt: Noon.AddMinutes(1)),
+            ],
+            CancellationToken.None);
+
+        outcome.AlertsOpened.Should().Be(1);
+
+        var alert = _store.AddedAlerts.Should().ContainSingle().Subject;
+        alert.PeakValue.Should().Be(14.5m, "the worst gradient of the episode");
+        alert.TriggeringValue.Should().Be(12.1m, "the value that opened it never moves");
+        alert.LastObservedAt.Should().Be(Noon.AddMinutes(1));
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-30")]
+    public async Task A_gradient_needs_both_readings()
+    {
+        _store.Add(Context());
+
+        var outcome = await _evaluator.EvaluateAsync(
+            [Sample(1, [(MetricCode.TempC, 31.9m)])],
+            CancellationToken.None);
+
+        outcome.AlertsOpened.Should().Be(0);
+        _store.AddedAlerts.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-30")]
+    public async Task A_gradient_that_falls_back_under_the_threshold_closes_the_row()
+    {
+        var context = Context();
+        context.OpenAlerts.Add(new Alert
+        {
+            Id = 9,
+            TerrariumId = _terrariumId,
+            DeviceId = _deviceId,
+            Metric = MetricCode.SurfaceTempC,
+            Family = AlertFamily.Species,
+            Phase = ThresholdPhase.Any,
+            Severity = AlertSeverity.Warning,
+            Source = AlertSource.Gradient,
+            State = AlertState.Open,
+            TriggeredAt = Noon.AddMinutes(-10),
+            DedupeKey = "gradient-open",
+        });
+        _store.Add(context);
+
+        var outcome = await _evaluator.EvaluateAsync(
+            [Sample(1, [(MetricCode.TempC, 32.0m), (MetricCode.SurfaceTempC, 40.0m)])],
+            CancellationToken.None);
+
+        outcome.AlertsResolved.Should().Be(1);
+
+        var resolved = context.OpenAlerts.Should().ContainSingle().Subject;
+        resolved.State.Should().Be(AlertState.Resolved);
+        resolved.ResolvedReason.Should().Be(ResolvedReason.Recovered);
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-30")]
+    public async Task The_band_engine_never_adopts_a_gradient_row_as_its_own_episode()
+    {
+        // A profile may define an any-phase surface band, and a gradient row names the surface metric and the
+        // any-phase too. Without the source filter in Adopt, three in-band readings would "recover" the gradient
+        // alert and close a signal the band engine does not own.
+        var surfaceBand = Band(
+            TestBands.LeopardGecko() with
+            {
+                Metric = MetricCode.SurfaceTempC,
+                TargetMin = 26m,
+                TargetMax = 32m,
+            });
+
+        var context = Context(surfaceBand);
+        context.OpenAlerts.Add(new Alert
+        {
+            Id = 11,
+            TerrariumId = _terrariumId,
+            DeviceId = _deviceId,
+            Metric = MetricCode.SurfaceTempC,
+            Family = AlertFamily.Species,
+            Phase = ThresholdPhase.Any,
+            Severity = AlertSeverity.Warning,
+            Source = AlertSource.Gradient,
+            State = AlertState.Open,
+            TriggeredAt = Noon.AddMinutes(-10),
+            PeakValue = 13.0m,
+            DedupeKey = "gradient-open",
+        });
+        _store.Add(context);
+
+        await _evaluator.EvaluateAsync(
+            [
+                Sample(1, [(MetricCode.SurfaceTempC, 30.0m)], recordedAt: Noon),
+                Sample(2, [(MetricCode.SurfaceTempC, 30.0m)], recordedAt: Noon.AddMinutes(1)),
+                Sample(3, [(MetricCode.SurfaceTempC, 30.0m)], recordedAt: Noon.AddMinutes(2)),
+            ],
+            CancellationToken.None);
+
+        var gradient = context.OpenAlerts.Single(alert => alert.Source == AlertSource.Gradient);
+        gradient.State.Should().Be(AlertState.Open, "the band engine cannot resolve a signal it does not own");
+        gradient.PeakValue.Should().Be(13.0m, "and it cannot overwrite its peak with a temperature");
+    }
+
     private Alert OpenAlert(AlertSeverity severity) => new()
     {
         Id = 5,

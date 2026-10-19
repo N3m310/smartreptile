@@ -225,10 +225,10 @@ this guarantee.
 | `GradientWarning` (SHOULD) | `SurfaceTempC − TempC > 12 °C` when both exist | A basking spot far hotter than air is a burn risk; a genuinely useful extra the sensors make cheap |
 | `LightDeficit` (SHOULD) | accumulated `LightLux > profile.lightThresholdLux` < `profile.minLightHoursPerDay` by 21:00 local | Detects a failed lamp/timer without any actuator integration |
 
-`GradientWarning` and `LightDeficit` are marked SHOULD: they are implemented if M4 finishes early.
+`GradientWarning` and `LightDeficit` are marked SHOULD. **Both are built (2026-10-19, roadmap 3.6)** — see the
+as-built block at the end of this section.
 
-**As built (2026-10-10, roadmap 3.3) — all three signals of this table are implemented; the two SHOULD ones are
-not.**
+**As built (2026-10-10, roadmap 3.3) — the three device-health signals.**
 The rule is `DeviceSilencePolicy` (pure): `3 × samplingInterval` → Warning, 30 minutes → Critical, and `>` rather
 than `>=` so that the online/offline badge `TerrariumService.DeriveStatus` renders from the same threshold and the
 alert the watchdog opens cannot disagree at the boundary — both call one `SilenceThreshold`. The sweep is
@@ -261,6 +261,31 @@ carries V-08's deliberate exclusion of a long back-fill — and raises an **Info
 open, later skewed batches move its `LastObservedAt`; a *new* entry waits the hour V-09 asks for, and the entry
 closes when a trusted sample arrives. That is the reading of "one Info signal per hour" this build takes: an hourly
 *row* would read as a new problem every hour, when what it reports is that one problem is still there.
+
+**The two SHOULD signals, built (2026-10-19, roadmap 3.6).** Both had their `AlertSource` members and their
+localised notification strings since 3.5; what 3.6 added is the rule that raises them.
+
+- **`GradientWarning`** is `GradientWarningPolicy` (Domain, pure): `SurfaceTempC − TempC > 12 °C`, strictly greater
+  so 12.1 raises and 11.9 does not, and **null when either reading is missing** — the rule needs both numbers, and
+  closing an open episode on absent evidence would report a recovery nobody observed. It is decided inside
+  `SampleEvaluator`, because the evidence is a pair of readings from one instant and a sweep would have to guess
+  which surface reading belonged with which air reading. The row names `SurfaceTempC` and the species family, so it
+  sits beside that probe's own band alerts rather than replacing them, and carries the difference as its triggering
+  and peak value instead of a band, because no band was compared.
+- **`LightDeficit`** is `LightDeficitPolicy` (Domain, pure) plus `LightDeficitMonitor`, swept every 15 minutes by
+  `LightDeficitWorker`. It is an **accumulation**, so no single sample can violate it: the sweep judges one closed
+  local day at a time, from 21:00 local (`EvaluationLocalTime`, inclusive), over the minutes from local midnight to
+  that instant. The hours come from the same `MetricGridSummarizer` pass the daily summary uses, so the alert and
+  `DailyEnvironmentalSummary.LightDeficitHours` cannot disagree; the deficit is rounded to the column's
+  `decimal(8,3)` scale for the same reason. It raises **one** row per terrarium per day, dated from the instant the
+  day closed, touches it while the shortfall stands, and closes it either when back-filled readings meet the
+  requirement or when the local date rolls over. No per-sample light alert is raised: a dark minute at noon is not
+  a failure, and the instantaneous value is already the per-metric band's business.
+- **One deviation, recorded rather than implied.** A derived signal now appends its `AlertSource` to
+  `Alert.DedupeKey`, so a gradient row on `SurfaceTempC` and a surface-band row can both be open for the same
+  severity and phase. Without the suffix the filtered unique index would refuse the second one with a 2601 error.
+  Band alerts keep the documented three-segment key byte-for-byte, so nothing already stored is rewritten; the four
+  derived signals all name themselves. §02-design/02 §3.8 records the two shapes.
 
 ## 5. Alert state machine and notification handoff
 

@@ -272,7 +272,7 @@ notes, each with its reason:
 | `Family` | tinyint | 0 Enclosure, 1 Species; taken from the metric at creation and `Enclosure` for an alert with no metric at all (2026-10-17, migration `20261016162814_AddAlertFamily`) |
 | `Severity` | tinyint | 1 Warning, 2 Critical (0 Info reserved) |
 | `Phase` | tinyint | as evaluated |
-| `DedupeKey` | varchar(80) | `{terrariumId}:{metric}:{severity}:{phase}` |
+| `DedupeKey` | varchar(80) | `{terrariumId}:{metric}:{severity}:{phase}` for a band alert; a derived signal appends `:{source}` so two different facts about one metric cannot collide (2026-10-19) |
 | `State` | tinyint | 0 Open, 1 Acknowledged, 2 Resolved |
 | `TriggeringValue` | decimal(9,3) NULL | value at first violation |
 | `PeakValue` | decimal(9,3) | extremum during the episode (max for hot, min for cold) |

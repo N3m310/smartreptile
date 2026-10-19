@@ -551,10 +551,10 @@ covers, which is the same set the read surface resolves a card's band from — a
 |---|---|---|---|
 | 3.1 | `ThresholdService` + resolution order + `effectiveThresholds` endpoint + `ThresholdSnapshot` | backend | `TC-U-21…26`; UC-03 flows verified. **Complete — read half 2026-10-09, write half 2026-10-13** — the resolution rule is `ThresholdResolver` in the domain, `GET /terrariums/{id}/thresholds` is live, and `PUT`/`DELETE` overrides write a `ThresholdSnapshot` on every change; all of `TC-U-21…26` are green. See the two blocks below |
 | 3.2 | `ThresholdDecision.Decide` (pure) + `EvaluatorWorker` + ordered queue + `EvaluationState` | backend | `TC-U-10…20` and `TC-U-60` green. **Decision engine done 2026-10-09; live 30-second event-time reorder buffer and persisted watermark added 2026-10-19** — late samples remain available to history/summaries but cannot move live alert state backward. **Still open:** restart recovery for committed samples not yet evaluated; the in-memory queue does not replay them after process restart |
-| 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) belong with 3.6. See the block below |
+| 3.3 | Derived signals: `DeviceSilent`, `SensorFault`, `DeviceClockSkew` | backend | `TC-U-27…31`, `TC-I-09`. **All three signals done 2026-10-10** — silence (Warning at `3 × interval`, Critical at 30 min), the sensor fault (BR-07.1's failures → the metric reads `Unavailable`) and the clock-skew Info entry are built, and `TC-U-27`, `TC-U-28` and `TC-U-29` are green; the two SHOULD signals (`TC-U-30`, `TC-U-31`) were built with 3.6 on 2026-10-19 and are green. See the block below |
 | 3.4 | Alert lifecycle: open/ack/resolve/silence + audit + role gating | backend | `TC-I-07`, `TC-U-36`. **Built 2026-10-10** — the list, the detail, the timeline, ack and resolve, the three silence routes and the `alertChanged` push; `TC-U-36`'s role matrix holds because ack, resolve and both silence writes name the `Technician` policy, and `TC-I-07` is covered from the service side (the project has no HTTP host). See the block below |
 | 3.5 | `NotificationDispatcher` + policy matrix + FCM + SMTP + inbox + retries | backend | `TC-U-37…45` (policy matrix), live notification demoed (inbox + a real FCM push). **Built 2026-10-16; real FCM receipt verified 2026-10-19** — the policy matrix, the retry schedule, the escalation ladder, the hourly cap and the digest are the domain's `NotificationPolicy`/`NotificationCadence`; the dispatcher is a 15 s sweep over the alerts that owe somebody a message; the inbox is `GET /notifications` with the two mark-read routes; the channels are FCM HTTP v1 with a service-account assertion and SMTP against the Mailpit sink the development stack now runs. `TC-U-37…45` are green as 22 dispatcher cases plus 24 domain cases, and the whole chain was exercised live: a seeded excursion produced one Vietnamese inbox entry, one `notified` timeline entry and `notifications_sent_total = 1`. A synthetic `DeviceSilent` alert was also sent through the real backend/FCM path and appeared as an Android system notification on the API 36 emulator. The receipt was 113 s after the dispatcher recorded `Sent`, so it proves device receipt but not the 90 s timing in `TC-E2E-03`. See the block below |
-| 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`). **Core persistence and recomputation built 2026-10-19** — migration `AddEnvironmentalSummaries` adds unique-key hourly rollups and local-date summaries; `SummaryWorker` recomputes the last 48 h plus today/yesterday every 15 min; the SQL Server back-fill test proves an inserted late sample updates existing rows without duplicates. **Not fully closed:** the end-to-end evaluator/alert assertions in `TC-I-06` and the two SHOULD signals `TC-U-30`/`TC-U-31` still need their cases. The summaries read endpoint is a later route item |
+| 3.6 | Rollup worker + daily summary worker + exposure index maths | backend | `TC-U-46…50`, recomputation after back-fill (`TC-I-06`). **Complete — 2026-10-19** — migration `AddEnvironmentalSummaries` adds unique-key hourly rollups and local-date summaries; `SummaryWorker` recomputes the last 48 h plus today/yesterday every 15 min; `SummaryRecomputationTests` proves an inserted late sample updates existing rows without duplicating them. The acceptance cases now close too: `EvaluationThroughPipelineTests` plays the `daily` fixture through the real evaluator and asserts one back-dated alert with its peak **and** the rollup and daily summary against hand-computed values (`TC-I-06`), and the two SHOULD signals are built and green — `GradientWarning` (12 °C surface-to-air boundary, `TC-U-30`) and `LightDeficit` (accumulated light-hours judged at 21:00 local, `TC-U-31`). The summaries read endpoint is a later route item and is not part of this task |
 | 3.7 | Ops: `/metrics`, structured logs, audit endpoints | backend | `TC-I-15`. **Complete — acceptance measured 2026-10-19** — `/health/live`, `/health/ready`, `/version` and `/metrics` are verified; 1,000 synthetic MQTT samples increased `ingest_samples_total` from 7 to 1,007 exactly (nine batches, zero rejected), and SQL Server confirmed all 1,000 rows persisted; with the broker forced to fail startup on an unassigned bind address, `/health/ready` returned `503` with `database: Healthy` and `mqtt-broker: Unhealthy`, while authenticated `GET /api/v1/auth/me` remained `200`; the normal API was restored to healthy afterward. `npm run check:strings` passed with 509 keys identical in English and Vietnamese, with every web-referenced key defined. The audit query's scope and cursor were already covered by five integration cases |
 | 3.8 | `07-appendices/05` literature pass 2 — every shipped row cited | doc/report | 100% citation gate met |
 | 3.9 | Species-profile catalogue: `GET`/`POST`/`POST {id}/duplicate`/`PATCH {id}`/`DELETE {id}` on `/api/v1/species-profiles`, built-ins immutable, `409 profile_in_use` on delete | backend | **Built 2026-10-13** — `Application/Species/SpeciesProfileService.cs`, `Abstractions/ISpeciesProfileStore.cs`, `Infrastructure/Species/EfSpeciesProfileStore.cs`, `Api/Endpoints/SpeciesProfileEndpoints.cs`. Bands are validated by the domain's own `ThresholdBand.Validate` (BR-10.2), every write is audited with its before/after state (BR-10.4), and the routes were exercised live against SQL Server: create, duplicate (citation carried over), a patch that replaces the band set, `403 builtin_immutable`, `404` for a foreign profile, `409 profile_in_use`, `409 profile_name_taken`, `204` once the terrarium moved, and `401` for an orphaned token. 19 unit cases. **This is the route 4.16's create form was blocked on** — `POST /terrariums` needs a `speciesProfileId` and nothing exposed one until now |
@@ -954,6 +954,44 @@ idempotence holds against the real `ExecuteUpdate`), an id that is not the calle
 table at **one row** — the sweep's idempotence, measured. Two runs of this pass also found and fixed a real defect:
 the worker's *first* sweep ran before `DatabaseInitializer` had created the schema and logged a failed query, which
 is why the first tick now waits one interval, the same shape the silence watchdog uses.
+
+---
+
+## M3 task 3.6 — the summary pipeline and the two SHOULD signals (built 2026-10-19)
+
+The milestone's last functional gap. The pipeline itself landed earlier the same day — rollups, daily summaries and
+the exposure maths — and this pass closed the three acceptance holes the first pass had named rather than implied.
+
+| Piece | Where | Verified by |
+|---|---|---|
+| Hourly rollups and local-date summaries, rebuilt from raw readings | `Domain/Summaries/{TelemetryHourlyRollup,DailyEnvironmentalSummary,MetricGridSummary,ExposureCalculator}.cs`, `Infrastructure/Summaries/{SummaryRecomputer,SummaryWorker}.cs` | `TC-U-46…50` (24 cases) + `SummaryRecomputationTests` |
+| `GradientWarning` — `SurfaceTempC − TempC > 12 °C`, decided per sample because the evidence is one instant's pair of readings | `Domain/Signals/GradientWarningPolicy.cs`, `Application/Signals/HabitatSignalAlertWriter.cs`, called from `SampleEvaluator` | `TC-U-30`: 6 policy cases + 5 evaluator cases |
+| `LightDeficit` — accumulated light-hours against the profile requirement, judged once per local day at 21:00 | `Domain/Signals/LightDeficitPolicy.cs`, `Application/Signals/{LightDeficitMonitor,ILightDeficitStore}.cs`, `Infrastructure/Signals/{EfLightDeficitStore,LightDeficitWorker}.cs` | `TC-U-31`: 6 policy cases + 7 monitor cases |
+| The `daily` fixture through evaluator **and** summariser under one fake clock | `tests/SmartReptile.Tests.Integration/EvaluationThroughPipelineTests.cs` | `TC-I-06`: one alert, back-dated, with its peak; rollup `33.667 °C` / `1.666667 °C·h`; day `27.152 °C` / `1.6667 °C·h`, one counted episode |
+
+**Three readings settled here, recorded so they are not rediscovered.**
+
+1. **A derived signal's dedupe key names its source.** `Alert.DedupeKeyFor` gained an optional `AlertSource`, and the
+   four derived signals pass it, so a `GradientWarning` on `SurfaceTempC` and a surface *band* alert can both be open
+   for one severity and phase. The band alerts' three-segment key is unchanged byte-for-byte, so no stored row is
+   rewritten and no migration is needed. This also closed a pre-existing collision: a humidity `SensorFault` and a
+   humidity band alert wanted the same key on the seeded `Any`-phase band, and the second insert would have been
+   refused by the filtered unique index.
+2. **The light rule is an accumulation, not an instantaneous limit.** It is judged from 21:00 local — inclusive, so
+   the boundary is decidable — over the minutes from local midnight, and it raises no per-sample light alert. The
+   hours come from the same `MetricGridSummarizer` pass the daily summary uses, and the deficit is rounded to the
+   stored column's `decimal(8,3)` scale, so the alert and `DailyEnvironmentalSummary.LightDeficitHours` cannot
+   disagree about the number a keeper is shown.
+3. **The fixture is the whole local day, not just the excursion.** The reference dataset says "otherwise in range,
+   no gaps", and taking that literally is what makes the daily average hand-computable: a boundary-only fixture is
+   averaged together with the minute grid's three-minute hold-over, and the night phase needs its own in-range value
+   because 30 °C is out of band under the 22–27 °C night rule.
+
+**Evidence.** 977 unit tests (25 new: 6 + 6 policy, 7 monitor, 5 evaluator, minus the three dedupe-key assertions
+the source suffix changed) and 55 of 57 integration cases green — the two red ones are the pre-existing
+species-citation gate failures (`BandsAwaitingVerification` 19 vs 16 and the `your-org` placeholder links), which are
+tasks 1.8 and 3.8 and untouched here. `dotnet format --verify-no-changes` clean on every new and changed file, and
+`dotnet ef migrations has-pending-model-changes` reports no model change: this task added rules, not columns.
 
 ---
 

@@ -183,8 +183,17 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 > probes are two entries — which `sensor_recovered` closes as `Recovered`. `DeviceClockSkewPolicy` reads V-09's
 > flag (which is also where V-08's exclusion of a long back-fill lives, so an honest back-fill is never a clock
 > fault) and the recorder opens one **Info** entry per episode, refreshed while the clock stays wrong and closed by
-> the first trusted sample. `TC-U-30` and `TC-U-31` are the two SHOULD signals of §4.3 and belong with 3.6, where
-> the accumulated light-hours of `TC-U-31` come from.
+> the first trusted sample.
+>
+> **`TC-U-30` and `TC-U-31` are green (2026-10-19, roadmap 3.6).** `GradientWarningPolicyTests` pins the boundary —
+> 44.0/31.9 raises at 12.1 °C, 43.9/32.0 stays silent at 11.9 °C, exactly 12.0 does not raise, and a missing
+> reading is not a gradient — and five `SampleEvaluatorTests` cases drive it through the evaluator: open, silent,
+> continue-without-a-second-row, needs-both-readings, and close-on-recovery. `LightDeficitPolicyTests` pins the
+> arithmetic (6 h against 8 h is 2.0 h, never negative) and the 21:00 boundary (20:59 is not due, 21:00 is), and
+> seven `LightDeficitMonitorTests` cases drive the sweep over the documented fixture: six lit hours in
+> `Asia/Ho_Chi_Minh` raise exactly one 2.0 h signal with **no** per-sample light alert, a second sweep touches it,
+> a day that met the requirement opens nothing, a back-filled requirement closes it, the next local day closes it,
+> and an unresolvable zone is skipped rather than failing the sweep.
 >
 > **`TC-I-09`'s "no metric alerts from missing data" holds by construction rather than by a guard**: a silent node
 > publishes no readings, so the band engine has nothing to judge — and a *faulted* metric is excluded from it by
@@ -285,9 +294,12 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 > `TC-U-46…50` pass. The `TelemetryHourlyRollup` and `DailyEnvironmentalSummary` tables are persisted by
 > `SummaryWorker`, which rebuilds the last 48 hours and today/yesterday in local time. `SummaryRecomputationTests`
 > verifies that inserting a back-filled sample updates the existing hourly and daily rows without duplication
-> against SQL Server. The broader `TC-I-06` evaluator/alert fixture and the SHOULD signals `TC-U-30`/`TC-U-31`
-> remain open. `GET /terrariums/{id}/summaries` is a later read-surface item and remains unbuilt; see
-> `07-appendices/03` §4.2.
+> against SQL Server, and `EvaluationThroughPipelineTests` covers the other half of `TC-I-06`: the `daily` fixture
+> played back through the real evaluator produces exactly one back-dated alert with the right peak, and the rollup
+> and daily summary that follow agree with hand-computed values (33.667 °C average and 1.666667 °C·h for the hour,
+> 27.152 °C and 1.6667 °C·h for the day, one counted episode). The two SHOULD signals `TC-U-30`/`TC-U-31` are green
+> as of the same date; see `B4`. `GET /terrariums/{id}/summaries` is a later read-surface item and remains
+> unbuilt; see `07-appendices/03` §4.2.
 
 Reference dataset: target 26–32 °C, 40 min at 34.0 °C then 20 min at 33.0 °C, otherwise in range, no gaps.
 

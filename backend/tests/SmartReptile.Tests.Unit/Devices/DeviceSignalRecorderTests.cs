@@ -48,7 +48,7 @@ public class DeviceSignalRecorderTests
         alert.BandMin.Should().BeNull("nothing was measured, so there is no band to state");
         alert.TriggeringValue.Should().BeNull();
         alert.DedupeKey.Should().Be(Alert.DedupeKeyFor(
-            TerrariumId, MetricCode.HumidityPct, AlertSeverity.Warning, ThresholdPhase.Any));
+            TerrariumId, MetricCode.HumidityPct, AlertSeverity.Warning, ThresholdPhase.Any, AlertSource.SensorFault));
     }
 
     [Fact]

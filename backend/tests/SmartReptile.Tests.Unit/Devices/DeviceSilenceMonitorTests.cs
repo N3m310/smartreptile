@@ -57,7 +57,8 @@ public class DeviceSilenceMonitorTests
         alert.TriggeredAt.Should().Be(
             Now.AddMinutes(-4) + DeviceSilencePolicy.SilenceThreshold(60, 3),
             "the alert is dated from the instant the device should have been heard from, not from the sweep");
-        alert.DedupeKey.Should().Be(Alert.DedupeKeyFor(TerrariumId, null, AlertSeverity.Warning, ThresholdPhase.Any));
+        alert.DedupeKey.Should().Be(Alert.DedupeKeyFor(
+            TerrariumId, null, AlertSeverity.Warning, ThresholdPhase.Any, AlertSource.DeviceSilent));
     }
 
     [Fact]
@@ -74,7 +75,8 @@ public class DeviceSilenceMonitorTests
         open!.Severity.Should().Be(AlertSeverity.Critical);
         open.State.Should().Be(AlertState.Open);
         open.TriggeredAt.Should().Be(Now.AddMinutes(-31), "the outage began when it began");
-        open.DedupeKey.Should().Be(Alert.DedupeKeyFor(TerrariumId, null, AlertSeverity.Critical, ThresholdPhase.Any));
+        open.DedupeKey.Should().Be(Alert.DedupeKeyFor(
+            TerrariumId, null, AlertSeverity.Critical, ThresholdPhase.Any, AlertSource.DeviceSilent));
         device.Status.Should().Be(DeviceStatus.Offline);
     }
 
