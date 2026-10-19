@@ -11,6 +11,7 @@ class AppFailure implements Exception {
     this.title,
     this.detail,
     this.traceId,
+    this.errors = const [],
   });
 
   /// Stable machine-readable code from the RFC 7807 body, e.g. `claim_code_invalid`.
@@ -27,6 +28,9 @@ class AppFailure implements Exception {
 
   /// Correlation id echoed by the API — quoted when reporting a bug.
   final String? traceId;
+
+  /// Field-level violations from the problem body, if any.
+  final List<dynamic> errors;
 
   /// True when the request could not reach the server at all.
   bool get isNetworkFailure => statusCode == 0;
@@ -54,6 +58,14 @@ class AppFailure implements Exception {
       case 'token_missing':
       case 'unauthenticated':
         return 'unauthenticated';
+      case 'registration_invalid':
+        return 'registrationInvalid';
+      case 'registration_conflict':
+        return 'usernameTaken';
+      case 'recovery_failed':
+        return 'recoveryFailed';
+      case 'identifier_unknown':
+        return 'identifierUnknown';
       case 'user_not_found':
         return 'adminAccountNotFound';
       case 'self_change_refused':
@@ -65,6 +77,7 @@ class AppFailure implements Exception {
       case 'account_invalid':
         return 'adminErrorAccountInvalid';
       case 'password_invalid':
+      case 'password_policy_violation':
         return 'passwordPolicyViolation';
       case 'role_invalid':
         return 'adminErrorRoleInvalid';

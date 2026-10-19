@@ -104,10 +104,10 @@ void main() {
     settings = SettingsProvider();
     await settings.setLocale(Locale(languageCode));
     session = permissions == null
-        ? SessionProvider(
+        ? (SessionProvider(
             api: ApiClient(baseUrl: 'http://localhost'),
             store: TokenStore.inMemory(),
-          )
+          )..enterGuestMode())
         : await sessionHolding(permissions);
   }
 

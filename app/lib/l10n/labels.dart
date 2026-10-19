@@ -182,6 +182,14 @@ String failureMessage(AppLocalizations l10n, AppFailure failure) {
       return l10n.rateLimited;
     case 'unauthenticated':
       return l10n.unauthenticated;
+    case 'registrationInvalid':
+      return l10n.registrationInvalid;
+    case 'usernameTaken':
+      return l10n.usernameTaken;
+    case 'recoveryFailed':
+      return l10n.recoveryFailed;
+    case 'identifierUnknown':
+      return l10n.identifierUnknown;
     case 'errorForbidden':
       return l10n.errorForbidden;
     case 'adminAccountNotFound':
