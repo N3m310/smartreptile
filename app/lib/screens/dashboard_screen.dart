@@ -51,9 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: AppColors.bgMain,
       body: RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: () async {
-          await Future.delayed(const Duration(milliseconds: 500));
-        },
+        onRefresh: () => data.loadAll(),
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [

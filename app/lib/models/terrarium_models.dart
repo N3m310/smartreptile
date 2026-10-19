@@ -49,6 +49,9 @@ class TerrariumModel {
     required this.thresholds,
     required this.description,
     required this.deviceCount,
+    this.speciesProfileId,
+    this.timeZoneId,
+    this.location,
   });
 
   final String id;
@@ -62,6 +65,60 @@ class TerrariumModel {
   ThresholdModel thresholds;
   final String description;
   final int deviceCount;
+  final String? speciesProfileId;
+  final String? timeZoneId;
+  final String? location;
+
+  static String defaultImageForSpecies(String species) {
+    final lower = species.toLowerCase();
+    if (lower.contains('rồng') || lower.contains('dragon') || lower.contains('arid') || lower.contains('sa mạc')) {
+      return 'https://images.unsplash.com/photo-1574063413132-355dbfd83e25?auto=format&fit=crop&w=800&q=80';
+    } else if (lower.contains('trăn') || lower.contains('python') || lower.contains('rắn') || lower.contains('snake') || lower.contains('tropical')) {
+      return 'https://images.unsplash.com/photo-1531386151447-fd76ad50012f?auto=format&fit=crop&w=800&q=80';
+    } else if (lower.contains('tắc kè') || lower.contains('gecko') || lower.contains('chameleon')) {
+      return 'https://images.unsplash.com/photo-1508817628294-5a453fa0b8fb?auto=format&fit=crop&w=800&q=80';
+    }
+    return 'https://images.unsplash.com/photo-1548767797-d8c844163c4c?auto=format&fit=crop&w=800&q=80';
+  }
+
+  factory TerrariumModel.fromApi(
+    Map<String, dynamic> json, {
+    ThresholdModel? thresholds,
+  }) {
+    final id = json['id']?.toString() ?? '';
+    final name = json['name']?.toString() ?? 'Terrarium';
+    final species = json['speciesName']?.toString() ?? 'Chưa xác định';
+    final desc = json['description']?.toString() ?? '';
+    final dev = json['device'];
+    final deviceCount = dev != null ? 1 : 0;
+    final openAlertCount = (json['openAlertCount'] as num?)?.toInt() ?? 0;
+    final status = openAlertCount > 0 ? 'warning' : 'normal';
+
+    return TerrariumModel(
+      id: id,
+      name: name,
+      species: species,
+      image: defaultImageForSpecies(species),
+      status: status,
+      currentTemp: 28.0,
+      currentHumidity: 55.0,
+      currentLight: 400,
+      thresholds: thresholds ??
+          ThresholdModel(
+            tempMin: 22.0,
+            tempMax: 32.0,
+            humidityMin: 40.0,
+            humidityMax: 70.0,
+            lightMin: 150,
+            lightMax: 800,
+          ),
+      description: desc.isNotEmpty ? desc : 'Chuồng nuôi sinh thái bò sát.',
+      deviceCount: deviceCount,
+      speciesProfileId: json['speciesProfileId']?.toString(),
+      timeZoneId: json['timeZoneId']?.toString(),
+      location: json['location']?.toString(),
+    );
+  }
 }
 
 class DeviceModel {
@@ -86,6 +143,23 @@ class DeviceModel {
   final String firmware;
   final String lastSeen;
   final String ipAddress;
+
+  factory DeviceModel.fromApi(Map<String, dynamic> json) {
+    final status = json['status']?.toString().toLowerCase() ?? 'offline';
+    final runtime = json['runtime']?.toString().toLowerCase() ?? '';
+    final isOnline = runtime == 'online' || status == 'online';
+    return DeviceModel(
+      id: json['deviceId']?.toString() ?? '',
+      name: json['deviceName']?.toString() ?? 'Thiết bị ESP32',
+      type: json['protocol']?.toString() ?? 'ESP32 MQTT Node',
+      terrariumId: json['terrariumId']?.toString() ?? '',
+      terrariumName: json['terrariumName']?.toString() ?? 'Chưa gán chuồng',
+      isOnline: isOnline,
+      firmware: json['firmwareVersion']?.toString() ?? 'v1.0.0',
+      lastSeen: json['lastSeenAt']?.toString() ?? 'Chưa có dữ liệu',
+      ipAddress: json['macAddress']?.toString() ?? '00:00:00:00:00:00',
+    );
+  }
 }
 
 class AlertModel {
@@ -112,6 +186,57 @@ class AlertModel {
   bool isResolved;
   final String timestamp;
   String? resolvedAt;
+
+  factory AlertModel.fromApi(Map<String, dynamic> json) {
+    final id = json['id']?.toString() ?? '';
+    final metric = json['metric']?.toString() ?? '';
+    final family = json['family']?.toString().toLowerCase() ?? '';
+    final severityStr = json['severity']?.toString().toLowerCase() ?? 'warning';
+    final severity = severityStr == 'critical' ? 'danger' : 'warning';
+    final state = json['state']?.toString().toLowerCase() ?? 'active';
+    final isResolved = state == 'resolved';
+
+    String title;
+    String message;
+    String type;
+
+    if (metric.contains('temp')) {
+      type = 'temp_high';
+      title = 'Cảnh báo nhiệt độ';
+      final val = json['triggeringValue'];
+      message = val != null
+          ? 'Nhiệt độ hiện tại: $val°C (vượt ngưỡng cho phép)'
+          : 'Nhiệt độ chuồng lệch ngưỡng an toàn.';
+    } else if (metric.contains('hum')) {
+      type = 'humidity_high';
+      title = 'Cảnh báo độ ẩm';
+      final val = json['triggeringValue'];
+      message = val != null
+          ? 'Độ ẩm hiện tại: $val% (vượt ngưỡng cho phép)'
+          : 'Độ ẩm chuồng lệch ngưỡng an toàn.';
+    } else if (family == 'device') {
+      type = 'device_offline';
+      title = 'Mất kết nối thiết bị';
+      message = 'Bộ điều khiển IoT không phản hồi tín hiệu.';
+    } else {
+      type = 'temp_high';
+      title = 'Cảnh báo vi khí hậu';
+      message = 'Chỉ số đo vượt ngưỡng quy định.';
+    }
+
+    return AlertModel(
+      id: id,
+      title: title,
+      message: message,
+      terrariumId: json['terrariumId']?.toString() ?? '',
+      terrariumName: 'Chuồng nuôi',
+      type: type,
+      severity: severity,
+      isResolved: isResolved,
+      timestamp: json['triggeredAt']?.toString() ?? 'Vừa xong',
+      resolvedAt: json['resolvedAt']?.toString(),
+    );
+  }
 }
 
 class HistoryPoint {
