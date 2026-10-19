@@ -9,12 +9,14 @@ import 'package:smart_reptile/app.dart';
 import 'package:smart_reptile/core/permissions.dart';
 import 'package:smart_reptile/data/api_client.dart';
 import 'package:smart_reptile/data/token_store.dart';
+import 'package:smart_reptile/services/species_profile_service.dart';
 import 'package:smart_reptile/state/accounts_provider.dart';
 import 'package:smart_reptile/state/admin_provider.dart';
 import 'package:smart_reptile/state/app_data_provider.dart';
 import 'package:smart_reptile/state/roles_provider.dart';
 import 'package:smart_reptile/state/session_provider.dart';
 import 'package:smart_reptile/state/settings_provider.dart';
+import 'package:smart_reptile/state/species_profile_provider.dart';
 
 /// Widget tests for the app shell (`lib/app.dart`) — the surface a keeper sees.
 ///
@@ -46,6 +48,11 @@ void main() {
       ),
       ChangeNotifierProvider<RolesProvider>(
         create: (_) => RolesProvider(api: ApiClient(baseUrl: 'http://localhost')),
+      ),
+      ChangeNotifierProvider<SpeciesProfileProvider>(
+        create: (_) => SpeciesProfileProvider(
+          service: SpeciesProfileService(api: ApiClient(baseUrl: 'http://localhost')),
+        ),
       ),
     ],
     child: const SmartReptileApp(),

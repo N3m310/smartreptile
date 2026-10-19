@@ -5,12 +5,13 @@ import 'core/env.dart';
 import 'core/permissions.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'screens/admin/admin_hub_screen.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/terrariums_screen.dart';
 import 'screens/alerts_screen.dart';
+import 'screens/dashboard_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/species_screen.dart';
+import 'screens/terrariums_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
@@ -94,11 +95,20 @@ class _RootShellState extends State<_RootShell> {
       ),
       const _ShellTab(
         destination: NavigationDestination(
-          icon: Icon(Icons.pets_outlined),
-          selectedIcon: Icon(Icons.pets),
+          icon: Icon(Icons.grass_outlined),
+          selectedIcon: Icon(Icons.grass),
           label: 'Terrarium',
         ),
         screen: TerrariumsScreen(),
+      ),
+      const _ShellTab(
+        destination: NavigationDestination(
+          icon: Icon(Icons.pets_outlined),
+          selectedIcon: Icon(Icons.pets),
+          label: 'Hồ sơ loài',
+        ),
+        screen: SpeciesScreen(),
+        isMock: false,
       ),
       _ShellTab(
         destination: NavigationDestination(
