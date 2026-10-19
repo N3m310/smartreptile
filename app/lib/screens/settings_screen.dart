@@ -7,7 +7,7 @@ import '../state/app_data_provider.dart';
 import '../state/session_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/session_card.dart';
-import 'species/species_day1_test_sheet.dart';
+import 'species/species_profile_sheet.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -132,7 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
               trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.primary),
-              onTap: () => SpeciesDay1TestSheet.show(context),
+              onTap: () => SpeciesProfileSheet.show(context),
             ),
           ),
 

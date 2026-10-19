@@ -7,23 +7,23 @@ import '../../state/species_profile_provider.dart';
 import '../../theme/app_theme.dart';
 
 /// Bottom sheet for managing Reptile Species Profiles (Browse, Create with Form, Duplicate, Edit, Delete).
-class SpeciesDay1TestSheet extends StatefulWidget {
-  const SpeciesDay1TestSheet({super.key});
+class SpeciesProfileSheet extends StatefulWidget {
+  const SpeciesProfileSheet({super.key});
 
   static void show(BuildContext context) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const SpeciesDay1TestSheet(),
+      builder: (_) => const SpeciesProfileSheet(),
     );
   }
 
   @override
-  State<SpeciesDay1TestSheet> createState() => _SpeciesDay1TestSheetState();
+  State<SpeciesProfileSheet> createState() => _SpeciesProfileSheetState();
 }
 
-class _SpeciesDay1TestSheetState extends State<SpeciesDay1TestSheet> {
+class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
   String? _statusMessage;
   bool _isSuccess = true;
 
