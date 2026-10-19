@@ -42,6 +42,92 @@ class ApiClient {
   /// DELETE. The account delete carries `purge` in the query string, so no body is needed here.
   Future<Map<String, dynamic>> deleteJson(String path) => _send('DELETE', path);
 
+  /// GET that returns raw binary bytes (e.g. for authenticated image downloads).
+  Future<List<int>> getBytes(String path) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final headers = _headers();
+    http.Response response;
+    try {
+      response = await _http.get(uri, headers: headers).timeout(const Duration(seconds: 15));
+    } on Exception {
+      throw const AppFailure(code: 'network_unreachable', statusCode: 0);
+    }
+
+    if (response.statusCode == 401) {
+      final renewed = await onUnauthorized?.call() ?? false;
+      if (renewed) {
+        final retryHeaders = _headers();
+        response = await _http.get(uri, headers: retryHeaders).timeout(const Duration(seconds: 15));
+      }
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.bodyBytes;
+    }
+
+    _decode(response);
+    return const [];
+  }
+
+  /// POST multipart form data (e.g. for uploading species images).
+  Future<Map<String, dynamic>> postMultipart(
+    String path, {
+    required String fieldName,
+    required List<int> fileBytes,
+    required String filename,
+  }) => _sendMultipartOnce(
+    path,
+    fieldName: fieldName,
+    fileBytes: fileBytes,
+    filename: filename,
+    isRetry: false,
+  );
+
+  Future<Map<String, dynamic>> _sendMultipartOnce(
+    String path, {
+    required String fieldName,
+    required List<int> fileBytes,
+    required String filename,
+    required bool isRetry,
+  }) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final request = http.MultipartRequest('POST', uri);
+    if (accessToken != null) {
+      request.headers['Authorization'] = 'Bearer $accessToken';
+    }
+    request.headers['Accept'] = 'application/json';
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        fieldName,
+        fileBytes,
+        filename: filename,
+      ),
+    );
+
+    http.Response response;
+    try {
+      final streamed = await _http.send(request).timeout(const Duration(seconds: 20));
+      response = await http.Response.fromStream(streamed);
+    } on Exception {
+      throw const AppFailure(code: 'network_unreachable', statusCode: 0);
+    }
+
+    if (response.statusCode == 401 && !isRetry) {
+      final renewed = await onUnauthorized?.call() ?? false;
+      if (renewed) {
+        return _sendMultipartOnce(
+          path,
+          fieldName: fieldName,
+          fileBytes: fileBytes,
+          filename: filename,
+          isRetry: true,
+        );
+      }
+    }
+
+    return _decode(response);
+  }
+
   /// Closes the underlying HTTP client.
   void dispose() => _http.close();
 

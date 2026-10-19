@@ -9,12 +9,14 @@ import 'core/env.dart';
 import 'data/api_client.dart';
 import 'prototype/prototype_shell.dart';
 import 'prototype/prototype_state.dart';
+import 'services/species_profile_service.dart';
 import 'state/accounts_provider.dart';
 import 'state/admin_provider.dart';
 import 'state/app_data_provider.dart';
 import 'state/roles_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
+import 'state/species_profile_provider.dart';
 import 'state/telemetry_provider.dart';
 
 /// Composition root of the app (`03-implementation/05` §1).
@@ -42,6 +44,8 @@ void main() {
   final admin = AdminProvider(api: api);
   final accounts = AccountsProvider(api: api);
   final roles = RolesProvider(api: api);
+  final speciesService = SpeciesProfileService(api: api);
+  final species = SpeciesProfileProvider(service: speciesService);
 
   // One listener rather than four calls at every sign-out site: everything the administration surfaces hold belongs
   // to the account that was signed in, so the moment the session ends they are emptied. A screen left behind would
@@ -51,6 +55,7 @@ void main() {
       admin.clear();
       accounts.clear();
       roles.clear();
+      species.clear();
     }
   });
 
@@ -59,12 +64,14 @@ void main() {
       providers: [
         Provider<Clock>.value(value: clock),
         Provider<ApiClient>.value(value: api),
+        Provider<SpeciesProfileService>.value(value: speciesService),
         ChangeNotifierProvider<SettingsProvider>.value(value: settings),
         ChangeNotifierProvider<AppDataProvider>.value(value: appData),
         ChangeNotifierProvider<SessionProvider>.value(value: session),
         ChangeNotifierProvider<AdminProvider>.value(value: admin),
         ChangeNotifierProvider<AccountsProvider>.value(value: accounts),
         ChangeNotifierProvider<RolesProvider>.value(value: roles),
+        ChangeNotifierProvider<SpeciesProfileProvider>.value(value: species),
         ChangeNotifierProvider<TelemetryProvider>(
           create: (_) => TelemetryProvider(api: api, clock: clock),
         ),
