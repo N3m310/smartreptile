@@ -85,6 +85,15 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Device>> ListAllAsync(CancellationToken cancellationToken) =>
+        await db.Devices
+            .Include(device => device.Terrarium)
+            .OrderBy(device => device.DeviceName)
+            .ThenBy(device => device.PublicId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
 
     /// <inheritdoc />

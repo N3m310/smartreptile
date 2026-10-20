@@ -8,6 +8,7 @@ import 'screens/admin/admin_hub_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/terrariums_screen.dart';
 import 'screens/alerts_screen.dart';
+import 'screens/devices_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/species_screen.dart';
@@ -108,6 +109,15 @@ class _RootShellState extends State<_RootShell> {
           label: 'Hồ sơ loài',
         ),
         screen: SpeciesScreen(),
+        isMock: false,
+      ),
+      const _ShellTab(
+        destination: NavigationDestination(
+          icon: Icon(Icons.developer_board_outlined),
+          selectedIcon: Icon(Icons.developer_board),
+          label: 'Thiết bị IoT',
+        ),
+        screen: DevicesScreen(),
         isMock: false,
       ),
       _ShellTab(
@@ -244,10 +254,13 @@ class _RootShellState extends State<_RootShell> {
           Expanded(child: tabs[index].screen),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (value) => setState(() => _index = value),
-        destinations: [for (final tab in tabs) tab.destination],
+      bottomNavigationBar: DefaultTextStyle.merge(
+        textAlign: TextAlign.center,
+        child: NavigationBar(
+          selectedIndex: index,
+          onDestinationSelected: (value) => setState(() => _index = value),
+          destinations: [for (final tab in tabs) tab.destination],
+        ),
       ),
     );
   }
