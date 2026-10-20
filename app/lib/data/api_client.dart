@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -27,17 +28,46 @@ class ApiClient {
   /// GET that returns a decoded JSON object.
   Future<Map<String, dynamic>> getJson(String path) => _send('GET', path);
 
+  Future<Uint8List> getBytes(String path, {bool isRetry = false}) async {
+    final uri = Uri.parse(path.startsWith('http') ? path : '$baseUrl$path');
+    http.Response response;
+    try {
+      response = await _http
+          .get(uri, headers: _headers())
+          .timeout(const Duration(seconds: 10));
+    } on Exception {
+      throw const AppFailure(code: 'network_unreachable', statusCode: 0);
+    }
+    if (response.statusCode == 401 && !isRetry) {
+      final renewed = await onUnauthorized?.call() ?? false;
+      if (renewed) {
+        return getBytes(path, isRetry: true);
+      }
+    }
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.bodyBytes;
+    }
+    _decode(response);
+    throw AppFailure(
+      code: 'http_${response.statusCode}',
+      statusCode: response.statusCode,
+    );
+  }
+
   /// POST with an optional JSON body.
   Future<Map<String, dynamic>> postJson(String path, {Object? body}) =>
-      _send('POST', path, body);
+      _send('POST', path, body: body);
 
   /// PATCH with an optional JSON body.
-  Future<Map<String, dynamic>> patchJson(String path, {Object? body}) =>
-      _send('PATCH', path, body);
+  Future<Map<String, dynamic>> patchJson(
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+  }) => _send('PATCH', path, body: body, headers: headers);
 
   /// PUT with an optional JSON body.
   Future<Map<String, dynamic>> putJson(String path, {Object? body}) =>
-      _send('PUT', path, body);
+      _send('PUT', path, body: body);
 
   /// DELETE. The account delete carries `purge` in the query string, so no body is needed here.
   Future<Map<String, dynamic>> deleteJson(String path) => _send('DELETE', path);
@@ -72,28 +102,30 @@ class ApiClient {
 
   Future<Map<String, dynamic>> _send(
     String method,
-    String path, [
+    String path, {
     Object? body,
-  ]) => _sendOnce(method, path, body, isRetry: false);
+    Map<String, String>? headers,
+  }) => _sendOnce(method, path, body: body, headers: headers, isRetry: false);
 
   Future<Map<String, dynamic>> _sendOnce(
     String method,
-    String path,
-    Object? body, {
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
     required bool isRetry,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
-    final headers = _headers(hasBody: body != null);
+    final requestHeaders = {..._headers(hasBody: body != null), ...?headers};
     final encoded = body == null ? null : jsonEncode(body);
 
     http.Response response;
     try {
       response = await switch (method) {
-        'POST' => _http.post(uri, headers: headers, body: encoded),
-        'PATCH' => _http.patch(uri, headers: headers, body: encoded),
-        'PUT' => _http.put(uri, headers: headers, body: encoded),
-        'DELETE' => _http.delete(uri, headers: headers, body: encoded),
-        _ => _http.get(uri, headers: headers),
+        'POST' => _http.post(uri, headers: requestHeaders, body: encoded),
+        'PATCH' => _http.patch(uri, headers: requestHeaders, body: encoded),
+        'PUT' => _http.put(uri, headers: requestHeaders, body: encoded),
+        'DELETE' => _http.delete(uri, headers: requestHeaders, body: encoded),
+        _ => _http.get(uri, headers: requestHeaders),
       }.timeout(const Duration(seconds: 10));
     } on Exception {
       // No status code: the server was not reachable. The UI shows cached values with explicit timestamps
@@ -106,7 +138,13 @@ class ApiClient {
     if (response.statusCode == 401 && !isRetry) {
       final renewed = await onUnauthorized?.call() ?? false;
       if (renewed) {
-        return _sendOnce(method, path, body, isRetry: true);
+        return _sendOnce(
+          method,
+          path,
+          body: body,
+          headers: headers,
+          isRetry: true,
+        );
       }
     }
 

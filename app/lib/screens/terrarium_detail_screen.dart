@@ -1,513 +1,569 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../models/terrarium_models.dart';
-import '../state/app_data_provider.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../core/problem.dart';
+import '../l10n/generated/app_localizations.dart';
+import '../l10n/labels.dart';
+import '../models/api_terrarium_models.dart';
+import '../core/status.dart';
+import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
 
-class TerrariumDetailScreen extends StatelessWidget {
-  const TerrariumDetailScreen({super.key, required this.terrarium});
+class TerrariumDetailScreen extends StatefulWidget {
+  const TerrariumDetailScreen({super.key, required this.terrariumId});
 
-  final TerrariumModel terrarium;
+  final String terrariumId;
 
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'danger':
-        return AppColors.statusDanger;
-      case 'warning':
-        return AppColors.statusWarning;
-      default:
-        return AppColors.statusNormal;
+  @override
+  State<TerrariumDetailScreen> createState() => _TerrariumDetailScreenState();
+}
+
+class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
+  late Future<ApiTerrarium> _terrariumFuture;
+  late Future<Map<String, dynamic>> _latestFuture;
+  late DateTime _to;
+  String _metric = 'tempC';
+  int _hours = 24;
+  Future<Map<String, dynamic>>? _seriesFuture;
+  Future<Map<String, dynamic>>? _coverageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _to = DateTime.now().toUtc();
+    _load();
+  }
+
+  void _load() {
+    final provider = context.read<TerrariumProvider>();
+    _terrariumFuture = provider.loadTerrarium(widget.terrariumId);
+    _latestFuture = provider.loadLatest(widget.terrariumId);
+    _loadHistory();
+  }
+
+  void _loadHistory() {
+    final provider = context.read<TerrariumProvider>();
+    final from = _to.subtract(Duration(hours: _hours));
+    _seriesFuture = provider.loadReadings(
+      id: widget.terrariumId,
+      metric: _metric,
+      from: from,
+      to: _to,
+    );
+    _coverageFuture = provider.loadCoverage(
+      id: widget.terrariumId,
+      from: from,
+      to: _to,
+    );
+  }
+
+  Future<void> _edit(ApiTerrarium current) async {
+    final l10n = AppLocalizations.of(context);
+    final name = TextEditingController(text: current.name);
+    final location = TextEditingController(text: current.location ?? '');
+    final description = TextEditingController(text: current.description ?? '');
+    final formKey = GlobalKey<FormState>();
+    AppFailure? failure;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(l10n.terrariumEdit),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: name,
+                    maxLength: 60,
+                    decoration: InputDecoration(labelText: l10n.terrariumName),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? l10n.terrariumNameRequired
+                        : value.trim().length > 60
+                        ? l10n.terrariumNameTooLong
+                        : null,
+                  ),
+                  TextFormField(
+                    controller: location,
+                    maxLength: 120,
+                    decoration: InputDecoration(
+                      labelText: l10n.terrariumLocation,
+                    ),
+                    validator: (value) => (value?.length ?? 0) > 120
+                        ? l10n.terrariumLocationTooLong
+                        : null,
+                  ),
+                  TextFormField(
+                    controller: description,
+                    maxLength: 1000,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      labelText: l10n.terrariumDescription,
+                    ),
+                    validator: (value) => (value?.length ?? 0) > 1000
+                        ? l10n.terrariumDescriptionTooLong
+                        : null,
+                  ),
+                  if (failure != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(
+                        failureMessage(l10n, failure!),
+                        style: const TextStyle(color: AppColors.statusDanger),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) return;
+                try {
+                  await context.read<TerrariumProvider>().updateTerrarium(
+                    current,
+                    name: name.text,
+                    location: location.text,
+                    description: description.text,
+                  );
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext, true);
+                  }
+                } on AppFailure catch (error) {
+                  setDialogState(() => failure = error);
+                }
+              },
+              child: Text(l10n.save),
+            ),
+          ],
+        ),
+      ),
+    );
+    name.dispose();
+    location.dispose();
+    description.dispose();
+    if (result == true && mounted) {
+      setState(_load);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(l10n.terrariumUpdated)));
     }
   }
 
-  String _getStatusText(String status) {
-    switch (status) {
-      case 'danger':
-        return 'Nguy hiểm';
-      case 'warning':
-        return 'Cảnh báo';
-      default:
-        return 'Bình thường';
+  Future<void> _delete(ApiTerrarium current) async {
+    final l10n = AppLocalizations.of(context);
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l10n.terrariumDelete),
+        content: Text(l10n.terrariumDeleteConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.terrariumDelete),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    try {
+      await context.read<TerrariumProvider>().deleteTerrarium(current);
+      if (mounted) Navigator.pop(context);
+    } on AppFailure catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failureMessage(l10n, failure))));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final data = context.watch<AppDataProvider>();
-    final current = data.terrariums.firstWhere(
-      (t) => t.id == terrarium.id,
-      orElse: () => terrarium,
-    );
-    final devices =
-        data.devices.where((d) => d.terrariumId == current.id).toList();
-    final history = data.historyFor(current.id);
-
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: AppColors.bgMain,
       appBar: AppBar(
-        title: Text(current.name),
+        title: Text(l10n.terrariumDetail),
         actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: _getStatusColor(current.status).withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _getStatusColor(current.status)),
-            ),
-            child: Text(
-              _getStatusText(current.status),
-              style: TextStyle(
-                color: _getStatusColor(current.status),
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+          FutureBuilder<ApiTerrarium>(
+            future: _terrariumFuture,
+            builder: (context, snapshot) {
+              final current = snapshot.data;
+              if (current == null) return const SizedBox.shrink();
+              return PopupMenuButton<String>(
+                onSelected: (action) {
+                  if (action == 'edit') _edit(current);
+                  if (action == 'delete') _delete(current);
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(value: 'edit', child: Text(l10n.terrariumEdit)),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(l10n.terrariumDelete),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Hero Banner with Image
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
+      body: FutureBuilder<ApiTerrarium>(
+        future: _terrariumFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            final failure = snapshot.error is AppFailure
+                ? snapshot.error as AppFailure
+                : null;
+            return _ErrorState(
+              message: failure == null
+                  ? l10n.errorGeneric
+                  : failureMessage(l10n, failure),
+              retry: () => setState(_load),
+            );
+          }
+          final terrarium = snapshot.data;
+          if (terrarium == null) {
+            return Center(child: Text(l10n.terrariumNotFound));
+          }
+          return RefreshIndicator(
+            onRefresh: () async => setState(_load),
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                Image.network(
-                  current.image,
-                  height: 180,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
-                    height: 180,
-                    color: AppColors.bgCardHover,
-                    child: const Center(
-                      child: Icon(Icons.pets, size: 48, color: AppColors.primary),
-                    ),
+                Text(
+                  terrarium.name,
+                  style: const TextStyle(
+                    color: AppColors.textMain,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                Container(
-                  height: 180,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        AppColors.bgCard.withValues(alpha: 0.95),
-                      ],
-                    ),
-                  ),
+                const SizedBox(height: 4),
+                Text(
+                  terrarium.speciesName,
+                  style: const TextStyle(color: AppColors.accent),
                 ),
-                Positioned(
-                  bottom: 14,
-                  left: 16,
-                  right: 16,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        current.species,
-                        style: const TextStyle(
-                          color: AppColors.accent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                if (terrarium.location?.isNotEmpty == true)
+                  Text(
+                    terrarium.location!,
+                    style: const TextStyle(color: AppColors.textMuted),
+                  ),
+                const SizedBox(height: 18),
+                _latestReadings(l10n),
+                const SizedBox(height: 18),
+                _history(l10n),
+                const SizedBox(height: 12),
+                if (terrarium.device != null)
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.memory),
+                      title: Text(
+                        terrarium.device?['deviceName'] as String? ??
+                            l10n.device,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        current.description,
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      subtitle: Text(
+                        '${terrarium.device?['status'] ?? '—'} · ${terrarium.device?['deviceId'] ?? '—'}',
+                      ),
+                    ),
+                  )
+                else
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.memory),
+                      title: Text(l10n.device),
+                      subtitle: Text(l10n.terrariumBindDeviceNone),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _latestReadings(
+    AppLocalizations l10n,
+  ) => FutureBuilder<Map<String, dynamic>>(
+    future: _latestFuture,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (snapshot.hasError) {
+        final failure = snapshot.error is AppFailure
+            ? snapshot.error as AppFailure
+            : null;
+        return Text(
+          failure == null ? l10n.errorGeneric : failureMessage(l10n, failure),
+          style: const TextStyle(color: AppColors.statusDanger),
+        );
+      }
+      final readings =
+          (snapshot.data?['metrics'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .toList() ??
+          [];
+      if (readings.isEmpty) {
+        return Card(child: ListTile(title: Text(l10n.detailNoReadings)));
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.detailLatestReadings,
+            style: const TextStyle(
+              color: AppColors.textMain,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final reading in readings)
+            Card(
+              child: ListTile(
+                leading: Icon(_metricIcon(reading['code'] as String?)),
+                title: Text(
+                  '${_metricLabel(l10n, reading['code'] as String?)}: ${reading['value'] ?? '—'} ${reading['unit'] ?? ''}',
+                ),
+                subtitle: Text(
+                  '${MetricStatus.parse(reading['status'] as String?).label(l10n)} · ${_formatDate(reading['capturedAt'] as String?)}',
+                ),
+                trailing: _targetLabel(reading['target']),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+
+  Widget _history(AppLocalizations l10n) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.historyTitle,
+            style: const TextStyle(
+              color: AppColors.textMain,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            children: [
+              DropdownButton<String>(
+                value: _metric,
+                items: const [
+                  DropdownMenuItem(value: 'tempC', child: Text('°C')),
+                  DropdownMenuItem(value: 'humidityPct', child: Text('%RH')),
+                  DropdownMenuItem(value: 'lightLux', child: Text('lx')),
+                  DropdownMenuItem(value: 'uvIndex', child: Text('UV')),
+                  DropdownMenuItem(
+                    value: 'surfaceTempC',
+                    child: Text('°C surface'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _metric = value;
+                    _loadHistory();
+                  });
+                },
+              ),
+              DropdownButton<int>(
+                value: _hours,
+                items: [
+                  DropdownMenuItem(
+                    value: 24,
+                    child: Text(l10n.historyRange24h),
+                  ),
+                  DropdownMenuItem(
+                    value: 168,
+                    child: Text(l10n.historyRange7d),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _hours = value;
+                    _to = DateTime.now().toUtc();
+                    _loadHistory();
+                  });
+                },
+              ),
+            ],
+          ),
+          FutureBuilder<Map<String, dynamic>>(
+            future: _coverageFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    l10n.historyCoverageMissing,
+                    style: const TextStyle(color: AppColors.textMuted),
+                  ),
+                );
+              }
+              final coverage = snapshot.data?['coveragePct'];
+              return coverage == null
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        l10n.historyCoverage(coverage.toString()),
+                        style: const TextStyle(color: AppColors.textMuted),
+                      ),
+                    );
+            },
+          ),
+          FutureBuilder<Map<String, dynamic>>(
+            future: _seriesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  height: 120,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError) {
+                final failure = snapshot.error is AppFailure
+                    ? snapshot.error as AppFailure
+                    : null;
+                return Text(
+                  failure == null
+                      ? l10n.errorGeneric
+                      : failureMessage(l10n, failure),
+                  style: const TextStyle(color: AppColors.statusDanger),
+                );
+              }
+              final points =
+                  (snapshot.data?['points'] as List?)
+                      ?.whereType<Map<String, dynamic>>()
+                      .toList() ??
+                  [];
+              final spots = <FlSpot>[
+                for (var index = 0; index < points.length; index++)
+                  points[index]['avg'] is num
+                      ? FlSpot(
+                          index.toDouble(),
+                          (points[index]['avg'] as num).toDouble(),
+                        )
+                      : FlSpot.nullSpot,
+              ];
+              if (!spots.any((spot) => !spot.isNull())) {
+                return Text(
+                  l10n.historyNoReadings,
+                  style: const TextStyle(color: AppColors.textMuted),
+                );
+              }
+              return SizedBox(
+                height: 180,
+                child: LineChart(
+                  LineChartData(
+                    gridData: const FlGridData(show: true),
+                    titlesData: const FlTitlesData(
+                      topTitles: AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      rightTitles: AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: spots,
+                        isCurved: true,
+                        color: AppColors.primary,
+                        dotData: const FlDotData(show: false),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
+              );
+            },
           ),
-
-          const SizedBox(height: 18),
-
-          // 3 Sensor Gauge Cards
-          Row(
-            children: [
-              Expanded(
-                child: _GaugeItem(
-                  title: 'Nhiệt độ',
-                  value: '${current.currentTemp}°C',
-                  range: '${current.thresholds.tempMin}-${current.thresholds.tempMax}°C',
-                  color: AppColors.statusDanger,
-                  icon: Icons.thermostat,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _GaugeItem(
-                  title: 'Độ ẩm',
-                  value: '${current.currentHumidity}%',
-                  range: '${current.thresholds.humidityMin}-${current.thresholds.humidityMax}%',
-                  color: AppColors.primary,
-                  icon: Icons.water_drop,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _GaugeItem(
-                  title: 'Ánh sáng',
-                  value: '${current.currentLight} Lx',
-                  range: '${current.thresholds.lightMin}-${current.thresholds.lightMax} Lx',
-                  color: AppColors.accent,
-                  icon: Icons.wb_sunny_outlined,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // Detailed Charts
-          const Text(
-            'Biểu đồ chi tiết theo ngưỡng (24h)',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textMain,
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // 1. Temp Chart with reference lines
-          _SingleChartCard(
-            title: 'Nhiệt độ (°C)',
-            color: AppColors.statusDanger,
-            minThreshold: current.thresholds.tempMin,
-            maxThreshold: current.thresholds.tempMax,
-            spots: [
-              for (int i = 0; i < history.length; i++)
-                FlSpot(i.toDouble(), history[i].temperature),
-            ],
-            history: history,
-          ),
-
-          const SizedBox(height: 14),
-
-          // 2. Humidity Chart
-          _SingleChartCard(
-            title: 'Độ ẩm (%)',
-            color: AppColors.primary,
-            minThreshold: current.thresholds.humidityMin,
-            maxThreshold: current.thresholds.humidityMax,
-            spots: [
-              for (int i = 0; i < history.length; i++)
-                FlSpot(i.toDouble(), history[i].humidity),
-            ],
-            history: history,
-          ),
-
-          const SizedBox(height: 24),
-
-          // Connected Devices List
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Thiết bị kết nối với chuồng',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textMain,
-                ),
-              ),
-              Text(
-                '${devices.length} thiết bị',
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          for (final d in devices)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.bgCard,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.bgMain,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: const Icon(Icons.memory,
-                        size: 20, color: AppColors.primary),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          d.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textMain,
-                            fontSize: 13,
-                          ),
-                        ),
-                        Text(
-                          '${d.type} • FW ${d.firmware}',
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: d.isOnline
-                          ? AppColors.primary.withValues(alpha: 0.15)
-                          : AppColors.statusDanger.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: d.isOnline
-                            ? AppColors.primary
-                            : AppColors.statusDanger,
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Text(
-                      d.isOnline ? 'Online' : 'Offline',
-                      style: TextStyle(
-                        color: d.isOnline
-                            ? AppColors.primary
-                            : AppColors.statusDanger,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 24),
         ],
       ),
+    ),
+  );
+
+  Widget _targetLabel(Object? target) {
+    if (target is! Map<String, dynamic>) return const SizedBox.shrink();
+    final min = target['min'];
+    final max = target['max'];
+    if (min == null && max == null) return const SizedBox.shrink();
+    return Text(
+      '${min ?? '—'}–${max ?? '—'}',
+      style: const TextStyle(fontSize: 11),
     );
+  }
+
+  String _metricLabel(AppLocalizations l10n, String? code) => switch (code) {
+    'tempC' => l10n.metricTempC,
+    'humidityPct' => l10n.metricHumidityPct,
+    'lightLux' => l10n.metricLightLux,
+    'uvIndex' => l10n.metricUvIndex,
+    'surfaceTempC' => l10n.metricSurfaceTempC,
+    _ => l10n.device,
+  };
+
+  IconData _metricIcon(String? code) => switch (code) {
+    'tempC' || 'surfaceTempC' => Icons.thermostat,
+    'humidityPct' => Icons.water_drop,
+    'lightLux' => Icons.wb_sunny_outlined,
+    'uvIndex' => Icons.wb_sunny,
+    _ => Icons.sensors,
+  };
+
+  String _formatDate(String? value) {
+    if (value == null) return AppLocalizations.of(context).never;
+    final date = DateTime.tryParse(value)?.toLocal();
+    return date == null ? '—' : DateFormat.yMd().add_Hm().format(date);
   }
 }
 
-class _GaugeItem extends StatelessWidget {
-  const _GaugeItem({
-    required this.title,
-    required this.value,
-    required this.range,
-    required this.color,
-    required this.icon,
-  });
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.retry});
 
-  final String title;
-  final String value;
-  final String range;
-  final Color color;
-  final IconData icon;
+  final String message;
+  final VoidCallback retry;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.bgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 14),
-              const SizedBox(width: 4),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textMain,
-              fontFamily: 'monospace',
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            range,
-            style: const TextStyle(
-              fontSize: 9,
-              color: AppColors.textMuted,
-            ),
+          Text(message, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: retry,
+            child: Text(AppLocalizations.of(context).retry),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _SingleChartCard extends StatelessWidget {
-  const _SingleChartCard({
-    required this.title,
-    required this.color,
-    required this.minThreshold,
-    required this.maxThreshold,
-    required this.spots,
-    required this.history,
-  });
-
-  final String title;
-  final Color color;
-  final double minThreshold;
-  final double maxThreshold;
-  final List<FlSpot> spots;
-  final List<HistoryPoint> history;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.bgCard,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-              Text(
-                'Min: $minThreshold • Max: $maxThreshold',
-                style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 120,
-            child: LineChart(
-              LineChartData(
-                gridData: const FlGridData(show: false),
-                titlesData: FlTitlesData(
-                  rightTitles:
-                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  topTitles:
-                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 18,
-                      interval: 6,
-                      getTitlesWidget: (val, _) {
-                        final idx = val.toInt();
-                        if (idx >= 0 && idx < history.length) {
-                          return Text(
-                            history[idx].time,
-                            style: const TextStyle(
-                                fontSize: 8, color: AppColors.textMuted),
-                          );
-                        }
-                        return const SizedBox();
-                      },
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 24,
-                      getTitlesWidget: (val, _) => Text(
-                        val.toInt().toString(),
-                        style: const TextStyle(
-                            fontSize: 8, color: AppColors.textMuted),
-                      ),
-                    ),
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                extraLinesData: ExtraLinesData(
-                  horizontalLines: [
-                    HorizontalLine(
-                      y: maxThreshold,
-                      color: AppColors.statusDanger.withValues(alpha: 0.6),
-                      strokeWidth: 1.5,
-                      dashArray: [4, 4],
-                      label: HorizontalLineLabel(
-                        show: true,
-                        labelResolver: (_) => 'Max',
-                        style: const TextStyle(
-                            color: AppColors.statusDanger, fontSize: 8),
-                      ),
-                    ),
-                    HorizontalLine(
-                      y: minThreshold,
-                      color: AppColors.statusWarning.withValues(alpha: 0.6),
-                      strokeWidth: 1.5,
-                      dashArray: [4, 4],
-                      label: HorizontalLineLabel(
-                        show: true,
-                        labelResolver: (_) => 'Min',
-                        style: const TextStyle(
-                            color: AppColors.statusWarning, fontSize: 8),
-                      ),
-                    ),
-                  ],
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    color: color,
-                    barWidth: 2,
-                    dotData: const FlDotData(show: false),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+    ),
+  );
 }

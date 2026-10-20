@@ -95,6 +95,7 @@ class _RootShellState extends State<_RootShell> {
           label: 'Terrarium',
         ),
         screen: TerrariumsScreen(),
+        isMock: false,
       ),
       _ShellTab(
         destination: NavigationDestination(
@@ -129,6 +130,7 @@ class _RootShellState extends State<_RootShell> {
           label: 'Lịch sử',
         ),
         screen: HistoryScreen(),
+        isMock: false,
       ),
       const _ShellTab(
         destination: NavigationDestination(

@@ -14,6 +14,10 @@ import type {
   AdminOverview,
   AdminPage,
   AdminTerrariumView,
+  AlertDetail,
+  AlertPage,
+  AlertTimelineEntry,
+  AlertView,
   AuthSession,
   Coverage,
   CreateRoleBody,
@@ -25,6 +29,7 @@ import type {
   HealthReport,
   LatestReadings,
   MetricsSnapshot,
+  MetricSilence,
   PermissionSummary,
   RangeSeries,
   RoleSummary,
@@ -37,6 +42,7 @@ import type {
   TimeZoneList,
   UpdateAccountBody,
   UpdateRoleBody,
+  UpdateProfileBody,
   UpdateSpeciesProfileBody,
   UserPage,
   UserProfile,
@@ -72,6 +78,10 @@ export async function logout(refreshToken: string): Promise<void> {
 
 export async function me(): Promise<UserProfile> {
   return apiRequest('/api/v1/auth/me');
+}
+
+export async function updateMyProfile(body: UpdateProfileBody): Promise<UserProfile> {
+  return apiRequest('/api/v1/auth/me', { method: 'PATCH', body });
 }
 
 export async function changePassword(body: {
@@ -138,6 +148,10 @@ export async function listDevices(): Promise<DeviceList> {
   return apiRequest('/api/v1/devices');
 }
 
+export async function getDevice(deviceId: string): Promise<DeviceItem> {
+  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}`);
+}
+
 /**
  * `PATCH /devices/{id}` — rename a board or change its intervals (item 9b). A patch: an omitted field keeps its
  * value. The interval is stored, not pushed: the board picks it up on its next connection.
@@ -168,6 +182,85 @@ export async function claimDeviceByMac(body: {
   terrariumId: string;
 }): Promise<{ deviceId: string; secret: string; terrariumId: string; boundAtUtc: string }> {
   return apiRequest('/api/v1/devices/claim-by-mac', { method: 'POST', body });
+}
+
+export async function claimDevice(body: { claimCode: string; terrariumId: string }): Promise<{
+  deviceId: string;
+  secret: string;
+  terrariumId: string;
+  boundAtUtc: string;
+}> {
+  return apiRequest('/api/v1/devices/claim', { method: 'POST', body });
+}
+
+export async function rotateDeviceSecret(deviceId: string): Promise<{
+  deviceId: string;
+  secret: string;
+  previousUsableUntilUtc: string;
+}> {
+  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}/rotate-secret`, { method: 'POST' });
+}
+
+export async function revokeDevice(deviceId: string): Promise<void> {
+  await apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}/revoke`, { method: 'POST' });
+}
+
+export async function listAlerts(params: {
+  state?: string;
+  severity?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  pageSize?: number;
+}): Promise<AlertPage> {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') {
+      query.set(key, String(value));
+    }
+  });
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiRequest(`/api/v1/alerts${suffix}`);
+}
+
+export async function getAlert(alertId: number): Promise<AlertDetail> {
+  return apiRequest(`/api/v1/alerts/${alertId}`);
+}
+
+export async function getAlertTimeline(alertId: number): Promise<{ items: AlertTimelineEntry[] }> {
+  return apiRequest(`/api/v1/alerts/${alertId}/timeline`);
+}
+
+export async function acknowledgeAlert(alertId: number): Promise<AlertView> {
+  return apiRequest(`/api/v1/alerts/${alertId}/ack`, { method: 'POST' });
+}
+
+export async function resolveAlert(
+  alertId: number,
+  body: { reason: 'Recovered' | 'FalsePositive' | 'SensorFault' | 'Accepted'; note?: string }
+): Promise<AlertView> {
+  return apiRequest(`/api/v1/alerts/${alertId}/resolve`, { method: 'POST', body });
+}
+
+export async function listTerrariumSilences(terrariumId: string): Promise<{ items: MetricSilence[] }> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(terrariumId)}/silences`);
+}
+
+export async function createTerrariumSilence(
+  terrariumId: string,
+  body: { metric?: string; untilUtc: string; reason: string }
+): Promise<MetricSilence> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(terrariumId)}/silences`, {
+    method: 'POST',
+    body,
+  });
+}
+
+export async function cancelTerrariumSilence(terrariumId: string, silenceId: string): Promise<void> {
+  await apiRequest(
+    `/api/v1/terrariums/${encodeURIComponent(terrariumId)}/silences/${encodeURIComponent(silenceId)}`,
+    { method: 'DELETE' }
+  );
 }
 
 /**

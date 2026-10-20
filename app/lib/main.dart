@@ -20,6 +20,7 @@ import 'state/roles_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
 import 'state/telemetry_provider.dart';
+import 'state/terrarium_provider.dart';
 import 'services/push_registration_service.dart';
 
 /// Composition root of the app (`03-implementation/05` §1).
@@ -69,6 +70,7 @@ Future<void> main() async {
         );
   final session = SessionProvider(api: api, pushRegistration: pushRegistration);
   final admin = AdminProvider(api: api);
+  final terrariums = TerrariumProvider(api);
   final accounts = AccountsProvider(api: api);
   final roles = RolesProvider(api: api);
 
@@ -80,6 +82,7 @@ Future<void> main() async {
       admin.clear();
       accounts.clear();
       roles.clear();
+      terrariums.clear();
     }
   });
 
@@ -92,6 +95,7 @@ Future<void> main() async {
         ChangeNotifierProvider<AppDataProvider>.value(value: appData),
         ChangeNotifierProvider<SessionProvider>.value(value: session),
         ChangeNotifierProvider<AdminProvider>.value(value: admin),
+        ChangeNotifierProvider<TerrariumProvider>.value(value: terrariums),
         ChangeNotifierProvider<AccountsProvider>.value(value: accounts),
         ChangeNotifierProvider<RolesProvider>.value(value: roles),
         ChangeNotifierProvider<TelemetryProvider>(

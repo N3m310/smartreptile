@@ -1,363 +1,536 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+import '../core/problem.dart';
 import '../l10n/generated/app_localizations.dart';
-import '../state/app_data_provider.dart';
+import '../models/api_terrarium_models.dart';
+import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
+import '../l10n/labels.dart';
 import 'terrarium_detail_screen.dart';
 
-class TerrariumsScreen extends StatelessWidget {
+class TerrariumsScreen extends StatefulWidget {
   const TerrariumsScreen({super.key});
 
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'danger':
-        return AppColors.statusDanger;
-      case 'warning':
-        return AppColors.statusWarning;
-      default:
-        return AppColors.statusNormal;
-    }
+  @override
+  State<TerrariumsScreen> createState() => _TerrariumsScreenState();
+}
+
+class _TerrariumsScreenState extends State<TerrariumsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<TerrariumProvider>().loadTerrariums();
+    });
   }
 
-  String _getStatusText(String status) {
-    switch (status) {
-      case 'danger':
-        return 'Nguy hiểm';
-      case 'warning':
-        return 'Cảnh báo';
-      default:
-        return 'Bình thường';
-    }
-  }
-
-  void _showAddTerrariumDialog(BuildContext context) {
-    final nameCtrl = TextEditingController();
-    final speciesCtrl = TextEditingController();
-    final descCtrl = TextEditingController();
-
-    showModalBottomSheet(
+  Future<void> _createTerrarium() async {
+    final created = await showModalBottomSheet<ApiTerrarium>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppColors.bgCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      builder: (_) => const _CreateTerrariumSheet(),
+    );
+    if (!mounted || created == null) return;
+    await context.read<TerrariumProvider>().loadTerrariums();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(AppLocalizations.of(context).terrariumCreated),
+        backgroundColor: AppColors.primary,
       ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Thêm Terrarium Mới',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textMain,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: AppColors.textMuted),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Tên chuồng (Ví dụ: Terrarium #04)',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: speciesCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Loài bò sát (Ví dụ: Trăn Cây Xanh)',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: descCtrl,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Mô tả tập tính / vi khí hậu',
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  onPressed: () {
-                    if (nameCtrl.text.isNotEmpty &&
-                        speciesCtrl.text.isNotEmpty) {
-                      context.read<AppDataProvider>().addTerrarium(
-                            name: nameCtrl.text,
-                            species: speciesCtrl.text,
-                            description: descCtrl.text,
-                          );
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            AppLocalizations.of(context)
-                                .mockDataLocalChangeNotice,
-                          ),
-                          backgroundColor: AppColors.primary,
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text(
-                    'Tạo Terrarium',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    );
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TerrariumDetailScreen(terrariumId: created.id),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final data = context.watch<AppDataProvider>();
+    final data = context.watch<TerrariumProvider>();
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        onPressed: () => _showAddTerrariumDialog(context),
+        onPressed: _createTerrarium,
         icon: const Icon(Icons.add),
-        label: const Text('Thêm chuồng', style: TextStyle(fontWeight: FontWeight.bold)),
+        label: Text(l10n.terrariumNew),
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: data.terrariums.length,
-        itemBuilder: (context, index) {
-          final item = data.terrariums[index];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 16),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TerrariumDetailScreen(terrarium: item),
-                  ),
-                );
-              },
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: RefreshIndicator(
+        onRefresh: data.loadTerrariums,
+        child: data.isLoading && data.terrariums.isEmpty
+            ? const Center(child: CircularProgressIndicator())
+            : data.lastFailure != null && data.terrariums.isEmpty
+            ? ListView(
+                padding: const EdgeInsets.all(24),
                 children: [
-                  Stack(
-                    children: [
-                      Image.network(
-                        item.image,
-                        height: 140,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          height: 140,
-                          color: AppColors.bgCardHover,
-                          child: const Center(
-                            child: Icon(Icons.pets, color: AppColors.primary),
-                          ),
-                        ),
-                      ),
-                      Container(
-                        height: 140,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              AppColors.bgCard.withValues(alpha: 0.9),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: _getStatusColor(item.status),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _getStatusText(item.status),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 10,
-                        left: 14,
-                        right: 14,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.name,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textMain,
-                              ),
-                            ),
-                            Text(
-                              item.species,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                  Text(
+                    failureMessage(l10n, data.lastFailure!),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.statusDanger),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      children: [
-                        // 3 Mini stats
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 10, horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: AppColors.bgMain,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            children: [
-                              _MiniStat(
-                                label: 'Nhiệt độ',
-                                value: '${item.currentTemp}°C',
-                                color: AppColors.statusDanger,
-                                icon: Icons.thermostat,
-                              ),
-                              _MiniStat(
-                                label: 'Độ ẩm',
-                                value: '${item.currentHumidity}%',
-                                color: AppColors.primary,
-                                icon: Icons.water_drop,
-                              ),
-                              _MiniStat(
-                                label: 'Ánh sáng',
-                                value: '${item.currentLight} Lx',
-                                color: AppColors.accent,
-                                icon: Icons.wb_sunny_outlined,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              '${item.deviceCount} thiết bị IoT kết nối',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppColors.textMuted),
-                            ),
-                            const Row(
-                              children: [
-                                Text(
-                                  'Xem chi tiết',
-                                  style: TextStyle(
-                                    color: AppColors.primary,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Icon(Icons.chevron_right,
-                                    color: AppColors.primary, size: 16),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  TextButton(
+                    onPressed: data.loadTerrariums,
+                    child: Text(l10n.retry),
                   ),
                 ],
+              )
+            : data.terrariums.isEmpty
+            ? ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  const Icon(Icons.pets, size: 48, color: AppColors.primary),
+                  const SizedBox(height: 12),
+                  Text(l10n.emptyStateTitle, textAlign: TextAlign.center),
+                  const SizedBox(height: 6),
+                  Text(l10n.emptyStateBody, textAlign: TextAlign.center),
+                ],
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: data.terrariums.length,
+                itemBuilder: (context, index) {
+                  final item = data.terrariums[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              TerrariumDetailScreen(terrariumId: item.id),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 58,
+                              height: 58,
+                              decoration: BoxDecoration(
+                                color: AppColors.bgCardHover,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Icon(
+                                Icons.pets,
+                                color: AppColors.primary,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.name,
+                                    style: const TextStyle(
+                                      color: AppColors.textMain,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    item.speciesName,
+                                    style: const TextStyle(
+                                      color: AppColors.accent,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  if (item.location?.isNotEmpty == true) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      item.location!,
+                                      style: const TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const Icon(
+                              Icons.chevron_right,
+                              color: AppColors.textMuted,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-            ),
-          );
-        },
       ),
     );
   }
 }
 
-class _MiniStat extends StatelessWidget {
-  const _MiniStat({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
+class _CreateTerrariumSheet extends StatefulWidget {
+  const _CreateTerrariumSheet();
 
-  final String label;
-  final String value;
-  final Color color;
-  final IconData icon;
+  @override
+  State<_CreateTerrariumSheet> createState() => _CreateTerrariumSheetState();
+}
+
+class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _location = TextEditingController();
+  List<ApiSpeciesProfile> _profiles = [];
+  ApiSpeciesProfile? _selected;
+  AppFailure? _failure;
+  bool _loadingProfiles = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfiles();
+  }
+
+  Future<void> _loadProfiles() async {
+    try {
+      final profiles = await context
+          .read<TerrariumProvider>()
+          .loadSpeciesProfiles();
+      if (!mounted) return;
+      setState(() {
+        _profiles = profiles;
+        _selected = profiles.isEmpty ? null : profiles.first;
+        _loadingProfiles = false;
+      });
+    } on AppFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _failure = failure;
+        _loadingProfiles = false;
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate() || _selected == null) return;
+    setState(() {
+      _failure = null;
+      _saving = true;
+    });
+    try {
+      final created = await context.read<TerrariumProvider>().createTerrarium(
+        name: _name.text,
+        speciesProfileId: _selected!.id,
+        location: _location.text,
+      );
+      if (mounted) Navigator.pop(context, created);
+    } on AppFailure catch (failure) {
+      if (mounted) setState(() => _failure = failure);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _location.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Form(
+        key: _formKey,
+        child: ListView(
+          shrinkWrap: true,
           children: [
-            Icon(icon, color: color, size: 12),
-            const SizedBox(width: 3),
-            Text(label,
-                style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l10n.terrariumNew,
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _name,
+              maxLength: 60,
+              decoration: InputDecoration(labelText: l10n.terrariumName),
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? l10n.terrariumNameRequired
+                  : value.trim().length > 60
+                  ? l10n.terrariumNameTooLong
+                  : null,
+            ),
+            const SizedBox(height: 10),
+            if (_loadingProfiles)
+              const Center(child: CircularProgressIndicator())
+            else if (_failure != null)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    failureMessage(l10n, _failure!),
+                    style: const TextStyle(color: AppColors.statusDanger),
+                  ),
+                  TextButton(onPressed: _loadProfiles, child: Text(l10n.retry)),
+                ],
+              )
+            else
+              DropdownButtonFormField<ApiSpeciesProfile>(
+                initialValue: _selected,
+                isExpanded: true,
+                decoration: InputDecoration(labelText: l10n.terrariumSpecies),
+                items: _profiles
+                    .map(
+                      (profile) => DropdownMenuItem(
+                        value: profile,
+                        child: Row(
+                          children: [
+                            _ProfileThumbnail(profile: profile),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    profile.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (profile.scientificName.isNotEmpty)
+                                    Text(
+                                      profile.scientificName,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 11,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (profile) => setState(() => _selected = profile),
+                validator: (profile) =>
+                    profile == null ? l10n.speciesProfileChoose : null,
+              ),
+            if (_selected != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _showProfileDetails(context, _selected!),
+                  icon: const Icon(Icons.info_outline),
+                  label: Text(l10n.speciesProfileDetail),
+                ),
+              ),
+            ],
+            TextFormField(
+              controller: _location,
+              maxLength: 120,
+              decoration: InputDecoration(labelText: l10n.terrariumLocation),
+              validator: (value) => (value?.length ?? 0) > 120
+                  ? l10n.terrariumLocationTooLong
+                  : null,
+            ),
+            if (_failure != null && !_loadingProfiles)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  failureMessage(l10n, _failure!),
+                  style: const TextStyle(color: AppColors.statusDanger),
+                ),
+              ),
+            const SizedBox(height: 18),
+            SizedBox(
+              height: 48,
+              child: ElevatedButton(
+                onPressed: _saving || _loadingProfiles || _selected == null
+                    ? null
+                    : _submit,
+                child: Text(_saving ? l10n.creating : l10n.create),
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
-            color: AppColors.textMain,
-            fontFamily: 'monospace',
-          ),
+      ),
+    );
+  }
+
+  void _showProfileDetails(BuildContext context, ApiSpeciesProfile profile) {
+    final l10n = AppLocalizations.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppColors.bgCard,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        builder: (context, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text(
+              profile.name,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            if (profile.scientificName.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  profile.scientificName,
+                  style: const TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              ),
+            if (profile.imageUrl != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: _SpeciesPicture(profile: profile),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              '${l10n.profilePhotoperiodHours}: ${profile.photoperiodHours}',
+            ),
+            Text('${l10n.profileLightsOn}: ${profile.lightsOnLocalTime}'),
+            Text(
+              '${l10n.profileLightThreshold}: ${profile.lightThresholdLux} lx',
+            ),
+            Text(
+              '${l10n.profileMinLightHours}: ${profile.minLightHoursPerDay}',
+            ),
+            const SizedBox(height: 18),
+            Text(
+              l10n.speciesProfileBands,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            for (final band in profile.bands)
+              Card(
+                child: ListTile(
+                  title: Text('${band['metric']} · ${band['phase']}'),
+                  subtitle: Text(
+                    '${band['targetMin'] ?? '—'}–${band['targetMax'] ?? '—'} ${band['unit'] ?? ''} · ${l10n.thresholdColumnCritical}: ${band['criticalMin'] ?? '—'}–${band['criticalMax'] ?? '—'}',
+                  ),
+                ),
+              ),
+            if (profile.notes?.isNotEmpty == true) Text(profile.notes!),
+          ],
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _SpeciesPicture extends StatelessWidget {
+  const _SpeciesPicture({required this.profile});
+
+  final ApiSpeciesProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+      future: context.read<TerrariumProvider>().loadProfileImage(profile),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 140,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError || snapshot.data == null) {
+          return const SizedBox(
+            height: 140,
+            child: Center(child: Icon(Icons.broken_image_outlined, size: 36)),
+          );
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Image.memory(
+            snapshot.data!,
+            height: 180,
+            width: double.infinity,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ProfileThumbnail extends StatelessWidget {
+  const _ProfileThumbnail({required this.profile});
+
+  final ApiSpeciesProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    if (profile.imageUrl == null) {
+      return const CircleAvatar(radius: 22, child: Icon(Icons.pets, size: 18));
+    }
+    return FutureBuilder(
+      future: context.read<TerrariumProvider>().loadProfileImage(profile),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const CircleAvatar(
+            radius: 22,
+            child: SizedBox(
+              height: 16,
+              width: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+        if (snapshot.hasError || snapshot.data == null) {
+          return const CircleAvatar(
+            radius: 22,
+            child: Icon(Icons.broken_image_outlined, size: 18),
+          );
+        }
+        return CircleAvatar(
+          radius: 22,
+          backgroundImage: MemoryImage(snapshot.data!),
+          onBackgroundImageError: (_, _) {},
+        );
+      },
     );
   }
 }

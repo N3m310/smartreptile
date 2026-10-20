@@ -1,217 +1,258 @@
 import React, { useState } from 'react';
-import {
-  Cpu,
-  Search,
-  Wifi,
-  WifiOff,
-  AlertTriangle,
-  RefreshCw,
-  SlidersHorizontal,
-} from 'lucide-react';
-import { initialDevices, Device } from '../data/mockData';
+import { AlertTriangle, Cpu, RefreshCw, Search, Wifi, WifiOff } from 'lucide-react';
+import * as api from '../api/endpoints';
+import { ApiError } from '../api/client';
+import type { DeviceItem, DeviceList, TerrariumList } from '../api/types';
+import { useI18n } from '../i18n';
+import { describeError } from '../lib/messages';
+import { usePolled } from '../lib/usePolled';
+import { useSession } from '../state/session';
+
+const POLL_MS = 30_000;
 
 export const Devices: React.FC = () => {
-  const [devices, setDevices] = useState<Device[]>(initialDevices);
+  const { t, lang } = useI18n();
+  const { hasPermission } = useSession();
+  const devices = usePolled<DeviceList>(() => api.listDevices(), POLL_MS);
+  const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [selected, setSelected] = useState<DeviceItem | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [deviceName, setDeviceName] = useState('');
+  const [samplingIntervalSec, setSamplingIntervalSec] = useState(60);
+  const [publishIntervalSec, setPublishIntervalSec] = useState(60);
+  const [claimCode, setClaimCode] = useState('');
+  const [terrariumId, setTerrariumId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const items = devices.data?.items ?? [];
+  const canRead = hasPermission('device.read');
+  const canWrite = hasPermission('device.write');
+  const canProvision = hasPermission('device.provision');
 
-  const filteredDevices = devices.filter((d) => {
-    const matchesSearch =
-      d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.terrariumName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.id.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesStatus =
-      statusFilter === 'all' ? true : d.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
+  const filtered = items.filter((device) => {
+    const query = searchTerm.trim().toLowerCase();
+    const matchesQuery =
+      !query ||
+      [device.deviceId, device.deviceName, device.macAddress, device.terrariumName ?? '']
+        .some((value) => value.toLowerCase().includes(query));
+    const runtime = device.runtime.toLowerCase();
+    const matchesStatus = statusFilter === 'all' || runtime === statusFilter;
+    return matchesQuery && matchesStatus;
   });
+  const offline = items.filter((device) => device.runtime.toLowerCase() === 'offline');
 
-  const offlineDevices = devices.filter((d) => d.status === 'offline');
+  const runAction = async (action: () => Promise<unknown>, reload = true) => {
+    setBusy(true);
+    setError(null);
+    setSecret(null);
+    try {
+      await action();
+      if (reload) {
+        devices.reload();
+      }
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEdit = (device: DeviceItem) => {
+    setSelected(device);
+    setDeviceName(device.deviceName);
+    setSamplingIntervalSec(device.samplingIntervalSec);
+    setPublishIntervalSec(device.publishIntervalSec);
+    setEditing(true);
+    setError(null);
+  };
+
+  const submitEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected) return;
+    await runAction(async () => {
+      const updated = await api.patchDevice(selected.deviceId, {
+        deviceName,
+        samplingIntervalSec,
+        publishIntervalSec,
+      });
+      setSelected(updated);
+      setEditing(false);
+    });
+  };
+
+  const claim = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!claimCode.trim() || !terrariumId) return;
+    await runAction(async () => {
+      const result = await api.claimDevice({ claimCode: claimCode.trim(), terrariumId });
+      setSecret(result.secret);
+      setClaimCode('');
+      devices.reload();
+    }, false);
+  };
+
+  const showDevice = async (device: DeviceItem) => {
+    setSelected(device);
+    setEditing(false);
+    setError(null);
+    setBusy(true);
+    try {
+      setSelected(await api.getDevice(device.deviceId));
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const formatDate = (value: string | null) =>
+    value ? new Intl.DateTimeFormat(lang === 'vi' ? 'vi-VN' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+
+  if (!canRead) {
+    return <p className="rounded-xl border border-hairline bg-surface p-5 text-sm text-muted">{t('errorForbidden')}</p>;
+  }
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-heading font-extrabold text-[#dcd5c4]">
-            Thiết bị & Cảm biến IoT
-          </h1>
-          <p className="text-sm text-[#8e9e8f] mt-1">
-            Quản lý phần cứng ESP32, DHT22 và LDR thu thập dữ liệu thời gian thực
-          </p>
+          <h1 className="font-heading text-2xl font-bold text-ink">Thiết bị IoT</h1>
+          <p className="mt-1 text-sm text-muted">Trạng thái và cấu hình thiết bị thuộc các bể nuôi của bạn.</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="px-3 py-1.5 rounded-xl bg-[#112016] border border-[#1e3825] text-xs font-mono text-[#dcd5c4]">
-            Tổng: <strong className="text-[#4a9e6a]">{devices.length}</strong> thiết bị
+          <span className="rounded-lg border border-hairline bg-surface px-3 py-2 text-xs text-muted">
+            Tổng thiết bị: <strong className="text-ink">{items.length}</strong>
           </span>
-        </div>
-      </div>
-
-      {/* Offline Alert Banner */}
-      {offlineDevices.length > 0 && (
-        <div className="p-4 sm:p-5 rounded-3xl bg-[#e8a832]/10 border border-[#e8a832]/30 flex items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-[#e8a832]/20 text-[#e8a832] shrink-0">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-[#dcd5c4]">
-                Phát hiện {offlineDevices.length} thiết bị đang ngoại tuyến (Offline)
-              </h4>
-              <p className="text-xs text-[#8e9e8f] mt-0.5">
-                {offlineDevices.map((d) => `${d.name} (${d.terrariumName})`).join(', ')} – Vui lòng kiểm tra nguồn điện hoặc kết nối WiFi/MQTT.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setStatusFilter('offline')}
-            className="px-3 py-1.5 bg-[#e8a832] hover:bg-[#d69827] text-black text-xs font-bold rounded-xl shrink-0 transition-colors cursor-pointer"
-          >
-            Lọc thiết bị lỗi
+          <button type="button" onClick={devices.reload} className="rounded-lg border border-hairline bg-surface p-2 text-muted hover:text-ink" aria-label="Tải lại">
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
+        </div>
+      </header>
+
+      {offline.length > 0 && (
+        <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-semibold text-ink">{offline.length} thiết bị đang ngoại tuyến</p>
+            <p className="mt-1 text-xs text-muted">{offline.map((device) => device.deviceName).join(', ')}</p>
+          </div>
         </div>
       )}
 
-      {/* Search & Filter Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 p-4 rounded-2xl bg-[#112016] border border-[#1e3825]">
-        {/* Search Input */}
-        <div className="relative flex-1">
-          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8e9e8f]">
-            <Search className="w-4 h-4" />
-          </div>
-          <input
-            type="text"
-            placeholder="Tìm theo tên thiết bị, mã ID, terrarium hoặc loại cảm biến..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-xs text-[#dcd5c4] placeholder-[#556055] outline-none focus:border-[#4a9e6a]"
-          />
-        </div>
+      {canProvision && (
+        <form onSubmit={(event) => void claim(event)} className="grid gap-3 rounded-xl border border-hairline bg-surface p-4 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="text-xs font-medium text-muted">
+            Mã nhận thiết bị
+            <input required value={claimCode} onChange={(event) => setClaimCode(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" placeholder="Nhập mã trên thiết bị" />
+          </label>
+          <label className="text-xs font-medium text-muted">
+            Bể nuôi
+            <select required value={terrariumId} onChange={(event) => setTerrariumId(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink">
+              <option value="">Chọn bể nuôi</option>
+              {(terrariums.data?.items ?? []).map((terrarium) => <option key={terrarium.id} value={terrarium.id}>{terrarium.name}</option>)}
+            </select>
+          </label>
+          <button disabled={busy || !terrariumId} className="self-end rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Nhận thiết bị</button>
+          {terrariums.error && <p className="text-xs text-critical sm:col-span-3">{describeError(t, terrariums.error)}</p>}
+        </form>
+      )}
 
-        {/* Filter buttons */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-[#8e9e8f] hidden md:inline">Trạng thái:</span>
-          <div className="flex items-center p-1 rounded-xl bg-[#0b1a0d] border border-[#1e3825] text-xs">
-            <button
-              onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                statusFilter === 'all'
-                  ? 'bg-[#162a1d] text-[#4a9e6a] font-bold'
-                  : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
-              }`}
-            >
-              Tất cả ({devices.length})
-            </button>
-            <button
-              onClick={() => setStatusFilter('online')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                statusFilter === 'online'
-                  ? 'bg-[#4a9e6a] text-white font-bold'
-                  : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
-              }`}
-            >
-              Online ({devices.filter((d) => d.status === 'online').length})
-            </button>
-            <button
-              onClick={() => setStatusFilter('offline')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                statusFilter === 'offline'
-                  ? 'bg-[#e05530] text-white font-bold'
-                  : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
-              }`}
-            >
-              Offline ({offlineDevices.length})
-            </button>
-          </div>
+      {secret && (
+        <div role="status" className="rounded-xl border border-warning/40 bg-warning/5 p-4 text-sm text-ink">
+          <strong>Khóa thiết bị chỉ hiển thị một lần:</strong>
+          <code className="ml-2 break-all font-mono">{secret}</code>
+          <button type="button" className="ml-3 text-xs text-accent underline" onClick={() => setSecret(null)}>Đã lưu</button>
         </div>
+      )}
+      {error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, error)}</p>}
+      {devices.error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, devices.error)}</p>}
+
+      <div className="flex flex-col gap-3 rounded-xl border border-hairline bg-surface p-4 md:flex-row">
+        <label className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Tìm mã thiết bị, tên, MAC hoặc bể nuôi" className="w-full rounded-lg border border-hairline bg-canvas py-2 pl-9 pr-3 text-sm text-ink" />
+        </label>
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink">
+          <option value="all">Tất cả trạng thái</option>
+          <option value="online">Trực tuyến</option>
+          <option value="offline">Ngoại tuyến</option>
+        </select>
       </div>
 
-      {/* Devices Table */}
-      <div className="bg-[#112016] border border-[#1e3825] rounded-3xl overflow-hidden shadow-xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[#1e3825] bg-[#0e1d11] text-[#8e9e8f] uppercase tracking-wider">
-                <th className="py-4 px-6 font-semibold">Mã & Tên Thiết bị</th>
-                <th className="py-4 px-6 font-semibold">Loại cảm biến / Node</th>
-                <th className="py-4 px-6 font-semibold">Chuồng quản lý</th>
-                <th className="py-4 px-6 font-semibold">Trạng thái</th>
-                <th className="py-4 px-6 font-semibold">Firmware</th>
-                <th className="py-4 px-6 font-semibold">IP / Giao tiếp</th>
-                <th className="py-4 px-6 font-semibold">Lần cuối thấy</th>
+      {devices.loading && !devices.data ? <p className="p-6 text-center text-sm text-muted">Đang tải thiết bị…</p> : null}
+      {!devices.loading && !devices.error && items.length === 0 ? <p className="rounded-xl border border-hairline bg-surface p-8 text-center text-sm text-muted">Chưa có thiết bị nào được kết nối.</p> : null}
+
+      <div className="overflow-x-auto rounded-xl border border-hairline bg-surface">
+        <table className="w-full min-w-[900px] text-left text-sm">
+          <thead className="border-b border-hairline bg-raised text-xs uppercase text-muted">
+            <tr>
+              <th className="px-4 py-3">Thiết bị</th><th className="px-4 py-3">Bể nuôi</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Firmware</th><th className="px-4 py-3">Chu kỳ lấy mẫu</th><th className="px-4 py-3">Lần cuối kết nối</th><th className="px-4 py-3">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-hairline">
+            {filtered.map((device) => (
+              <tr key={device.deviceId} className="hover:bg-raised/50">
+                <td className="px-4 py-3">
+                  <button type="button" onClick={() => void showDevice(device)} className="flex items-center gap-3 text-left">
+                    <Cpu className="h-4 w-4 text-brand" aria-hidden="true" />
+                    <span><strong className="block text-ink">{device.deviceName}</strong><small className="font-mono text-muted">{device.deviceId}</small></span>
+                  </button>
+                </td>
+                <td className="px-4 py-3 text-muted">{device.terrariumName ?? 'Chưa gán'}</td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-ink">
+                    {device.runtime.toLowerCase() === 'online' ? <Wifi className="h-4 w-4 text-accent" aria-hidden="true" /> : <WifiOff className="h-4 w-4 text-warning" aria-hidden="true" />}
+                    {device.runtime === 'online' ? 'Trực tuyến' : device.runtime === 'offline' ? 'Ngoại tuyến' : device.status}
+                  </span>
+                </td>
+                <td className="px-4 py-3 font-mono text-muted">{device.firmwareVersion ?? '—'}</td>
+                <td className="px-4 py-3 text-muted">{device.samplingIntervalSec}s</td>
+                <td className="px-4 py-3 text-muted">{formatDate(device.lastSeenAt)}</td>
+                <td className="px-4 py-3">
+                  {canWrite && <button type="button" onClick={() => startEdit(device)} className="mr-3 text-xs text-accent hover:underline">Cấu hình</button>}
+                  {canProvision && <button type="button" onClick={() => void runAction(async () => { const result = await api.rotateDeviceSecret(device.deviceId); setSecret(result.secret); })} className="text-xs text-accent hover:underline">Đổi khóa</button>}
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-[#1e3825]">
-              {filteredDevices.map((device) => (
-                <tr
-                  key={device.id}
-                  className="hover:bg-[#162a1d]/50 transition-colors"
-                >
-                  <td className="py-4 px-6">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-[#0b1a0d] border border-[#1e3825] text-[#4a9e6a]">
-                        <Cpu className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <span className="font-bold text-[#dcd5c4] text-sm block">
-                          {device.name}
-                        </span>
-                        <span className="text-[10px] font-mono text-[#8e9e8f]">
-                          {device.id}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td className="py-4 px-6 text-[#dcd5c4] font-medium">
-                    {device.type}
-                  </td>
-
-                  <td className="py-4 px-6 text-[#8e9e8f]">
-                    <span className="font-medium text-[#c87f3a]">
-                      {device.terrariumName}
-                    </span>
-                  </td>
-
-                  <td className="py-4 px-6">
-                    {device.status === 'online' ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#4a9e6a]/20 text-[#4a9e6a] border border-[#4a9e6a]/30">
-                        <Wifi className="w-3.5 h-3.5" />
-                        Trực tuyến
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#e05530]/20 text-[#e05530] border border-[#e05530]/30 animate-pulse">
-                        <WifiOff className="w-3.5 h-3.5" />
-                        Ngoại tuyến
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="py-4 px-6 font-mono text-[#dcd5c4]">
-                    {device.firmware}
-                  </td>
-
-                  <td className="py-4 px-6 font-mono text-[#8e9e8f]">
-                    {device.ipAddress}
-                  </td>
-
-                  <td className="py-4 px-6 text-[#8e9e8f]">
-                    {device.lastSeen}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {filteredDevices.length === 0 && (
-          <div className="text-center py-12 text-[#8e9e8f] text-sm">
-            Không tìm thấy thiết bị nào khớp với điều kiện tìm kiếm.
-          </div>
-        )}
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && items.length > 0 ? <p className="p-8 text-center text-sm text-muted">Không tìm thấy thiết bị phù hợp.</p> : null}
       </div>
+
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="device-dialog-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-hairline bg-surface p-5 shadow-xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div><h2 id="device-dialog-title" className="font-heading text-lg font-bold text-ink">{editing ? 'Cấu hình thiết bị' : selected.deviceName}</h2><p className="font-mono text-xs text-muted">{selected.deviceId}</p></div>
+              <button type="button" onClick={() => { setSelected(null); setEditing(false); }} className="text-sm text-muted hover:text-ink">Đóng</button>
+            </div>
+            {editing ? (
+              <form onSubmit={(event) => void submitEdit(event)} className="space-y-3">
+                <label className="block text-xs text-muted">Tên thiết bị<input maxLength={60} value={deviceName} onChange={(event) => setDeviceName(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
+                <label className="block text-xs text-muted">Chu kỳ lấy mẫu (10–300 giây)<input required type="number" min={10} max={300} value={samplingIntervalSec} onChange={(event) => setSamplingIntervalSec(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
+                <label className="block text-xs text-muted">Chu kỳ gửi dữ liệu (10–300 giây)<input required type="number" min={10} max={300} value={publishIntervalSec} onChange={(event) => setPublishIntervalSec(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
+                <div className="flex justify-end gap-2"><button type="button" onClick={() => setEditing(false)} className="rounded-lg border border-hairline px-3 py-2 text-sm text-muted">Huỷ</button><button disabled={busy} className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Lưu</button></div>
+              </form>
+            ) : (
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <Detail label="Địa chỉ MAC" value={selected.macAddress} /><Detail label="Chip ID" value={selected.chipId} /><Detail label="Giao thức" value={selected.protocol} /><Detail label="Trạng thái thiết bị" value={selected.status} /><Detail label="Firmware" value={selected.firmwareVersion ?? '—'} /><Detail label="Chu kỳ gửi" value={`${selected.publishIntervalSec}s`} /><Detail label="Tín hiệu Wi-Fi" value={selected.signalStrengthDbm === null ? '—' : `${selected.signalStrengthDbm} dBm`} /><Detail label="Pin" value={selected.batteryPct === null ? '—' : `${selected.batteryPct}%`} />
+                <div className="col-span-2 flex flex-wrap justify-end gap-2 border-t border-hairline pt-4">
+                  {canProvision && <button type="button" disabled={busy} onClick={() => void runAction(() => api.revokeDevice(selected.deviceId))} className="rounded-lg border border-warning/40 px-3 py-2 text-xs text-warning">Thu hồi khóa</button>}
+                  {canWrite && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Gỡ thiết bị ${selected.deviceName} khỏi tài khoản?`)) void runAction(async () => { await api.deleteDevice(selected.deviceId); setSelected(null); }); }} className="rounded-lg border border-critical/40 px-3 py-2 text-xs text-critical">Gỡ thiết bị</button>}
+                </div>
+              </dl>
+            )}
+            {error && <p role="alert" className="mt-3 text-sm text-critical">{describeError(t, error)}</p>}
+          </section>
+        </div>
+      )}
     </div>
   );
 };
+
+const Detail: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="rounded-lg border border-hairline p-3"><dt className="text-xs text-muted">{label}</dt><dd className="mt-1 break-all text-ink">{value}</dd></div>
+);

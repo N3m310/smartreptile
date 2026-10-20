@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Copy, ImagePlus, Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Copy, ImagePlus, Leaf, Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
@@ -9,6 +10,7 @@ import type {
   SpeciesProfileBandInput,
   SpeciesProfileItem,
   SpeciesProfileList,
+  TerrariumList,
   UpdateSpeciesProfileBody,
 } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
@@ -115,9 +117,17 @@ const ProfilePicture: React.FC<{
 
 export const SpeciesProfiles: React.FC = () => {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const { hasPermission } = useSession();
   const profiles = usePolled<SpeciesProfileList>(() => api.listSpeciesProfiles(), null);
+  const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), null);
   const items = profiles.data?.items ?? [];
+  const usage = new Map<string, number>();
+  for (const terrarium of terrariums.data?.items ?? []) {
+    usage.set(terrarium.speciesProfileId, (usage.get(terrarium.speciesProfileId) ?? 0) + 1);
+  }
+  const usageUnavailable = terrariums.data === null && !terrariums.loading;
+  const usageLoading = terrariums.data === null && terrariums.loading;
   const [createOpen, setCreateOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // The four write routes name `species.write`, which the shipped roles grant to Admin alone — but the gate is on
@@ -155,9 +165,10 @@ export const SpeciesProfiles: React.FC = () => {
 
       {createOpen && canWrite ? (
         <CreatePanel
-          onCreated={() => {
+          onCreated={(profileId) => {
             setNotice('speciesProfileCreated');
             profiles.reload();
+            navigate(`/species-profiles/${encodeURIComponent(profileId)}`);
           }}
           onCancel={() => setCreateOpen(false)}
         />
@@ -169,6 +180,14 @@ export const SpeciesProfiles: React.FC = () => {
       {!profiles.error?.isNetworkFailure && profiles.error ? (
         <ErrorPanel error={profiles.error} onRetry={() => profiles.reload()} />
       ) : null}
+      {terrariums.error ? (
+        <p role="status" className="text-xs text-muted">
+          {t('profileTerrariumCountUnavailable')}{' '}
+          <button type="button" className="underline" onClick={() => terrariums.reload()}>
+            {t('retry')}
+          </button>
+        </p>
+      ) : null}
 
       {profiles.loading ? <LoadingPanel label={t('signingIn')} /> : null}
 
@@ -176,12 +195,15 @@ export const SpeciesProfiles: React.FC = () => {
         <EmptyPanel title={t('emptyStateTitle')} body={t('emptyStateBody')} />
       ) : null}
 
-      <ul className="space-y-4">
+      <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((profile) => (
           <li key={profile.id}>
             <ProfileCard
               profile={profile}
               canWrite={canWrite}
+              compact
+              terrariumCount={usageUnavailable ? null : usage.get(profile.id) ?? 0}
+              terrariumCountLoading={usageLoading}
               onChanged={(key) => {
                 setNotice(key);
                 profiles.reload();
@@ -222,7 +244,7 @@ const RefusalBanner: React.FC<{ error: ApiError; className?: string }> = ({ erro
 };
 
 /** The create panel. A panel rather than a page because the list it lands in is right below it. */
-const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = ({
+const CreatePanel: React.FC<{ onCreated: (profileId: string) => void; onCancel: () => void }> = ({
   onCreated,
   onCancel,
 }) => {
@@ -244,7 +266,7 @@ const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = (
         await api.setSpeciesProfileImage(created.id, picture);
       }
 
-      onCreated();
+      onCreated(created.id);
       onCancel();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
@@ -273,11 +295,21 @@ const CreatePanel: React.FC<{ onCreated: () => void; onCancel: () => void }> = (
 };
 
 /** One profile: what it holds, its bands, and — for an Admin — the four ways of changing it. */
-const ProfileCard: React.FC<{
+export const ProfileCard: React.FC<{
   profile: SpeciesProfileItem;
   canWrite: boolean;
   onChanged: (notice: string) => void;
-}> = ({ profile, canWrite, onChanged }) => {
+  compact?: boolean;
+  terrariumCount?: number | null;
+  terrariumCountLoading?: boolean;
+}> = ({
+  profile,
+  canWrite,
+  onChanged,
+  compact = false,
+  terrariumCount = 0,
+  terrariumCountLoading = false,
+}) => {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
@@ -336,6 +368,34 @@ const ProfileCard: React.FC<{
       setConfirmingDelete(false);
       onChanged('speciesProfileDeleted');
     });
+
+  if (compact) {
+    return (
+      <article className="h-full rounded-2xl border border-hairline bg-surface p-4 transition-colors hover:border-brand/50">
+        <Link to={`/species-profiles/${encodeURIComponent(profile.id)}`} className="flex h-full gap-3">
+          {profile.imageUrl ? (
+            <ProfilePicture imageUrl={profile.imageUrl} imageUpdatedAt={profile.imageUpdatedAt} alt={profile.name} className="h-20 w-20 shrink-0 rounded-xl border border-hairline object-cover" />
+          ) : (
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-hairline bg-raised text-muted"><Leaf className="h-7 w-7" aria-hidden="true" /></div>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="font-heading font-semibold text-ink">{profile.name}</h2>
+            <p className="mt-0.5 text-xs italic text-muted">{profile.scientificName || '—'}</p>
+            <p className="mt-2 text-xs text-muted">
+              {terrariumCountLoading
+                ? t('profileTerrariumCountLoading')
+                : terrariumCount === null
+                  ? t('profileTerrariumCountUnavailable')
+                  : t('profileTerrariumCount', { count: terrariumCount })}
+            </p>
+            <span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-[10px] text-muted">
+              {profile.isBuiltIn ? t('speciesProfileBuiltIn') : t('speciesProfileMine')}
+            </span>
+          </div>
+        </Link>
+      </article>
+    );
+  }
 
   return (
     <article className="rounded-2xl border border-hairline bg-surface p-5">
