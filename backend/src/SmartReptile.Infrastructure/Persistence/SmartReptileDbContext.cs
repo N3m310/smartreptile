@@ -5,6 +5,7 @@ using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Evaluation;
 using SmartReptile.Domain.Identity;
+using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Notifications;
 using SmartReptile.Domain.Readings;
 using SmartReptile.Domain.Reference;
@@ -96,6 +97,12 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
     /// <summary>The time-zone catalogue a picker reads and the write paths validate against.</summary>
     public DbSet<TimeZoneReference> TimeZones => Set<TimeZoneReference>();
 
+    /// <summary>
+    /// The metric catalogue every table that names a metric points at (DI-06). Rows are code-owned, written by the
+    /// migration and kept in step with <c>MetricDictionary</c> at start-up.
+    /// </summary>
+    public DbSet<MetricReference> Metrics => Set<MetricReference>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -134,6 +141,28 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasIndex(zone => zone.SortOrder);
 
             entity.ToTable("TimeZone");
+        });
+
+        // The metric catalogue (DI-06). Same shape as the permission catalogue: the code defines the rows, the
+        // table makes them referenceable, and the eight columns below stop being bare numbers.
+        modelBuilder.Entity<MetricReference>(entity =>
+        {
+            // Keyed by the code the other tables already store, so no row has to be rewritten and the foreign key
+            // stays four bytes wide.
+            entity.HasKey(metric => metric.Code);
+            entity.Property(metric => metric.Code).ValueGeneratedNever();
+            entity.Property(metric => metric.ApiKey).HasMaxLength(24).IsRequired();
+            entity.Property(metric => metric.PayloadKey).HasMaxLength(8).IsRequired();
+            entity.Property(metric => metric.DisplayName).HasMaxLength(60).IsRequired();
+            entity.Property(metric => metric.Unit).HasMaxLength(8).IsRequired();
+            entity.Property(metric => metric.PlausibleMin).HasPrecision(9, 3);
+            entity.Property(metric => metric.PlausibleMax).HasPrecision(9, 3);
+
+            // The natural key a client sends (`?metric=tempC`), and the picker's order.
+            entity.HasIndex(metric => metric.ApiKey).IsUnique();
+            entity.HasIndex(metric => metric.SortOrder);
+
+            entity.ToTable("Metric");
         });
     }
 
@@ -316,6 +345,10 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasOne(t => t.SpeciesProfile).WithMany(p => p.Thresholds)
                 .HasForeignKey(t => t.SpeciesProfileId).OnDelete(DeleteBehavior.Cascade);
 
+            // DI-06: the metric is a row of the catalogue, not a bare number, so a band cannot name metric 8 by typo.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(t => t.Metric).OnDelete(DeleteBehavior.Restrict);
+
             // DI-05: band ordering is a database rule as well as a domain rule (§03-implementation/06 §2).
             entity.ToTable("Threshold", table =>
             {
@@ -344,6 +377,10 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasIndex(o => new { o.TerrariumId, o.Metric, o.Phase }).IsUnique();
             entity.HasOne<Terrarium>().WithMany(t => t.ThresholdOverrides)
                 .HasForeignKey(o => o.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            // DI-06: an override points at a catalogue row like the profile band it replaces.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(o => o.Metric).OnDelete(DeleteBehavior.Restrict);
 
             entity.ToTable("ThresholdOverride", table =>
             {
@@ -447,6 +484,11 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasOne<Terrarium>().WithMany()
                 .HasForeignKey(e => e.TerrariumId).OnDelete(DeleteBehavior.SetNull);
 
+            // DI-06: an event that names a metric (a sensor fault, say) names a catalogue row; device-level events
+            // carry null.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(e => e.Metric).OnDelete(DeleteBehavior.Restrict);
+
             entity.ToTable("DeviceEvent");
         });
     }
@@ -491,6 +533,11 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasOne(r => r.Sample).WithMany(s => s.Readings)
                 .HasForeignKey(r => r.SampleId).OnDelete(DeleteBehavior.Cascade);
 
+            // DI-06: what was 1..7 as a bare number is now a row of `Metric`, so a stored reading always names a
+            // metric the catalogue knows. Restrict, not cascade: a catalogue row in use must not be deletable.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(r => r.Metric).OnDelete(DeleteBehavior.Restrict);
+
             entity.ToTable("MetricReading");
         });
     }
@@ -514,6 +561,10 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             // SQL Server rejects a second cascade path from Terrarium through ThresholdSnapshot to this table.
             entity.HasOne<ThresholdSnapshot>().WithMany()
                 .HasForeignKey(rollup => rollup.ThresholdSnapshotId).OnDelete(DeleteBehavior.NoAction);
+
+            // DI-06: the rollup's metric is the catalogue's, so a summary cannot be keyed by an unknown number.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(rollup => rollup.Metric).OnDelete(DeleteBehavior.Restrict);
 
             entity.ToTable("TelemetryHourlyRollup");
         });
@@ -576,6 +627,11 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             entity.HasOne<Terrarium>().WithMany().HasForeignKey(a => a.TerrariumId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<Device>().WithMany().HasForeignKey(a => a.DeviceId).OnDelete(DeleteBehavior.Cascade);
 
+            // DI-06: a metric alert names a catalogue row; a device-level alert carries no metric at all, which is
+            // why the column is nullable and the foreign key accepts null.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(a => a.Metric).OnDelete(DeleteBehavior.Restrict);
+
             entity.Ignore(a => a.Duration);
 
             entity.ToTable("Alert");
@@ -603,6 +659,10 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
 
             entity.HasOne<Terrarium>().WithMany().HasForeignKey(silence => silence.TerrariumId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // DI-06: null means "every metric", a value must be one the catalogue holds.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(silence => silence.Metric).OnDelete(DeleteBehavior.Restrict);
 
             entity.ToTable("MetricSilence");
         });
@@ -666,6 +726,10 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
 
             entity.HasOne<Terrarium>().WithMany()
                 .HasForeignKey(state => state.TerrariumId).OnDelete(DeleteBehavior.Cascade);
+
+            // DI-06: the evaluator's key names a catalogue metric, so its state cannot outlive the metric's meaning.
+            entity.HasOne<MetricReference>().WithMany()
+                .HasForeignKey(state => state.Metric).OnDelete(DeleteBehavior.Restrict);
 
             entity.ToTable("EvaluationState");
         });

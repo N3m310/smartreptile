@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using SmartReptile.Domain.Metrics;
 using SmartReptile.Infrastructure.Persistence;
 
 namespace SmartReptile.Tests.Integration;
@@ -17,6 +18,45 @@ namespace SmartReptile.Tests.Integration;
 [Collection(DatabaseCollection.Name)]
 public sealed class DatabaseInvariantTests(DatabaseFixture fixture)
 {
+    [Fact]
+    public async Task A_reading_cannot_name_a_metric_the_catalogue_does_not_hold()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var terrariumId = await Seed.TerrariumAsync(db, await Seed.UserAsync(db));
+        var deviceId = await Seed.DeviceAsync(db, terrariumId);
+        await Seed.TelemetrySampleAsync(db, terrariumId, deviceId, sequence: 1);
+
+        var sampleId = await db.TelemetrySamples
+            .Where(sample => sample.DeviceId == deviceId && sample.Sequence == 1)
+            .Select(sample => sample.Id)
+            .SingleAsync();
+
+        // DI-06: the eight columns that used to be bare numbers are foreign keys now, so a metric the dictionary
+        // never defined is refused by the database rather than stored and quietly ignored by every reader.
+        var failure = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO [MetricReading] (SampleId, Metric, Value) VALUES ({sampleId}, 99, 1.0)
+            """));
+
+        failure.Message.Should().Contain("FK_MetricReading_Metric_Metric");
+
+        // The catalogue row a real reading names is accepted, and the row a catalogue row still referenced cannot
+        // be deleted: both halves of the same guarantee.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO [MetricReading] (SampleId, Metric, Value) VALUES ({sampleId}, 1, 24.5)
+            """);
+
+        var referenced = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM [Metric] WHERE [Code] = 1"));
+
+        // Which of the eight constraints fires is SQL Server's choice — the seeded profiles already point at metric
+        // 1 — so the assertion is that a catalogue reference did, not the name of one particular table.
+        referenced.Message.Should().Contain("REFERENCE constraint").And.Contain("_Metric_Metric");
+
+        await tx.RollbackAsync();
+    }
+
     [Fact]
     public async Task At_most_one_non_revoked_device_can_be_bound_to_a_terrarium()
     {
@@ -146,17 +186,17 @@ public sealed class DatabaseInvariantTests(DatabaseFixture fixture)
 
         var terrariumId = await Seed.TerrariumAsync(db, await Seed.UserAsync(db));
 
-        await InsertEvaluationStateAsync(db, terrariumId, metric: 0, phase: 0, sampleId: 1);
+        await InsertEvaluationStateAsync(db, terrariumId, metric: (int)MetricCode.TempC, phase: 0, sampleId: 1);
 
         // One state row per key is the invariant: a second evaluator writing one would mean two of them
         // disagreeing about the same excursion, and the primary key is what makes that impossible.
         var failure = await Assert.ThrowsAsync<SqlException>(
-            () => InsertEvaluationStateAsync(db, terrariumId, metric: 0, phase: 0, sampleId: 2));
+            () => InsertEvaluationStateAsync(db, terrariumId, metric: (int)MetricCode.TempC, phase: 0, sampleId: 2));
 
         failure.Message.Should().Contain("PK_EvaluationState");
 
         // A different phase is a different key, which is what lets a Day and a Night excursion coexist.
-        await InsertEvaluationStateAsync(db, terrariumId, metric: 0, phase: 1, sampleId: 2);
+        await InsertEvaluationStateAsync(db, terrariumId, metric: (int)MetricCode.TempC, phase: 1, sampleId: 2);
 
         await tx.RollbackAsync();
     }

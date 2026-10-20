@@ -112,6 +112,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DeviceId");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("TriggeredAt");
 
                     b.HasIndex("TerrariumId", "State", "TriggeredAt")
@@ -153,6 +155,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetimeoffset(3)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Metric");
 
                     b.HasIndex("TerrariumId", "UntilUtc");
 
@@ -399,6 +403,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("TerrariumId");
 
                     b.HasIndex("DeviceId", "RecordedAt")
@@ -500,6 +506,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("TerrariumId", "Metric", "Phase");
+
+                    b.HasIndex("Metric");
 
                     b.ToTable("EvaluationState", (string)null);
                 });
@@ -770,6 +778,61 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("User", (string)null);
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Metrics.MetricReference", b =>
+                {
+                    b.Property<int>("Code")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ApiKey")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("Family")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsCore")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PayloadKey")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<decimal>("PlausibleMax")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal>("PlausibleMin")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<int>("Precision")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.HasKey("Code");
+
+                    b.HasIndex("ApiKey")
+                        .IsUnique();
+
+                    b.HasIndex("SortOrder");
+
+                    b.ToTable("Metric", (string)null);
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Notifications.NotificationLog", b =>
@@ -1094,6 +1157,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("SpeciesProfileId", "Metric", "Phase")
                         .IsUnique();
 
@@ -1162,6 +1227,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Metric");
 
                     b.HasIndex("TerrariumId", "Metric", "Phase")
                         .IsUnique();
@@ -1323,6 +1390,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("ThresholdSnapshotId");
 
                     b.HasIndex("TerrariumId", "Metric", "HourStartUtc")
@@ -1426,6 +1495,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1435,6 +1509,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Alerts.MetricSilence", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1476,6 +1555,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1493,6 +1577,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Evaluation.EvaluationState", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1550,6 +1640,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Readings.MetricReading", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Readings.TelemetrySample", "Sample")
                         .WithMany("Readings")
                         .HasForeignKey("SampleId")
@@ -1576,6 +1672,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Species.Threshold", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Species.SpeciesProfile", "SpeciesProfile")
                         .WithMany("Thresholds")
                         .HasForeignKey("SpeciesProfileId")
@@ -1587,6 +1689,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Species.ThresholdOverride", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany("ThresholdOverrides")
                         .HasForeignKey("TerrariumId")
@@ -1605,6 +1713,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Summaries.TelemetryHourlyRollup", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")

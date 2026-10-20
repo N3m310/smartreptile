@@ -49,6 +49,10 @@ public sealed class DatabaseInitializer(
 
         if (settings.SeedReferenceDataOnStartup)
         {
+            // The metric catalogue first: the built-in profiles below name metrics, and since DI-06 those names are
+            // foreign keys, so a row the dictionary knows has to exist before a band can point at it.
+            await seeder.SeedMetricCatalogueAsync(cancellationToken).ConfigureAwait(false);
+
             profilesSeeded = await seeder.SeedAsync(cancellationToken).ConfigureAwait(false);
 
             // The time-zone catalogue is seeded by the same switch, because it is read by the same clients: a

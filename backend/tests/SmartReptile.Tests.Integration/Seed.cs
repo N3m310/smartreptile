@@ -135,7 +135,7 @@ public static class Seed
         db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO [Threshold] (Id, SpeciesProfileId, Metric, Phase, TargetMin, TargetMax,
                                      DwellWarnMinutes, DwellCritMinutes, RecoveryMargin, Enabled)
-            VALUES (NEWID(), {speciesProfileId}, 0, 0, {targetMin}, {targetMax},
+            VALUES (NEWID(), {speciesProfileId}, {(int)MetricCode.TempC}, 0, {targetMin}, {targetMax},
                     {dwellWarnMinutes}, {dwellCritMinutes}, 0.5, 1)
             """);
 
