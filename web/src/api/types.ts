@@ -51,6 +51,23 @@ export interface UserProfile {
   permissions: string[];
   preferredLanguage: string;
   timeZoneId: string;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+  minNotifySeverity: string;
+  channelFcmEnabled: boolean;
+  channelEmailEnabled: boolean;
+  hasFcmToken: boolean;
+}
+
+export interface UpdateProfileBody {
+  preferredLanguage?: string;
+  timeZoneId?: string;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  minNotifySeverity?: string;
+  channelFcmEnabled?: boolean;
+  channelEmailEnabled?: boolean;
+  fcmToken?: string;
 }
 
 /** `POST /auth/login`, `/auth/refresh`. Timestamps are ISO-8601 instants in UTC. */
@@ -230,6 +247,58 @@ export interface DeviceItem {
 
 export interface DeviceList {
   items: DeviceItem[];
+}
+
+export interface AlertView {
+  id: number;
+  terrariumId: string;
+  deviceId: string;
+  metric: string | null;
+  family: string;
+  severity: string;
+  state: string;
+  source: string;
+  phase: string;
+  triggeringValue: number | null;
+  peakValue: number | null;
+  bandMin: number | null;
+  bandMax: number | null;
+  triggeredAt: string;
+  lastObservedAt: string | null;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  resolvedReason: string | null;
+  durationSeconds: number | null;
+}
+
+export interface AlertPage {
+  items: AlertView[];
+  nextCursor: string | null;
+}
+
+export interface AlertDetail {
+  alert: AlertView;
+  series: { at: string; value: number }[];
+  seriesTruncated: boolean;
+}
+
+export interface AlertTimelineEntry {
+  event: string;
+  at: string;
+  actorUserId: string | null;
+  reason: string | null;
+  note: string | null;
+}
+
+export interface MetricSilence {
+  id: string;
+  terrariumId: string;
+  metric: string | null;
+  untilUtc: string;
+  reason: string;
+  createdAt: string;
+  createdByUserId: string;
+  active: boolean;
 }
 
 /**

@@ -132,7 +132,6 @@ export const AdminAccounts: React.FC = () => {
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminColumnAccount')}</th>
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminColumnRole')}</th>
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminColumnStatus')}</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminRolePermissions')}</th>
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminColumnCreated')}</th>
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminColumnLastLogin')}</th>
                   <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('adminAccountActions')}</th>
@@ -154,9 +153,6 @@ export const AdminAccounts: React.FC = () => {
                       >
                         {account.isActive ? t('adminBadgeActive') : t('adminBadgeDisabled')}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 align-top text-ink">
-                      {t('adminRoleGrants', { count: account.permissions.length })}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 align-top text-muted">
                       {formatDate(account.createdAt, lang)}

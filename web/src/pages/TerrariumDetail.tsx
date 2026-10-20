@@ -249,6 +249,8 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
   const [draft, setDraft] = useState<BandDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [retryAction, setRetryAction] = useState<(() => void) | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const rows = thresholds.data?.effectiveThresholds ?? [];
@@ -261,6 +263,8 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
 
   const startEdit = (row: EffectiveThreshold) => {
     setError(null);
+    setClientError(null);
+    setRetryAction(null);
     setNotice(null);
     setEditing(rowKey(row));
     setDraft({
@@ -282,17 +286,47 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
       return;
     }
 
+    const values = [
+      draft.targetMin,
+      draft.targetMax,
+      draft.criticalMin,
+      draft.criticalMax,
+      draft.dwellWarnMinutes,
+      draft.dwellCritMinutes,
+      draft.recoveryMargin,
+    ];
+    const parsed = values.map((value) => (value.trim() === '' ? null : Number(value.replace(',', '.'))));
+    if (parsed.some((value) => value !== null && !Number.isFinite(value))) {
+      setClientError(t('thresholdNumberInvalid'));
+      return;
+    }
+    const [targetMin, targetMax] = parsed;
+    if (targetMin === null || targetMax === null) {
+      setClientError(t('thresholdNumberRequired'));
+      return;
+    }
+    if (targetMin >= targetMax) {
+      setClientError(t('thresholdOrderingInvalid'));
+      return;
+    }
+    setClientError(null);
+
+    await saveOverride(row, draft);
+  };
+
+  const saveOverride = async (row: EffectiveThreshold, currentDraft: BandDraft) => {
     setBusy(true);
     setError(null);
+    setRetryAction(null);
     setNotice(null);
-
     try {
-      await api.putTerrariumThresholds(terrariumId, [toInput(row, draft)]);
+      await api.putTerrariumThresholds(terrariumId, [toInput(row, currentDraft)]);
       closeEditor();
       setNotice('thresholdSaved');
       thresholds.reload();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+      setRetryAction(() => () => { void saveOverride(row, currentDraft); });
     } finally {
       setBusy(false);
     }
@@ -301,6 +335,7 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
   const clearOverride = async (row: EffectiveThreshold) => {
     setBusy(true);
     setError(null);
+    setRetryAction(null);
     setNotice(null);
 
     try {
@@ -310,6 +345,7 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
       thresholds.reload();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+      setRetryAction(() => () => { void clearOverride(row); });
     } finally {
       setBusy(false);
     }
@@ -337,7 +373,22 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
         )
       ) : null}
 
-      {thresholds.loading ? <LoadingPanel label={t('signingIn')} /> : null}
+      {thresholds.loading ? <LoadingPanel label={t('thresholdsLoading')} /> : null}
+
+      {clientError ? (
+        <p role="alert" className="mt-3 rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
+          {clientError}
+        </p>
+      ) : null}
+
+      {error && editing === null ? (
+        <p role="alert" className="mt-3 rounded-lg border border-critical/40 bg-critical/10 px-2.5 py-2 text-[11px] text-ink">
+          {describeError(t, error)}
+          <button type="button" disabled={busy} onClick={retryAction ?? (() => thresholds.reload())} className="ml-2 underline disabled:opacity-60">
+            {t('thresholdRetry')}
+          </button>
+        </p>
+      ) : null}
 
       {!thresholds.loading && !thresholds.error && rows.length === 0 ? (
         <p className="mt-3 text-xs text-muted">{t('thresholdsEmpty')}</p>
@@ -428,37 +479,37 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <NumberField
                     id={`${rowKey(row)}-target-min`}
-                    label={t('thresholdMin')}
+                    label={`${t('thresholdMin')} (${row.unit})`}
                     value={draft.targetMin}
-                    onChange={(value) => setDraft({ ...draft, targetMin: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, targetMin: value }); }}
                     invalid={fieldHasError(error, 'overrides[0].targetMin')}
                   />
                   <NumberField
                     id={`${rowKey(row)}-target-max`}
-                    label={t('thresholdMax')}
+                    label={`${t('thresholdMax')} (${row.unit})`}
                     value={draft.targetMax}
-                    onChange={(value) => setDraft({ ...draft, targetMax: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, targetMax: value }); }}
                     invalid={fieldHasError(error, 'overrides[0].targetMax')}
                   />
                   <NumberField
                     id={`${rowKey(row)}-critical-min`}
-                    label={t('thresholdCritMin')}
+                    label={`${t('thresholdCritMin')} (${row.unit})`}
                     value={draft.criticalMin}
-                    onChange={(value) => setDraft({ ...draft, criticalMin: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, criticalMin: value }); }}
                     invalid={fieldHasError(error, 'overrides[0].criticalMin')}
                   />
                   <NumberField
                     id={`${rowKey(row)}-critical-max`}
-                    label={t('thresholdCritMax')}
+                    label={`${t('thresholdCritMax')} (${row.unit})`}
                     value={draft.criticalMax}
-                    onChange={(value) => setDraft({ ...draft, criticalMax: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, criticalMax: value }); }}
                     invalid={fieldHasError(error, 'overrides[0].criticalMax')}
                   />
                   <NumberField
                     id={`${rowKey(row)}-dwell-warn`}
                     label={t('thresholdDwellWarn')}
                     value={draft.dwellWarnMinutes}
-                    onChange={(value) => setDraft({ ...draft, dwellWarnMinutes: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, dwellWarnMinutes: value }); }}
                     step="1"
                     invalid={fieldHasError(error, 'overrides[0].dwellWarnMinutes')}
                   />
@@ -466,15 +517,15 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
                     id={`${rowKey(row)}-dwell-crit`}
                     label={t('thresholdDwellCrit')}
                     value={draft.dwellCritMinutes}
-                    onChange={(value) => setDraft({ ...draft, dwellCritMinutes: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, dwellCritMinutes: value }); }}
                     step="1"
                     invalid={fieldHasError(error, 'overrides[0].dwellCritMinutes')}
                   />
                   <NumberField
                     id={`${rowKey(row)}-margin`}
-                    label={t('thresholdMargin')}
+                    label={`${t('thresholdMargin')} (${row.unit})`}
                     value={draft.recoveryMargin}
-                    onChange={(value) => setDraft({ ...draft, recoveryMargin: value })}
+                    onChange={(value) => { setClientError(null); setDraft({ ...draft, recoveryMargin: value }); }}
                     invalid={fieldHasError(error, 'overrides[0].recoveryMargin')}
                   />
                   <div>
@@ -497,6 +548,9 @@ const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = (
                     {fieldMessages(t, error.errors).map((message) => (
                       <p key={message}>{message}</p>
                     ))}
+                    <button type="button" disabled={busy} onClick={retryAction ?? (() => thresholds.reload())} className="mt-1 underline disabled:opacity-60">
+                      {t('thresholdRetry')}
+                    </button>
                   </div>
                 ) : null}
 
@@ -557,7 +611,7 @@ const NumberField: React.FC<{
     </label>
     <input
       id={id}
-      type="number"
+      type="text"
       inputMode="decimal"
       step={step}
       value={value}
