@@ -189,11 +189,8 @@ internal sealed class FakeUserStore : IUserStore
     /// <summary>Accounts a hard delete removed, so the test can assert the row went.</summary>
     public IReadOnlyList<User> RemovedUsers => _removedUsers;
 
-    /// <summary>
-    /// What <see cref="FindFootprintAsync"/> answers. Injected rather than computed, because a hard delete's guard
-    /// is about rows this fake has no reason to model.
-    /// </summary>
-    public AccountFootprint Footprint { get; set; } = new(0, 0, 0, 0, 0);
+    /// <summary>What the next purge answers, so an audit payload can be asserted without modelling rows.</summary>
+    public AccountPurge Purge { get; set; } = new(0, 0, 0, 0);
 
     public int SaveCount { get; private set; }
 
@@ -227,10 +224,12 @@ internal sealed class FakeUserStore : IUserStore
 
     public void AddUser(User user) => _users.Add(user);
 
-    public void RemoveUser(User user)
+    public Task<AccountPurge> PurgeAccountAsync(User user, CancellationToken cancellationToken)
     {
         _users.Remove(user);
         _removedUsers.Add(user);
+
+        return Task.FromResult(Purge);
     }
 
     /// <summary>
@@ -291,9 +290,6 @@ internal sealed class FakeUserStore : IUserStore
     public void AddRole(Role role) => _roles.Add(role);
 
     public void RemoveRole(Role role) => _roles.Remove(role);
-
-    public Task<AccountFootprint> FindFootprintAsync(Guid userId, CancellationToken cancellationToken) =>
-        Task.FromResult(Footprint);
 
     /// <summary>Audit rows staged for the next save, in order (BR-18.4).</summary>
     public IReadOnlyList<AuditLog> AuditEntries => _auditEntries;

@@ -349,22 +349,6 @@ public static class AlertEndpoints
             _ => StatusCodes.Status400BadRequest,
         };
 
-        var extensions = new Dictionary<string, object?>
-        {
-            ["code"] = code,
-        };
-
-        if (errors is { Count: > 0 } violations)
-        {
-            extensions["errors"] = violations
-                .Select(violation => new { violation.Field, violation.Code, violation.Message })
-                .ToArray();
-        }
-
-        return Results.Problem(
-            title: message,
-            statusCode: status,
-            type: $"https://smartreptile.example/problems/{code}",
-            extensions: extensions);
+        return ApiProblem.Create(code, message, status, errors);
     }
 }

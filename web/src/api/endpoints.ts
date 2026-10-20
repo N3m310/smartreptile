@@ -520,12 +520,12 @@ export async function setUserDisabled(userId: string, disabled: boolean): Promis
 }
 
 /**
- * `DELETE /users/{id}` — requires `user.manage`. Without `purge` this is a soft delete: the account is disabled and
- * every row that names it is kept. With it the row is erased, which the API allows only when nothing references it
- * (`409 account_in_use` names what still does).
+ * `DELETE /users/{id}` — requires `user.manage`. A hard delete: the account's enclosures and their readings, alerts
+ * and summaries go with it, its boards are unbound rather than revoked, and its own species profiles and inbox are
+ * removed. `POST /users/{id}/disable` is the reversible act, and the only way to keep what the account held.
  */
-export async function deleteUser(userId: string, purge: boolean): Promise<UserSummary> {
-  return apiRequest(`/api/v1/users/${encodeURIComponent(userId)}?purge=${purge ? 'true' : 'false'}`, {
+export async function deleteUser(userId: string): Promise<UserSummary> {
+  return apiRequest(`/api/v1/users/${encodeURIComponent(userId)}`, {
     method: 'DELETE',
   });
 }

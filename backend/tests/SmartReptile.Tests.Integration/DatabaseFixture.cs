@@ -1,9 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SmartReptile.Infrastructure.Options;
 using SmartReptile.Infrastructure.Persistence;
 using SmartReptile.Infrastructure.Security;
+using SmartReptile.Infrastructure.Summaries;
+using SmartReptile.Infrastructure.Time;
 
 namespace SmartReptile.Tests.Integration;
 
@@ -57,6 +61,16 @@ public sealed class DatabaseFixture : IAsyncLifetime
                 new Pbkdf2PasswordHasher(),
                 Options.Create(new AdminAccountOptions()),
                 NullLogger<SystemAdminAccountSeeder>.Instance),
+            // Demo data is off: the shared database must not gain three fictional accounts and a week of readings on
+            // every run, and the seeder's own test configures it explicitly.
+            new DemoDataSeeder(
+                db,
+                new Pbkdf2PasswordHasher(),
+                new SummaryRecomputer(db, new SystemClock()),
+                new SystemClock(),
+                new TestHostEnvironment(),
+                Options.Create(new DemoDataOptions()),
+                NullLogger<DemoDataSeeder>.Instance),
             Options.Create(new StartupOptions()),
             NullLogger<DatabaseInitializer>.Instance);
 
@@ -92,4 +106,27 @@ public sealed class DatabaseCollection : ICollectionFixture<DatabaseFixture>
 {
     /// <summary>Collection name shared by every integration test class.</summary>
     public const string Name = "database";
+}
+
+/// <summary>
+/// The smallest <see cref="IHostEnvironment"/> the demo-data seeder reads: its environment name. Everything else is
+/// unused by that seeder, and a fixture that stood up a real host would be testing the host.
+/// </summary>
+public sealed class TestHostEnvironment : IHostEnvironment
+{
+    /// <summary>
+    /// <c>Production</c> rather than <c>Development</c>, which is what makes the demo-data step skip: the fixture shares
+    /// one database with the whole suite, and three fictional accounts appearing in it would be a side effect no test
+    /// asked for.
+    /// </summary>
+    public string EnvironmentName { get; set; } = Environments.Production;
+
+    /// <inheritdoc />
+    public string ApplicationName { get; set; } = "SmartReptile.Tests.Integration";
+
+    /// <inheritdoc />
+    public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+    /// <inheritdoc />
+    public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
 }

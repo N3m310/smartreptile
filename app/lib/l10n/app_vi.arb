@@ -516,10 +516,8 @@
   "adminAccountRemoved": "Đã xoá tài khoản.",
   "adminAccountDeleteTitle": "Xoá {username}",
   "@adminAccountDeleteTitle": { "placeholders": { "username": { "type": "String" } } },
-  "adminAccountDeleteSoft": "Xoá mềm — giữ lại lịch sử",
-  "adminAccountDeleteSoftHint": "Tài khoản bị khoá, còn mọi bể nuôi, cảnh báo và dòng nhật ký gắn với nó vẫn được giữ.",
-  "adminAccountDeleteHard": "Xoá cứng — xoá hẳn bản ghi",
-  "adminAccountDeleteHardHint": "Bản ghi bị xoá hẳn. Cách này chỉ chạy được khi không còn dữ liệu nào tham chiếu tài khoản; nếu không, máy chủ sẽ từ chối và nói rõ cái gì còn tham chiếu.",
+  "adminAccountDeletePermanent": "Xoá vĩnh viễn",
+  "adminAccountDeletePermanentHint": "Tài khoản, các bể nuôi cùng dữ liệu đọc, cảnh báo và tổng hợp của chúng, hồ sơ loài riêng và hộp thông báo của tài khoản đều bị xoá. Thiết bị vẫn còn nhưng không còn thuộc bể nào, để tài khoản khác nhận lại. Không hoàn tác được — nếu muốn giữ dữ liệu, hãy khoá tài khoản.",
   "adminAccountNotFound": "Tài khoản này không còn tồn tại.",
 
   "adminFormRole": "Vai trò",

@@ -64,6 +64,7 @@ public static class DependencyInjection
         services.AddOptions<RetentionOptions>().Bind(configuration.GetSection(RetentionOptions.SectionName)).ValidateOnStart();
         services.AddOptions<DefaultsOptions>().Bind(configuration.GetSection(DefaultsOptions.SectionName)).ValidateOnStart();
         services.AddOptions<StartupOptions>().Bind(configuration.GetSection(StartupOptions.SectionName));
+        services.AddOptions<DemoDataOptions>().Bind(configuration.GetSection(DemoDataOptions.SectionName));
         services.AddOptions<AdminAccountOptions>().Bind(configuration.GetSection(AdminAccountOptions.SectionName));
         services.AddOptions<IngestOptions>().Bind(configuration.GetSection(IngestOptions.SectionName)).ValidateOnStart();
         services.AddOptions<ProvisioningOptions>()
@@ -244,6 +245,7 @@ public static class DependencyInjection
         services.AddScoped<ReferenceDataSeeder>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<SystemAdminAccountSeeder>();
+        services.AddScoped<DemoDataSeeder>();
         services.AddScoped<DatabaseInitializer>();
 
         services.AddHealthChecks()

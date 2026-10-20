@@ -152,8 +152,8 @@ export interface SpeciesProfileBand {
 }
 
 /**
- * The item shape of `GET /species-profiles`. The bands travel with the profile, so a picker needs one request
- * rather than one per row.
+ * The item shape of `GET /species-profiles` and of `GET /species-profiles/{id}`. The bands travel with the profile,
+ * so a picker needs one request rather than one per row.
  */
 export interface SpeciesProfileItem {
   id: string;
@@ -162,6 +162,11 @@ export interface SpeciesProfileItem {
   climateZone: string;
   /** True for the seeded profiles: read-only, and the ones a keeper copies to tune (FR-10 A2). */
   isBuiltIn: boolean;
+  /**
+   * True when this caller may edit the profile: it is one of their own rather than a built-in. The client shows the
+   * edit controls on it and offers "duplicate it instead" when it is false.
+   */
+  canEdit: boolean;
   photoperiodHours: number;
   lightsOnLocalTime: string;
   lightThresholdLux: number;

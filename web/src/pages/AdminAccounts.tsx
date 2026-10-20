@@ -381,7 +381,6 @@ const AccountPanel: React.FC<{
   const [quietHoursEnd, setQuietHoursEnd] = useState(account.quietHoursEnd ?? '');
   const [role, setRole] = useState(account.role);
   const [newPassword, setNewPassword] = useState('');
-  const [purge, setPurge] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -699,43 +698,16 @@ const AccountPanel: React.FC<{
           <div className="space-y-2 border-t border-hairline pt-4">
             <h3 className="text-[11px] font-medium text-muted">{t('adminAccountDelete')}</h3>
 
-            {/* Two modes rather than one with a flag: "remove this account" means "keep the history" to an
-                auditor and "erase the row" to whoever mistyped a username, and the API behaves differently. */}
-            <div className="space-y-1.5">
-              <label className="flex items-start gap-2 text-[11px] text-ink">
-                <input
-                  type="radio"
-                  name={`delete-mode-${account.id}`}
-                  checked={!purge}
-                  onChange={() => setPurge(false)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-brand"
-                />
-                <span>
-                  <span className="block">{t('adminAccountDeleteSoft')}</span>
-                  <span className="block text-muted">{t('adminAccountDeleteSoftHint')}</span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-[11px] text-ink">
-                <input
-                  type="radio"
-                  name={`delete-mode-${account.id}`}
-                  checked={purge}
-                  onChange={() => setPurge(true)}
-                  className="mt-0.5 h-3.5 w-3.5 accent-brand"
-                />
-                <span>
-                  <span className="block">{t('adminAccountDeleteHard')}</span>
-                  <span className="block text-muted">{t('adminAccountDeleteHardHint')}</span>
-                </span>
-              </label>
-            </div>
+            {/* One mode, because the API has one: a delete is a hard delete now, and the reversible act is the
+                disable button above. Offering a choice the server no longer honours was the failure. */}
+            <p className="text-[11px] text-muted">{t('adminAccountDeletePermanentHint')}</p>
 
             {confirmDelete ? (
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void run(() => api.deleteUser(account.id, purge), 'adminAccountRemoved')}
+                  onClick={() => void run(() => api.deleteUser(account.id), 'adminAccountRemoved')}
                   className="inline-flex items-center gap-2 rounded-lg bg-critical px-3 py-2 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-70"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

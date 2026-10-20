@@ -116,6 +116,48 @@ public class TerrariumServiceTests
     }
 
     [Fact]
+    public async Task List_narrows_to_one_species_profile_when_asked()
+    {
+        var desert = _store.AddProfile("Arid (desert)");
+        var tropical = _store.AddProfile("Tropical");
+        _store.AddTerrarium(_owner, "Alpha", desert);
+        _store.AddTerrarium(_owner, "Beta", tropical);
+
+        var outcome = await _service.ListAsync(_owner, CancellationToken.None, speciesProfileId: desert.Id);
+
+        outcome.Terrariums.Should().ContainSingle().Which.Name.Should().Be("Alpha");
+    }
+
+    [Fact]
+    public async Task List_narrows_what_the_caller_may_see_and_never_widens_it()
+    {
+        var profile = _store.AddProfile();
+        _store.AddTerrarium(Guid.NewGuid(), "Theirs", profile);
+
+        var outcome = await _service.ListAsync(_owner, CancellationToken.None, speciesProfileId: profile.Id);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrariums.Should().BeEmpty("the filter narrows a permitted set; it does not reach across accounts");
+    }
+
+    [Fact]
+    public async Task List_filters_an_administrators_cross_account_list_too()
+    {
+        var arid = _store.AddProfile("Arid (desert)");
+        var tropical = _store.AddProfile("Tropical");
+        _store.AddTerrarium(_owner, "Mine", arid);
+        _store.AddTerrarium(Guid.NewGuid(), "Theirs", tropical);
+
+        var outcome = await _service.ListAsync(
+            _owner,
+            CancellationToken.None,
+            mayReachAnyAccount: true,
+            speciesProfileId: arid.Id);
+
+        outcome.Terrariums.Should().ContainSingle().Which.Name.Should().Be("Mine");
+    }
+
+    [Fact]
     public async Task List_reports_the_device_state_activity_and_species_name()
     {
         var profile = _store.AddProfile("Leopard gecko (semi-desert)");

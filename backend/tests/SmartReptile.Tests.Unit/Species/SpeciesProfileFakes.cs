@@ -91,9 +91,14 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
     public Task<SpeciesProfile?> FindAsync(Guid profileId, CancellationToken cancellationToken) =>
         Task.FromResult(_profiles.FirstOrDefault(profile => profile.Id == profileId));
 
-    public Task<bool> NameTakenAsync(Guid userId, string name, CancellationToken cancellationToken) =>
+    public Task<bool> NameTakenAsync(
+        Guid? ownerUserId,
+        string name,
+        Guid? excludingProfileId,
+        CancellationToken cancellationToken) =>
         Task.FromResult(_profiles.Any(profile =>
-            profile.CreatedByUserId == userId
+            profile.CreatedByUserId == ownerUserId
+            && profile.Id != excludingProfileId
             && string.Equals(profile.Name, name, StringComparison.OrdinalIgnoreCase)));
 
     public Task<bool> IsAssignedAsync(Guid profileId, CancellationToken cancellationToken) =>
@@ -124,6 +129,24 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
         SaveCount++;
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// True by default. Set <see cref="ConflictOnSave"/> to stand in for another request changing the row between
+    /// the read and the write, which is what the real adapter's rowversion check answers with <c>false</c>.
+    /// </summary>
+    public bool ConflictOnSave { get; set; }
+
+    public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken)
+    {
+        if (ConflictOnSave)
+        {
+            return Task.FromResult(false);
+        }
+
+        SaveCount++;
+
+        return Task.FromResult(true);
     }
 }
 

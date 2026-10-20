@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Auditing;
+using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 
 namespace SmartReptile.Infrastructure.Persistence;
@@ -153,40 +154,54 @@ public sealed class EfUserStore(SmartReptileDbContext db) : IUserStore
     public void RemoveRole(Role role) => db.Roles.Remove(role);
 
     /// <inheritdoc />
-    public async Task<AccountFootprint> FindFootprintAsync(Guid userId, CancellationToken cancellationToken)
+    public async Task<AccountPurge> PurgeAccountAsync(User user, CancellationToken cancellationToken)
     {
-        // Four counts rather than one join: each is an index seek, and an aggregate over a join would report a
-        // multiplied number the moment an account owns two enclosures with two boards.
-        //
-        // The terrarium count ignores the soft-delete filter on purpose: a removed enclosure still names its owner,
-        // and `Terrarium.UserId` is RESTRICT, so a delete that did not count it would fail at the database instead
-        // of answering with a reason.
+        // Soft-deleted enclosures are included: their rows still hold the RESTRICT foreign key, so leaving them
+        // behind would make the account's own delete fail in the database instead of succeeding here.
         var terrariums = await db.Terrariums
             .IgnoreQueryFilters()
-            .CountAsync(terrarium => terrarium.UserId == userId, cancellationToken)
+            .Where(row => row.UserId == user.Id)
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+        var terrariumIds = terrariums.ConvertAll(row => row.Id);
 
         var devices = await db.Devices
-            .CountAsync(device => device.UserId == userId, cancellationToken)
+            .Where(device => device.TerrariumId != null && terrariumIds.Contains(device.TerrariumId.Value))
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        foreach (var device in devices)
+        {
+            // Unbound, not revoked, and pointed at no enclosure: the same state the keeper's own delete leaves a
+            // board in. The board itself survives, because a deployment that lost a piece of hardware every time an
+            // account went away would have no way to claim it again.
+            device.TerrariumId = null;
+            device.Status = DeviceStatus.Provisioning;
+            device.ProvisionedAt = null;
+            device.ClaimCode = null;
+            device.ClaimCodeExpiresAt = null;
+        }
+
         var profiles = await db.SpeciesProfiles
-            .CountAsync(profile => profile.CreatedByUserId == userId, cancellationToken)
+            .Where(profile => profile.CreatedByUserId == user.Id && !profile.IsBuiltIn)
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
         var notifications = await db.NotificationLogs
-            .CountAsync(row => row.UserId == userId, cancellationToken)
+            .Where(row => row.UserId == user.Id)
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var sessions = await db.RefreshTokens
-            .CountAsync(token => token.UserId == userId && token.RevokedAt == null, cancellationToken)
-            .ConfigureAwait(false);
+        // Staged in dependency order, and committed as one unit: the enclosures before the profiles they name, and
+        // the account last. A failure anywhere leaves the account exactly as it was.
+        db.Terrariums.RemoveRange(terrariums);
+        db.SpeciesProfiles.RemoveRange(profiles);
+        db.NotificationLogs.RemoveRange(notifications);
+        db.Users.Remove(user);
 
-        return new AccountFootprint(terrariums, devices, profiles, notifications, sessions);
+        return new AccountPurge(terrariums.Count, devices.Count, profiles.Count, notifications.Count);
     }
-
-    /// <inheritdoc />
-    public void RemoveUser(User user) => db.Users.Remove(user);
 
     /// <inheritdoc />
     public void AddAuditEntry(AuditLog entry) => db.AuditLogs.Add(entry);

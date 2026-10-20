@@ -542,16 +542,16 @@ reads data across accounts, and because the guarantees about who may do it are t
   preferences, reset a password, change a role, disable, re-enable, and delete. Reads require `user.read`, every
   write `user.manage`. Registration is unchanged and still produces an `Owner`; a created account may be given any
   role code, defaulting to `Owner`.
-- `BR-19.2` **Deletion is two verbs.** The default `DELETE /users/{id}` **disables** the account (its data is kept,
-  it cannot sign in, its sessions end); `?purge=true` erases the row and MUST be refused with `409 account_in_use`
-  when enclosures, boards, alerts or audit rows still name the account. An account that owns things is disabled, not
-  deleted, because a board whose owner no longer exists is worse than an account that is merely disabled.
+- `BR-19.2` **Deletion is one verb, and it erases.** `DELETE /users/{id}` is a **hard delete** (2026-10-20): in one
+  transaction it unbinds the account's boards, deletes its enclosures with their readings, alerts, summaries and
+  overrides, deletes its own catalogue profiles and its inbox, and then the account row. `POST /users/{id}/disable`
+  is the reversible act, and it is the only way to take an account out of circulation without losing what it held.
 - `BR-19.3` **Two guards.** An administrator MUST NOT act on their own account (`409 self_change_refused`), and a
   change MUST NOT leave the deployment with nobody able to manage accounts (`409 last_administrator_refused`). The
   second is evaluated by counting accounts whose role grants `user.manage`, not by comparing role names.
 - `BR-19.4` **Every account action is audited** (`account.created`, `account.updated`, `account.password_reset`,
   `account.role_changed`, `account.disabled`, `account.enabled`, `account.deleted`), with the actor and, for a
-  purge, what the account held.
+  delete, what the account held.
 - `BR-19.5` **The deployment dashboard** at `/api/v1/admin/*` (MUST) requires `data.read.any` and MUST be the only
   read surface that reaches other accounts' data. It answers: the counts a reviewer asks for (accounts, enclosures,
   boards online, open alerts split by family and severity, species profiles), every account with its holdings,
@@ -574,9 +574,9 @@ reads data across accounts, and because the guarantees about who may do it are t
 - **Given** the administrator's own account, **when** it tries to disable or demote itself, **then** the response is
   `409 self_change_refused`; **and given** it is the only account holding `user.manage`, **when** its role is
   changed, **then** the response is `409 last_administrator_refused`.
-- **Given** an account that owns one enclosure, **when** `DELETE /users/{id}?purge=true` is called, **then** the
-  response is `409 account_in_use` and the account is untouched; **when** the same account owns nothing, **then** the
-  row is erased and a later read of it is `404`.
+- **Given** an account that owns one enclosure and one board, **when** `DELETE /users/{id}` is called, **then** the
+  account, its enclosure and every reading, alert and summary belonging to it are gone, the board remains in the
+  deployment unbound, and a later read of the account is `404`.
 - **Given** the `Viewer` role, **when** an administrator removes `notification.read` from it, **then** the change is
   stored, the audit entry records the set before and after, and a subsequent start-up does not restore the grant.
 

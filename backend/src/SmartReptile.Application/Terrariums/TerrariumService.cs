@@ -85,14 +85,25 @@ public sealed class TerrariumService(
     /// (TASKS 2026-10-14, item 5). Each item then carries <see cref="TerrariumSummary.OwnerUserId"/>, because a
     /// list of rows belonging to unknown accounts is not usable.
     /// </param>
+    /// <param name="speciesProfileId">
+    /// When set, only the enclosures assigned to that species profile — the query a profile page makes to list the
+    /// terrariums judged against it. It narrows the set the caller may already see and never widens it, so a
+    /// profile the caller cannot read still answers with an empty list rather than naming its terrariums.
+    /// </param>
     public async Task<TerrariumOutcome> ListAsync(
         Guid ownerUserId,
         CancellationToken cancellationToken,
-        bool mayReachAnyAccount = false)
+        bool mayReachAnyAccount = false,
+        Guid? speciesProfileId = null)
     {
         var terrariums = mayReachAnyAccount
             ? await store.ListAllAsync(cancellationToken)
             : await store.ListOwnedAsync(ownerUserId, cancellationToken);
+
+        if (speciesProfileId is { } profileId)
+        {
+            terrariums = [.. terrariums.Where(terrarium => terrarium.SpeciesProfileId == profileId)];
+        }
 
         var activity = await store.SummariseActivityAsync([.. terrariums.Select(t => t.Id)], cancellationToken);
 

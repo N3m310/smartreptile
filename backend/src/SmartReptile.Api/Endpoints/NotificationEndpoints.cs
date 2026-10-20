@@ -95,9 +95,5 @@ public static class NotificationEndpoints
     }
 
     private static IResult NotFound() =>
-        Results.Problem(
-            title: "The notification does not exist.",
-            statusCode: StatusCodes.Status404NotFound,
-            type: "https://smartreptile.example/problems/not_found",
-            extensions: new Dictionary<string, object?> { ["code"] = "not_found" });
+        ApiProblem.Create("not_found", "The notification does not exist.", StatusCodes.Status404NotFound);
 }

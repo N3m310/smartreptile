@@ -1,11 +1,14 @@
+using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Metrics;
 
 namespace SmartReptile.Application.Admin;
 
 /// <summary>
 /// The administrator's dashboard (TASKS 2026-10-14, item 13). Every read here is cross-account, which is why the
-/// service is reached only through routes naming <c>Permissions.DataReadAny</c>.
+/// service is reached only through routes naming <c>Permissions.DataReadAny</c>; the one write it performs names
+/// <c>Permissions.DataWriteAny</c>.
 /// </summary>
 /// <remarks>
 /// <b>Why there is a service at all when the store already returns the rendered shapes.</b> Two things belong
@@ -14,7 +17,7 @@ namespace SmartReptile.Application.Admin;
 /// lets the dashboard label its two tabs from the same answer that fills them, rather than from a list of metric keys
 /// the JavaScript would have to carry (the mistake DOC_CHANGES_2026-10-03 §1 records for the web client).
 /// </remarks>
-public sealed class AdminService(IAdminStore store)
+public sealed class AdminService(IAdminStore store, IDeviceSessionRegistry sessions, IClock clock)
 {
     /// <summary>Rows a page asks for when the caller names none.</summary>
     public const int DefaultPageSize = 50;
@@ -121,9 +124,42 @@ public sealed class AdminService(IAdminStore store)
         return new AdminPage<AdminAlertView>(items, total, page.Skip, page.Take);
     }
 
-    /// <summary>Open alerts of one family, out of the header's figures.</summary>
-    private static int OpenAlertsIn(AdminCounts counts, AlertFamily family) => family switch
+    /// <summary>Deletes one enclosure outright, whoever owns it, and disconnects the boards it was holding.</summary>
+    /// <remarks>
+    /// The order is the point: the rows commit first, the broker sessions close after. A session that outlives the
+    /// commit by a moment is harmless — ingest refuses an unbound device — while closing a session for a delete that
+    /// then failed would be a board that stopped reporting for no reason it can be told.
+    /// </remarks>
+    /// <param name="terrariumId">Enclosure to remove.</param>
+    /// <param name="actingUserId">Administrator performing the delete, recorded on both audit rows.</param>
+    /// <param name="actor">Request provenance for the audit rows.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>False when no live enclosure has that id, which the route answers as <c>404</c>.</returns>
+    public async Task<bool> DeleteTerrariumAsync(
+        Guid terrariumId,
+        Guid actingUserId,
+        AuditActor actor,
+        CancellationToken cancellationToken)
     {
+        var deleted = await store
+            .DeleteTerrariumAsync(terrariumId, actingUserId, actor, clock.UtcNow, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (deleted is null)
+        {
+            return false;
+        }
+
+        foreach (var publicId in deleted.UnboundDevicePublicIds)
+        {
+            await sessions.KickAsync(publicId, "terrarium_deleted", cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    /// <summary>Open alerts of one family, out of the header's figures.</summary>
+    private static int OpenAlertsIn(AdminCounts counts, AlertFamily family) => family switch    {
         AlertFamily.Enclosure => counts.AlertsOpenEnclosure,
         AlertFamily.Species => counts.AlertsOpenSpecies,
         _ => 0,

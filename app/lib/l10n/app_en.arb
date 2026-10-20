@@ -523,10 +523,8 @@
   "adminAccountRemoved": "Account removed.",
   "adminAccountDeleteTitle": "Remove {username}",
   "@adminAccountDeleteTitle": { "placeholders": { "username": { "type": "String" } } },
-  "adminAccountDeleteSoft": "Soft delete — keep the history",
-  "adminAccountDeleteSoftHint": "The account is disabled, and every enclosure, alert and audit row that names it is kept.",
-  "adminAccountDeleteHard": "Hard delete — erase the row",
-  "adminAccountDeleteHardHint": "The row is erased outright. That only works while nothing references the account; otherwise the server refuses and names what still does.",
+  "adminAccountDeletePermanent": "Delete permanently",
+  "adminAccountDeletePermanentHint": "The account, its enclosures and their readings, alerts and summaries, its own species profiles and its inbox are erased. Its boards survive, unbound, so another account can claim them. This cannot be undone — disable the account instead to keep the data.",
   "adminAccountNotFound": "That account no longer exists.",
 
   "adminFormRole": "Role",

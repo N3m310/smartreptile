@@ -76,6 +76,9 @@ export const Layout: React.FC = () => {
     { name: t('navWallboard'), path: '/wallboard', icon: MonitorPlay, permission: null },
   ];
 
+  // `navSystem` was hidden from the sidebar on 2026-10-19 at the product owner's request; `/system` still resolves
+  // for anyone who types the URL, so retiring the menu entry does not retire the page.
+
   /**
    * The administrator's entries, shown only to an account whose role grants what the screens behind them need
    * (FR-18). A menu entry that leads to a redirect is a worse answer than no entry, and the same guard sits on the

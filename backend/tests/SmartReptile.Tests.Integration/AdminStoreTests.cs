@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Admin;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Infrastructure.Admin;
@@ -189,6 +190,60 @@ public sealed class AdminStoreTests(DatabaseFixture fixture)
         rollup.Terrariums.Should().Be(1);
         rollup.Devices.Should().Be(1);
         rollup.AlertsOpen.Should().Be(1);
+
+        await tx.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task Deleting_an_enclosure_removes_it_unbinds_its_board_and_audits_both()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var ownerId = await Seed.UserAsync(db);
+        var terrariumId = await Seed.TerrariumAsync(db, ownerId);
+        var deviceId = await Seed.DeviceAsync(db, terrariumId, status: 1);
+        var actingUserId = await Seed.UserAsync(db);
+        var publicId = await db.Devices
+            .Where(device => device.Id == deviceId)
+            .Select(device => device.PublicId)
+            .SingleAsync();
+        var now = DateTimeOffset.UtcNow;
+
+        var deleted = await new EfAdminStore(db)
+            .DeleteTerrariumAsync(terrariumId, actingUserId, AuditActor.Unknown, now, CancellationToken.None);
+
+        deleted.Should().NotBeNull();
+        deleted!.OwnerUserId.Should().Be(ownerId, "the caller learns whose enclosure it was");
+        deleted.UnboundDevicePublicIds.Should().Equal(publicId);
+
+        // The board outlives the enclosure: still a row, no longer bound, free to be claimed again.
+        var device = await db.Devices.SingleAsync(row => row.Id == deviceId);
+        device.TerrariumId.Should().BeNull();
+        device.Status.Should().Be(DeviceStatus.Provisioning, "a board with no enclosure is unassigned, not revoked");
+
+        // A hard delete, not the keeper's soft one: nothing is left behind for a query filter to hide.
+        (await db.Terrariums.IgnoreQueryFilters().AnyAsync(row => row.Id == terrariumId))
+            .Should().BeFalse("the administrator's delete removes the row");
+
+        var terrariumAudit = await db.AuditLogs
+            .Where(row => row.Action == AuditAction.TerrariumDeleted && row.EntityId == terrariumId.ToString())
+            .ToListAsync();
+
+        var row = terrariumAudit.Should().ContainSingle().Subject;
+        row.UserId.Should().Be(actingUserId, "the trail says who acted");
+        row.BeforeJson.Should().Contain(ownerId.ToString(), "and the payload says whose data it was");
+
+        var deviceAudit = await db.AuditLogs
+            .Where(row => row.Action == AuditAction.DeviceUnbound && row.EntityId == publicId)
+            .ToListAsync();
+
+        deviceAudit.Should().ContainSingle().Which.UserId.Should().Be(actingUserId);
+
+        // An id nobody holds is not a delete, which the route turns into 404.
+        (await new EfAdminStore(db).DeleteTerrariumAsync(
+            Guid.NewGuid(), actingUserId, AuditActor.Unknown, now, CancellationToken.None))
+            .Should().BeNull();
 
         await tx.RollbackAsync();
     }
