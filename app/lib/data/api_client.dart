@@ -72,6 +72,59 @@ class ApiClient {
   /// DELETE. The account delete carries `purge` in the query string, so no body is needed here.
   Future<Map<String, dynamic>> deleteJson(String path) => _send('DELETE', path);
 
+  /// POST a single authenticated file part, retrying once after token renewal.
+  Future<Map<String, dynamic>> postMultipart(
+    String path, {
+    required String fieldName,
+    required List<int> fileBytes,
+    required String filename,
+  }) => _sendMultipart(
+    path,
+    fieldName: fieldName,
+    fileBytes: fileBytes,
+    filename: filename,
+    isRetry: false,
+  );
+
+  Future<Map<String, dynamic>> _sendMultipart(
+    String path, {
+    required String fieldName,
+    required List<int> fileBytes,
+    required String filename,
+    required bool isRetry,
+  }) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
+    request.headers.addAll(_headers());
+    request.files.add(
+      http.MultipartFile.fromBytes(fieldName, fileBytes, filename: filename),
+    );
+
+    http.Response response;
+    try {
+      final streamed = await _http
+          .send(request)
+          .timeout(const Duration(seconds: 20));
+      response = await http.Response.fromStream(streamed);
+    } on Exception {
+      throw const AppFailure(code: 'network_unreachable', statusCode: 0);
+    }
+
+    if (response.statusCode == 401 && !isRetry) {
+      final renewed = await onUnauthorized?.call() ?? false;
+      if (renewed) {
+        return _sendMultipart(
+          path,
+          fieldName: fieldName,
+          fileBytes: fileBytes,
+          filename: filename,
+          isRetry: true,
+        );
+      }
+    }
+
+    return _decode(response);
+  }
+
   /// Closes the underlying HTTP client.
   void dispose() => _http.close();
 

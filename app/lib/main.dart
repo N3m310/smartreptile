@@ -13,12 +13,14 @@ import 'core/env.dart';
 import 'data/api_client.dart';
 import 'prototype/prototype_shell.dart';
 import 'prototype/prototype_state.dart';
+import 'services/species_profile_service.dart';
 import 'state/accounts_provider.dart';
 import 'state/admin_provider.dart';
 import 'state/app_data_provider.dart';
 import 'state/roles_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
+import 'state/species_profile_provider.dart';
 import 'state/telemetry_provider.dart';
 import 'state/terrarium_provider.dart';
 import 'services/push_registration_service.dart';
@@ -73,6 +75,8 @@ Future<void> main() async {
   final terrariums = TerrariumProvider(api);
   final accounts = AccountsProvider(api: api);
   final roles = RolesProvider(api: api);
+  final speciesService = SpeciesProfileService(api: api);
+  final species = SpeciesProfileProvider(service: speciesService);
 
   // One listener rather than four calls at every sign-out site: everything the administration surfaces hold belongs
   // to the account that was signed in, so the moment the session ends they are emptied. A screen left behind would
@@ -83,6 +87,7 @@ Future<void> main() async {
       accounts.clear();
       roles.clear();
       terrariums.clear();
+      species.clear();
       appData.resetToMocks();
     } else {
       appData.loadAll();
@@ -98,11 +103,13 @@ Future<void> main() async {
       providers: [
         Provider<Clock>.value(value: clock),
         Provider<ApiClient>.value(value: api),
+        Provider<SpeciesProfileService>.value(value: speciesService),
         ChangeNotifierProvider<SettingsProvider>.value(value: settings),
         ChangeNotifierProvider<AppDataProvider>.value(value: appData),
         ChangeNotifierProvider<SessionProvider>.value(value: session),
         ChangeNotifierProvider<AdminProvider>.value(value: admin),
         ChangeNotifierProvider<TerrariumProvider>.value(value: terrariums),
+        ChangeNotifierProvider<SpeciesProfileProvider>.value(value: species),
         ChangeNotifierProvider<AccountsProvider>.value(value: accounts),
         ChangeNotifierProvider<RolesProvider>.value(value: roles),
         ChangeNotifierProvider<TelemetryProvider>(

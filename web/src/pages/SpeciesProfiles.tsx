@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Copy, ImagePlus, Leaf, Loader2, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import {
+  Copy,
+  ImagePlus,
+  Leaf,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
@@ -130,9 +142,22 @@ export const SpeciesProfiles: React.FC = () => {
   const usageLoading = terrariums.data === null && terrariums.loading;
   const [createOpen, setCreateOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [climateZone, setClimateZone] = useState('');
   // The four write routes name `species.write`, which the shipped roles grant to Admin alone — but the gate is on
   // the permission, because a deployment may grant it to a role of its own (FR-18).
   const canWrite = hasPermission(PERMISSION_CODES.speciesWrite);
+  const query = search.trim().toLocaleLowerCase();
+  const filteredItems = items.filter((profile) => {
+    if (climateZone && profile.climateZone !== climateZone) {
+      return false;
+    }
+    return (
+      !query ||
+      profile.name.toLocaleLowerCase().includes(query) ||
+      profile.scientificName.toLocaleLowerCase().includes(query)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -163,6 +188,49 @@ export const SpeciesProfiles: React.FC = () => {
         </p>
       ) : null}
 
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <label className="relative min-w-0 flex-1">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t('adminSearchSpeciesProfiles')}
+            aria-label={t('adminSearchSpeciesProfiles')}
+            className="w-full rounded-lg border border-hairline bg-field py-2 pl-9 pr-3 text-xs text-ink outline-none focus:border-brand"
+          />
+        </label>
+        <select
+          value={climateZone}
+          onChange={(event) => setClimateZone(event.target.value)}
+          aria-label={t('profileClimateZone')}
+          className="rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+        >
+          <option value="">{t('speciesProfileAllZones')}</option>
+          {CLIMATE_ZONES.map((zone) => (
+            <option key={zone} value={zone}>
+              {climateZoneLabel(t, zone)}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => {
+            profiles.reload();
+            terrariums.reload();
+          }}
+          aria-label={t('speciesProfileRefresh')}
+          title={t('speciesProfileRefresh')}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised"
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          <span className="sm:hidden">{t('speciesProfileRefresh')}</span>
+        </button>
+      </div>
+
       {createOpen && canWrite ? (
         <CreatePanel
           onCreated={(profileId) => {
@@ -192,11 +260,32 @@ export const SpeciesProfiles: React.FC = () => {
       {profiles.loading ? <LoadingPanel label={t('signingIn')} /> : null}
 
       {!profiles.loading && items.length === 0 && !profiles.error ? (
-        <EmptyPanel title={t('emptyStateTitle')} body={t('emptyStateBody')} />
+        <p className="rounded-xl border border-hairline bg-surface px-4 py-6 text-center text-xs text-muted">
+          {t('speciesProfileEmpty')}
+        </p>
+      ) : null}
+
+      {!profiles.loading && items.length > 0 && filteredItems.length === 0 ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-center gap-3 rounded-xl border border-hairline bg-surface px-4 py-6 text-center text-xs text-muted"
+        >
+          <span>{t('speciesProfileNoMatches')}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setClimateZone('');
+            }}
+            className="text-accent underline"
+          >
+            {t('speciesProfileClearFilters')}
+          </button>
+        </div>
       ) : null}
 
       <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {items.map((profile) => (
+        {filteredItems.map((profile) => (
           <li key={profile.id}>
             <ProfileCard
               profile={profile}
@@ -372,27 +461,170 @@ export const ProfileCard: React.FC<{
   if (compact) {
     return (
       <article className="h-full rounded-2xl border border-hairline bg-surface p-4 transition-colors hover:border-brand/50">
-        <Link to={`/species-profiles/${encodeURIComponent(profile.id)}`} className="flex h-full gap-3">
-          {profile.imageUrl ? (
-            <ProfilePicture imageUrl={profile.imageUrl} imageUpdatedAt={profile.imageUpdatedAt} alt={profile.name} className="h-20 w-20 shrink-0 rounded-xl border border-hairline object-cover" />
-          ) : (
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-hairline bg-raised text-muted"><Leaf className="h-7 w-7" aria-hidden="true" /></div>
-          )}
-          <div className="min-w-0 flex-1">
-            <h2 className="font-heading font-semibold text-ink">{profile.name}</h2>
-            <p className="mt-0.5 text-xs italic text-muted">{profile.scientificName || '—'}</p>
-            <p className="mt-2 text-xs text-muted">
-              {terrariumCountLoading
-                ? t('profileTerrariumCountLoading')
-                : terrariumCount === null
-                  ? t('profileTerrariumCountUnavailable')
-                  : t('profileTerrariumCount', { count: terrariumCount })}
-            </p>
-            <span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-[10px] text-muted">
-              {profile.isBuiltIn ? t('speciesProfileBuiltIn') : t('speciesProfileMine')}
-            </span>
+        {!editing && !duplicating && !confirmingDelete ? (
+          <Link to={`/species-profiles/${encodeURIComponent(profile.id)}`} className="flex gap-3">
+            {profile.imageUrl ? (
+              <ProfilePicture
+                imageUrl={profile.imageUrl}
+                imageUpdatedAt={profile.imageUpdatedAt}
+                alt={profile.name}
+                className="h-20 w-20 shrink-0 rounded-xl border border-hairline object-cover"
+              />
+            ) : (
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-hairline bg-raised text-muted">
+                <Leaf className="h-7 w-7" aria-hidden="true" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h2 className="font-heading font-semibold text-ink">{profile.name}</h2>
+              <p className="mt-0.5 text-xs italic text-muted">{profile.scientificName || '—'}</p>
+              <p className="mt-2 text-xs text-muted">
+                {terrariumCountLoading
+                  ? t('profileTerrariumCountLoading')
+                  : terrariumCount === null
+                    ? t('profileTerrariumCountUnavailable')
+                    : t('profileTerrariumCount', { count: terrariumCount })}
+              </p>
+              <span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-[10px] text-muted">
+                {profile.isBuiltIn ? t('speciesProfileBuiltIn') : t('speciesProfileMine')}
+              </span>
+            </div>
+          </Link>
+        ) : null}
+        {canWrite ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-hairline pt-3 text-xs">
+            {writable ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setError(null);
+                  setEditing((open) => !open);
+                  setConfirmingDelete(false);
+                  setDuplicating(false);
+                }}
+                aria-expanded={editing}
+                className="inline-flex items-center gap-1 text-accent hover:underline disabled:opacity-60"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('speciesProfileEdit')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setEditing(false);
+                setConfirmingDelete(false);
+                setDuplicating((open) => !open);
+              }}
+              aria-expanded={duplicating}
+              className="inline-flex items-center gap-1 text-accent hover:underline disabled:opacity-60"
+            >
+              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('speciesProfileDuplicate')}
+            </button>
+            {writable ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setEditing(false);
+                setDuplicating(false);
+                setConfirmingDelete((open) => !open);
+              }}
+              aria-expanded={confirmingDelete}
+              className="inline-flex items-center gap-1 text-muted hover:text-critical hover:underline disabled:opacity-60"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('speciesProfileDelete')}
+            </button>
+            ) : null}
           </div>
-        </Link>
+        ) : null}
+        {editing ? (
+          <div className="mt-3 border-t border-hairline pt-3">
+            <ProfileForm
+              idPrefix={`profile-edit-${profile.id}`}
+              initial={draftFrom(profile)}
+              submitLabel={t('save')}
+              busyLabel={t('saving')}
+              busy={busy}
+              error={error}
+              pictureUrl={profile.imageUrl}
+              pictureUpdatedAt={profile.imageUpdatedAt}
+              onSubmit={(draft, picture) => void save(draft, picture)}
+              onCancel={() => setEditing(false)}
+            />
+          </div>
+        ) : null}
+        {duplicating ? (
+          <div className="mt-3 space-y-2 border-t border-hairline pt-3">
+            <label htmlFor={`compact-copy-${profile.id}`} className="text-[11px] text-muted">
+              {t('speciesProfileDuplicateName')}
+            </label>
+            <input
+              id={`compact-copy-${profile.id}`}
+              value={copyName}
+              onChange={(event) => setCopyName(event.target.value)}
+              maxLength={80}
+              className="w-full rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setDuplicating(false)}
+                className="rounded-lg border border-hairline px-3 py-2 text-xs text-ink disabled:opacity-60"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void duplicate()}
+                className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
+              >
+                {busy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {t('speciesProfileDuplicate')}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {confirmingDelete ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-critical/30 bg-critical/5 p-3">
+            <span className="mr-auto text-xs text-ink">
+              {t('speciesProfileDeleteConfirm')}
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void remove()}
+              className="inline-flex items-center gap-1 rounded-lg bg-critical px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
+            >
+              {busy ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {t('speciesProfileDelete')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              className="rounded-lg border border-hairline px-3 py-2 text-xs text-ink"
+            >
+              {t('cancel')}
+            </button>
+          </div>
+        ) : null}
+        {error ? <RefusalBanner error={error} className="mt-3" /> : null}
       </article>
     );
   }

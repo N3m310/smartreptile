@@ -11,6 +11,7 @@ import 'screens/alerts_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/species_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
@@ -99,6 +100,15 @@ class _RootShellState extends State<_RootShell> {
           label: 'Terrarium',
         ),
         screen: TerrariumsScreen(),
+        isMock: false,
+      ),
+      const _ShellTab(
+        destination: NavigationDestination(
+          icon: Icon(Icons.biotech_outlined),
+          selectedIcon: Icon(Icons.biotech),
+          label: 'Hồ sơ loài',
+        ),
+        screen: SpeciesScreen(),
         isMock: false,
       ),
       _ShellTab(
