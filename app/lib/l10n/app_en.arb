@@ -471,7 +471,7 @@
   "adminTabSpeciesProfiles": "Species Profiles",
   "adminSearchTerrariums": "Search by name or owner",
   "adminSearchDevices": "Search by public id, name or owner",
-  "adminSearchSpeciesProfiles": "Search by profile or scientific name",
+  "adminSearchSpeciesProfiles": "Search by profile, scientific name or climate zone",
   "adminColumnOwner": "Owner",
   "adminColumnSpeciesProfile": "Species profile",
   "adminColumnStatus": "Status",

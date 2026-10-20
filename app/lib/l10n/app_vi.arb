@@ -464,7 +464,7 @@
   "adminTabSpeciesProfiles": "Hồ sơ loài",
   "adminSearchTerrariums": "Tìm theo tên bể hoặc chủ sở hữu",
   "adminSearchDevices": "Tìm theo mã công khai, tên hoặc chủ sở hữu",
-  "adminSearchSpeciesProfiles": "Tìm theo tên hồ sơ hoặc tên khoa học",
+  "adminSearchSpeciesProfiles": "Tìm theo tên hồ sơ, tên khoa học hoặc vùng khí hậu",
   "adminColumnOwner": "Chủ sở hữu",
   "adminColumnSpeciesProfile": "Hồ sơ loài",
   "adminColumnStatus": "Trạng thái",
