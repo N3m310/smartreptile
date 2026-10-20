@@ -26,23 +26,31 @@ class AdminListsScreen extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
 
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         backgroundColor: AppColors.bgMain,
         appBar: AppBar(
           title: Text(l10n.adminListsTitle),
           bottom: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
               Tab(text: l10n.adminTabTerrariums),
               Tab(text: l10n.adminTabDevices),
               Tab(text: l10n.adminTabAlerts),
+              Tab(text: l10n.adminTabSpeciesProfiles),
             ],
           ),
         ),
         body: const AdminGate(
           permission: Permissions.dataReadAny,
           child: TabBarView(
-            children: [_TerrariumList(), _DeviceList(), _AlertList()],
+            children: [
+              _TerrariumList(),
+              _DeviceList(),
+              _AlertList(),
+              _SpeciesProfileList(),
+            ],
           ),
         ),
       ),
@@ -467,6 +475,86 @@ class _AlertListState extends State<_AlertList> {
                 ? l10n.never
                 : MetricFormat.dateTime(row.resolvedAt!),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Every species profile defined on the system (built-in and custom).
+class _SpeciesProfileList extends StatefulWidget {
+  const _SpeciesProfileList();
+
+  @override
+  State<_SpeciesProfileList> createState() => _SpeciesProfileListState();
+}
+
+class _SpeciesProfileListState extends State<_SpeciesProfileList> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<AdminProvider>().loadSpeciesProfiles();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final admin = context.watch<AdminProvider>();
+    final page = admin.speciesProfiles;
+
+    return _PagedList<AdminSpeciesProfile>(
+      state: page,
+      searchHint: l10n.adminSearchSpeciesProfiles,
+      onSearch: (value) => admin.loadSpeciesProfiles(search: value),
+      onPrevious: () =>
+          admin.loadSpeciesProfiles(skip: page!.skip - adminPageSize),
+      onNext: () => admin.loadSpeciesProfiles(skip: page!.skip + adminPageSize),
+      onRetry: () => admin.loadSpeciesProfiles(skip: page?.skip ?? 0),
+      rowBuilder: (context, row) => _RowCard(
+        title: row.name,
+        subtitle: row.scientificName.isNotEmpty ? row.scientificName : null,
+        badges: [
+          AdminStatusPill(
+            label: row.isBuiltIn
+                ? l10n.speciesProfileBuiltIn
+                : l10n.climateZoneSemiArid,
+            color: row.isBuiltIn
+                ? AppColors.primary
+                : AppColors.statusNormal,
+            icon: Icons.eco_outlined,
+          ),
+          AdminStatusPill(
+            label: l10n.speciesProfileBandCount(row.bandsCount),
+            color: AppColors.textMuted,
+            icon: Icons.tune_outlined,
+          ),
+        ],
+        facts: [
+          AdminKeyValue(
+            label: l10n.profileClimateZone,
+            value: row.climateZone,
+          ),
+          AdminKeyValue(
+            label: l10n.profilePhotoperiodHours,
+            value: '${row.photoperiodHours.toStringAsFixed(1)} h',
+          ),
+          AdminKeyValue(
+            label: l10n.profileLightsOn,
+            value: row.lightsOnLocalTime,
+          ),
+          AdminKeyValue(
+            label: l10n.profileLightThreshold,
+            value: '${row.lightThresholdLux.toStringAsFixed(0)} lx',
+          ),
+          if (row.notes != null && row.notes!.isNotEmpty)
+            AdminKeyValue(
+              label: l10n.profileNotes,
+              value: row.notes!,
+            ),
         ],
       ),
     );

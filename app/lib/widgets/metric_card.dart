@@ -5,6 +5,7 @@ import '../core/status.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../l10n/labels.dart';
 import '../models/metric_value.dart';
+import '../theme/app_theme.dart';
 import 'status_badge.dart';
 
 /// One metric card on the dashboard.
@@ -137,7 +138,7 @@ class MetricCard extends StatelessWidget {
                         ageText,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: isStale
-                              ? const Color(0xFFED6C02)
+                              ? AppColors.statusWarning
                               : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),

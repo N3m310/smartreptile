@@ -18,6 +18,8 @@ String _str(Object? value) => value as String? ?? '';
 
 String? _strOrNull(Object? value) => value as String?;
 
+double _double(Object? value) => (value as num?)?.toDouble() ?? 0.0;
+
 double? _doubleOrNull(Object? value) => (value as num?)?.toDouble();
 
 DateTime? _date(Object? value) =>
@@ -354,6 +356,54 @@ class AdminAlert {
     metric: _strOrNull(json['metric']),
     triggeredAt: _date(json['triggeredAt']),
     resolvedAt: _date(json['resolvedAt']),
+  );
+}
+
+/// One species profile, as `GET /api/v1/species-profiles` returns it.
+class AdminSpeciesProfile {
+  /// Creates a row.
+  const AdminSpeciesProfile({
+    required this.id,
+    required this.name,
+    required this.scientificName,
+    required this.climateZone,
+    required this.isBuiltIn,
+    required this.photoperiodHours,
+    required this.lightsOnLocalTime,
+    required this.lightThresholdLux,
+    required this.minLightHoursPerDay,
+    this.notes,
+    this.imageUrl,
+    this.bandsCount = 0,
+  });
+
+  final String id;
+  final String name;
+  final String scientificName;
+  final String climateZone;
+  final bool isBuiltIn;
+  final double photoperiodHours;
+  final String lightsOnLocalTime;
+  final double lightThresholdLux;
+  final double minLightHoursPerDay;
+  final String? notes;
+  final String? imageUrl;
+  final int bandsCount;
+
+  /// Parses one row.
+  factory AdminSpeciesProfile.fromJson(Map<String, dynamic> json) => AdminSpeciesProfile(
+    id: _str(json['id']),
+    name: _str(json['name']),
+    scientificName: _str(json['scientificName']),
+    climateZone: _str(json['climateZone']),
+    isBuiltIn: json['isBuiltIn'] as bool? ?? false,
+    photoperiodHours: _double(json['photoperiodHours']),
+    lightsOnLocalTime: _str(json['lightsOnLocalTime']),
+    lightThresholdLux: _double(json['lightThresholdLux']),
+    minLightHoursPerDay: _double(json['minLightHoursPerDay']),
+    notes: _strOrNull(json['notes']),
+    imageUrl: _strOrNull(json['imageUrl']),
+    bandsCount: (json['bands'] as List?)?.length ?? 0,
   );
 }
 

@@ -169,12 +169,15 @@ class ApiClient {
     // RFC 7807 problem body. Fall back to the status code when the body is not JSON.
     try {
       final problem = jsonDecode(response.body) as Map<String, dynamic>;
+      final rawErrors = problem['errors'];
+      final errorsList = rawErrors is List ? rawErrors : const [];
       throw AppFailure(
         code: (problem['code'] as String?) ?? 'http_${response.statusCode}',
         statusCode: response.statusCode,
         title: problem['title'] as String?,
         detail: problem['detail'] as String?,
         traceId: problem['traceId'] as String?,
+        errors: errorsList,
       );
     } on FormatException {
       throw AppFailure(
