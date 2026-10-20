@@ -190,6 +190,13 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
                 .OrderBy(device => device.DeviceName)
                 .ThenBy(device => device.PublicId)]);
 
+    /// <summary>Every board in the deployment, ordered the way the adapter orders it for the admin list.</summary>
+    public Task<IReadOnlyList<Device>> ListAllAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Device>>(
+            [.. _devices
+                .OrderBy(device => device.DeviceName)
+                .ThenBy(device => device.PublicId)]);
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         SaveCount++;
