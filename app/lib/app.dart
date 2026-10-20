@@ -10,7 +10,6 @@ import 'screens/terrariums_screen.dart';
 import 'screens/alerts_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/settings_screen.dart';
 import 'screens/species_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
@@ -145,14 +144,6 @@ class _RootShellState extends State<_RootShell> {
         ),
         screen: HistoryScreen(),
         isMock: false,
-      ),
-      const _ShellTab(
-        destination: NavigationDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings),
-          label: 'Cài đặt',
-        ),
-        screen: SettingsScreen(),
       ),
       if (session.hasAnyPermission(_administrativePermissions))
         _ShellTab(

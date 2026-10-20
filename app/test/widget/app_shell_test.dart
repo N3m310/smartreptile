@@ -9,12 +9,15 @@ import 'package:smart_reptile/app.dart';
 import 'package:smart_reptile/core/permissions.dart';
 import 'package:smart_reptile/data/api_client.dart';
 import 'package:smart_reptile/data/token_store.dart';
+import 'package:smart_reptile/l10n/generated/app_localizations.dart';
+import 'package:smart_reptile/screens/settings_screen.dart';
 import 'package:smart_reptile/state/accounts_provider.dart';
 import 'package:smart_reptile/state/admin_provider.dart';
 import 'package:smart_reptile/state/app_data_provider.dart';
 import 'package:smart_reptile/state/roles_provider.dart';
 import 'package:smart_reptile/state/session_provider.dart';
 import 'package:smart_reptile/state/settings_provider.dart';
+import 'package:smart_reptile/theme/app_theme.dart';
 
 /// Widget tests for the app shell (`lib/app.dart`) — the surface a keeper sees.
 ///
@@ -146,7 +149,12 @@ void main() {
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Cài đặt'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Cảnh báo'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(
@@ -159,10 +167,22 @@ void main() {
   testWidgets('saving the mock thresholds says what happened instead of reporting a success', (tester) async {
     await useLocale('vi');
     useTallSurface(tester);
-    await tester.pumpWidget(app());
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Cài đặt'));
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AppDataProvider>(create: (_) => AppDataProvider()),
+          ChangeNotifierProvider<SettingsProvider>.value(value: settings),
+          ChangeNotifierProvider<SessionProvider>.value(value: session),
+        ],
+        child: MaterialApp(
+          locale: const Locale('vi'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: AppTheme.darkTheme,
+          home: const Scaffold(body: SettingsScreen()),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // The scrollable is named explicitly: every text field on this screen contains one of its own, so the default
@@ -266,5 +286,22 @@ void main() {
       findsNothing,
       reason: 'the data lists need data.read.any, which this session does not hold',
     );
+  });
+
+  testWidgets('admin hub displays logout button and allows sign out', (tester) async {
+    await useLocale('vi', permissions: [Permissions.dataReadAny]);
+    useTallSurface(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Quản trị'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Đăng xuất'), findsOneWidget);
+
+    await tester.tap(find.text('Đăng xuất'));
+    await tester.pumpAndSettle();
+
+    expect(session.isSignedIn, isFalse);
   });
 }

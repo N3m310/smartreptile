@@ -51,6 +51,7 @@ class AdminHubScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final session = context.watch<SessionProvider>();
     final available = [
       for (final entry in _entries)
@@ -73,6 +74,53 @@ class AdminHubScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => entry.build()),
               ),
             ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.statusDanger,
+              side: BorderSide(
+                color: AppColors.statusDanger.withValues(alpha: 0.5),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onPressed: () async {
+              final session = context.read<SessionProvider>();
+
+              if (!session.isSignedIn) {
+                if (session.isGuestMode) {
+                  session.leaveGuestMode();
+                  return;
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(l10n.sessionSignedOut)),
+                );
+                return;
+              }
+
+              await session.signOut();
+
+              if (!context.mounted) {
+                return;
+              }
+
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(l10n.signedOut)));
+            },
+            icon: Icon(
+              session.isSignedIn ? Icons.logout : Icons.login,
+              size: 18,
+            ),
+            label: Text(
+              session.isSignedIn ? l10n.signOut : 'Đăng nhập / Thoát khách',
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
       ],
     );
   }
