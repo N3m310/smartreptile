@@ -17,6 +17,7 @@ import 'services/species_profile_service.dart';
 import 'state/accounts_provider.dart';
 import 'state/admin_provider.dart';
 import 'state/app_data_provider.dart';
+import 'state/device_provider.dart';
 import 'state/roles_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
@@ -77,6 +78,7 @@ Future<void> main() async {
   final roles = RolesProvider(api: api);
   final speciesService = SpeciesProfileService(api: api);
   final species = SpeciesProfileProvider(service: speciesService);
+  final devices = DeviceProvider(api: api);
 
   // One listener rather than four calls at every sign-out site: everything the administration surfaces hold belongs
   // to the account that was signed in, so the moment the session ends they are emptied. A screen left behind would
@@ -88,6 +90,7 @@ Future<void> main() async {
       roles.clear();
       terrariums.clear();
       species.clear();
+      devices.clear();
       appData.resetToMocks();
     } else {
       appData.loadAll();
@@ -110,6 +113,7 @@ Future<void> main() async {
         ChangeNotifierProvider<AdminProvider>.value(value: admin),
         ChangeNotifierProvider<TerrariumProvider>.value(value: terrariums),
         ChangeNotifierProvider<SpeciesProfileProvider>.value(value: species),
+        ChangeNotifierProvider<DeviceProvider>.value(value: devices),
         ChangeNotifierProvider<AccountsProvider>.value(value: accounts),
         ChangeNotifierProvider<RolesProvider>.value(value: roles),
         ChangeNotifierProvider<TelemetryProvider>(

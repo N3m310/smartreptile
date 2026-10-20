@@ -30,7 +30,8 @@ public static class DeviceEndpoints
         {
             var outcome = await provisioning.ListAsync(
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(new { items = outcome.Devices }) : Problem(outcome.Problem!);
         })
@@ -50,7 +51,8 @@ public static class DeviceEndpoints
             var outcome = await provisioning.GetAsync(
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Device) : Problem(outcome.Problem!);
         })
@@ -70,7 +72,8 @@ public static class DeviceEndpoints
                 deviceId,
                 request,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Device) : Problem(outcome.Problem!);
         })
@@ -94,7 +97,8 @@ public static class DeviceEndpoints
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                RequestActor.From(context));
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Device) : Problem(outcome.Problem!);
         })
@@ -222,7 +226,8 @@ public static class DeviceEndpoints
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                RequestActor.From(context));
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
 
             if (outcome.Problem is { } problem)
             {
@@ -253,7 +258,8 @@ public static class DeviceEndpoints
                 deviceId,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                RequestActor.From(context));
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.NoContent() : Problem(outcome.Problem!);
         })

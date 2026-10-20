@@ -428,12 +428,13 @@ public sealed class DeviceProvisioningService(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var now = clock.UtcNow;
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || device.Status == DeviceStatus.Revoked || device.UserId != ownerUserId)
+        if (device is null || device.Status == DeviceStatus.Revoked || (!mayReachAnyAccount && device.UserId != ownerUserId))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -490,12 +491,13 @@ public sealed class DeviceProvisioningService(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var now = clock.UtcNow;
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || device.UserId != ownerUserId)
+        if (device is null || (!mayReachAnyAccount && device.UserId != ownerUserId))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -531,11 +533,12 @@ public sealed class DeviceProvisioningService(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || device.UserId != ownerUserId)
+        if (device is null || (!mayReachAnyAccount && device.UserId != ownerUserId))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -683,9 +686,15 @@ public sealed class DeviceProvisioningService(
     /// <summary>The caller's boards, ordered by display name (TASKS 2026-10-14, item 9b).</summary>
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task<DeviceOutcome> ListAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+    /// <param name="mayReachAnyAccount">When true, lists every device in the deployment (data.read.any).</param>
+    public async Task<DeviceOutcome> ListAsync(
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false)
     {
-        var devices = await store.ListOwnedAsync(ownerUserId, cancellationToken);
+        var devices = mayReachAnyAccount
+            ? await store.ListAllAsync(cancellationToken)
+            : await store.ListOwnedAsync(ownerUserId, cancellationToken);
 
         return DeviceOutcome.Listed([.. devices.Select(Describe)]);
     }
@@ -694,14 +703,16 @@ public sealed class DeviceProvisioningService(
     /// <param name="deviceId">Public id of the device.</param>
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">When true, allows reading any device in the deployment (data.read.any).</param>
     public async Task<DeviceOutcome> GetAsync(
         string deviceId,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false)
     {
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || !IsCallers(device, ownerUserId))
+        if (device is null || (!mayReachAnyAccount && !IsCallers(device, ownerUserId)))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -721,17 +732,19 @@ public sealed class DeviceProvisioningService(
     /// <param name="request">The fields to change; omitted members are left alone.</param>
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">When true, allows editing any device in the deployment.</param>
     public async Task<DeviceOutcome> UpdateAsync(
         string deviceId,
         UpdateDeviceRequest request,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || !IsCallers(device, ownerUserId))
+        if (device is null || (!mayReachAnyAccount && !IsCallers(device, ownerUserId)))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }

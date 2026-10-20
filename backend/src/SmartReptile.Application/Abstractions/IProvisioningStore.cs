@@ -70,6 +70,11 @@ public interface IProvisioningStore
     /// </remarks>
     Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// All boards in the deployment with the bound terrarium loaded. Used when an administrator lists devices (data.read.any).
+    /// </summary>
+    Task<IReadOnlyList<Device>> ListAllAsync(CancellationToken cancellationToken);
+
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
 

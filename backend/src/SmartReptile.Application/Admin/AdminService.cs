@@ -159,7 +159,8 @@ public sealed class AdminService(IAdminStore store, IDeviceSessionRegistry sessi
     }
 
     /// <summary>Open alerts of one family, out of the header's figures.</summary>
-    private static int OpenAlertsIn(AdminCounts counts, AlertFamily family) => family switch    {
+    private static int OpenAlertsIn(AdminCounts counts, AlertFamily family) => family switch
+    {
         AlertFamily.Enclosure => counts.AlertsOpenEnclosure,
         AlertFamily.Species => counts.AlertsOpenSpecies,
         _ => 0,

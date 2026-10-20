@@ -11,12 +11,16 @@ import 'package:smart_reptile/data/api_client.dart';
 import 'package:smart_reptile/data/token_store.dart';
 import 'package:smart_reptile/l10n/generated/app_localizations.dart';
 import 'package:smart_reptile/screens/settings_screen.dart';
+import 'package:smart_reptile/services/species_profile_service.dart';
 import 'package:smart_reptile/state/accounts_provider.dart';
 import 'package:smart_reptile/state/admin_provider.dart';
 import 'package:smart_reptile/state/app_data_provider.dart';
+import 'package:smart_reptile/state/device_provider.dart';
 import 'package:smart_reptile/state/roles_provider.dart';
 import 'package:smart_reptile/state/session_provider.dart';
 import 'package:smart_reptile/state/settings_provider.dart';
+import 'package:smart_reptile/state/species_profile_provider.dart';
+import 'package:smart_reptile/state/terrarium_provider.dart';
 import 'package:smart_reptile/theme/app_theme.dart';
 
 /// Widget tests for the app shell (`lib/app.dart`) — the surface a keeper sees.
@@ -43,6 +47,17 @@ void main() {
       ChangeNotifierProvider<SessionProvider>.value(value: session),
       ChangeNotifierProvider<AdminProvider>(
         create: (_) => AdminProvider(api: ApiClient(baseUrl: 'http://localhost')),
+      ),
+      ChangeNotifierProvider<TerrariumProvider>(
+        create: (_) => TerrariumProvider(ApiClient(baseUrl: 'http://localhost')),
+      ),
+      ChangeNotifierProvider<SpeciesProfileProvider>(
+        create: (_) => SpeciesProfileProvider(
+          service: SpeciesProfileService(api: ApiClient(baseUrl: 'http://localhost')),
+        ),
+      ),
+      ChangeNotifierProvider<DeviceProvider>(
+        create: (_) => DeviceProvider(api: ApiClient(baseUrl: 'http://localhost')),
       ),
       ChangeNotifierProvider<AccountsProvider>(
         create: (_) => AccountsProvider(api: ApiClient(baseUrl: 'http://localhost')),
