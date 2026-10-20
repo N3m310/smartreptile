@@ -16,7 +16,7 @@ class AppColors {
   // Status colors
   static const statusNormal = Color(0xFF4A9E6A);
   static const statusWarning = Color(0xFFE8A832);
-  static const statusDanger = Color(0xFFE05530);
+  static const statusDanger = Color(0xFFE8613A);
   static const statusOffline = Color(0xFF556055);
 }
 

@@ -118,7 +118,7 @@ export const Devices: React.FC = () => {
               onClick={() => setStatusFilter('offline')}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
                 statusFilter === 'offline'
-                  ? 'bg-[#e05530] text-white font-bold'
+                  ? 'bg-[#e8613a] text-white font-bold'
                   : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
               }`}
             >
@@ -182,7 +182,7 @@ export const Devices: React.FC = () => {
                         Trực tuyến
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#e05530]/20 text-[#e05530] border border-[#e05530]/30 animate-pulse">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#e8613a]/20 text-[#e8613a] border border-[#e8613a]/30 animate-pulse">
                         <WifiOff className="w-3.5 h-3.5" />
                         Ngoại tuyến
                       </span>

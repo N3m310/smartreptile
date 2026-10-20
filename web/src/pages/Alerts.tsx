@@ -74,7 +74,7 @@ const MockAlerts: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {pendingCount > 0 ? (
-            <span className="px-3.5 py-1.5 rounded-xl bg-[#e05530]/20 border border-[#e05530]/40 text-xs font-bold text-[#e05530] flex items-center gap-1.5 animate-pulse">
+            <span className="px-3.5 py-1.5 rounded-xl bg-[#e8613a]/20 border border-[#e8613a]/40 text-xs font-bold text-[#e8613a] flex items-center gap-1.5 animate-pulse">
               <ShieldAlert className="w-4 h-4" />
               <span>{pendingCount} cảnh báo cần xử lý</span>
             </span>
@@ -104,7 +104,7 @@ const MockAlerts: React.FC = () => {
             onClick={() => setStatusFilter('pending')}
             className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
               statusFilter === 'pending'
-                ? 'bg-[#e05530] text-white shadow-md shadow-[#e05530]/20'
+                ? 'bg-[#e8613a] text-white shadow-md shadow-[#e8613a]/20'
                 : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
             }`}
           >
@@ -136,7 +136,7 @@ const MockAlerts: React.FC = () => {
                 isResolved
                   ? 'bg-[#112016]/40 border-[#1e3825] opacity-75'
                   : isDanger
-                  ? 'bg-[#112016] border-[#e05530]/40 shadow-lg shadow-[#e05530]/5 hover:border-[#e05530]'
+                  ? 'bg-[#112016] border-[#e8613a]/40 shadow-lg shadow-[#e8613a]/5 hover:border-[#e8613a]'
                   : 'bg-[#112016] border-[#e8a832]/40 shadow-lg shadow-[#e8a832]/5 hover:border-[#e8a832]'
               }`}
             >
@@ -147,7 +147,7 @@ const MockAlerts: React.FC = () => {
                     isResolved
                       ? 'bg-[#1e3825] text-[#8e9e8f]'
                       : isDanger
-                      ? 'bg-[#e05530]/20 text-[#e05530]'
+                      ? 'bg-[#e8613a]/20 text-[#e8613a]'
                       : 'bg-[#e8a832]/20 text-[#e8a832]'
                   }`}
                 >
@@ -164,7 +164,7 @@ const MockAlerts: React.FC = () => {
                         isResolved
                           ? 'bg-[#1e3825] text-[#8e9e8f]'
                           : isDanger
-                          ? 'bg-[#e05530] text-white'
+                          ? 'bg-[#e8613a] text-white'
                           : 'bg-[#e8a832] text-black'
                       }`}
                     >

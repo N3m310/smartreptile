@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 /// The single vocabulary shared by the API, the app and the dashboard (`02-design/04` §5).
 ///
 /// Rule: the status-to-colour/icon mapping exists exactly once, here. A second place that decides red/green is
@@ -67,15 +69,15 @@ enum MetricStatus {
   Color color(ThemeData theme) {
     switch (this) {
       case MetricStatus.inRange:
-        return const Color(0xFF2E7D32); // token color.inRange
+        return AppColors.statusNormal;
       case MetricStatus.outOfRange:
-        return const Color(0xFFED6C02); // token color.warning
+        return AppColors.statusWarning;
       case MetricStatus.critical:
-        return const Color(0xFFC62828); // token color.critical
+        return AppColors.statusDanger;
       case MetricStatus.noData:
       case MetricStatus.unavailable:
       case MetricStatus.maintenance:
-        return const Color(0xFF616161); // token color.unknown
+        return AppColors.textMuted;
     }
   }
 
