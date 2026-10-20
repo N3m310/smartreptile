@@ -32,6 +32,133 @@ class TerrariumDetailScreen extends StatelessWidget {
     }
   }
 
+  void _showEditThresholdsDialog(BuildContext context, TerrariumModel current) {
+    final data = context.read<AppDataProvider>();
+    final tempMinCtrl = TextEditingController(text: current.thresholds.tempMin.toString());
+    final tempMaxCtrl = TextEditingController(text: current.thresholds.tempMax.toString());
+    final humMinCtrl = TextEditingController(text: current.thresholds.humidityMin.toString());
+    final humMaxCtrl = TextEditingController(text: current.thresholds.humidityMax.toString());
+    final lightMinCtrl = TextEditingController(text: current.thresholds.lightMin.toString());
+    final lightMaxCtrl = TextEditingController(text: current.thresholds.lightMax.toString());
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.bgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 24,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Cấu hình ngưỡng vi khí hậu',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textMain,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: AppColors.textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Nhiệt độ (°C)', style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(child: TextField(controller: tempMinCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Min (°C)'))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextField(controller: tempMaxCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max (°C)'))),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text('Độ ẩm (%)', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(child: TextField(controller: humMinCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Min (%)'))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextField(controller: humMaxCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max (%)'))),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text('Cường độ sáng (Lux)', style: TextStyle(color: AppColors.statusWarning, fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(child: TextField(controller: lightMinCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Min (Lux)'))),
+                  const SizedBox(width: 12),
+                  Expanded(child: TextField(controller: lightMaxCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max (Lux)'))),
+                ],
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () async {
+                    final tMin = double.tryParse(tempMinCtrl.text) ?? current.thresholds.tempMin;
+                    final tMax = double.tryParse(tempMaxCtrl.text) ?? current.thresholds.tempMax;
+                    final hMin = double.tryParse(humMinCtrl.text) ?? current.thresholds.humidityMin;
+                    final hMax = double.tryParse(humMaxCtrl.text) ?? current.thresholds.humidityMax;
+                    final lMin = int.tryParse(lightMinCtrl.text) ?? current.thresholds.lightMin;
+                    final lMax = int.tryParse(lightMaxCtrl.text) ?? current.thresholds.lightMax;
+
+                    final updated = current.thresholds.copyWith(
+                      tempMin: tMin,
+                      tempMax: tMax,
+                      humidityMin: hMin,
+                      humidityMax: hMax,
+                      lightMin: lMin,
+                      lightMax: lMax,
+                    );
+
+                    final success = await data.updateThresholds(current.id, updated);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            data.isLive
+                                ? (success ? 'Đã lưu ngưỡng cài đặt lên máy chủ thành công!' : 'Không thể lưu ngưỡng lên máy chủ.')
+                                : 'Đã cập nhật ngưỡng cục bộ thành công.',
+                          ),
+                          backgroundColor: (data.isLive && !success) ? AppColors.statusDanger : AppColors.primary,
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Lưu cấu hình ngưỡng', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = context.watch<AppDataProvider>();
@@ -48,6 +175,11 @@ class TerrariumDetailScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(current.name),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.tune, color: AppColors.primary),
+            tooltip: 'Cấu hình ngưỡng',
+            onPressed: () => _showEditThresholdsDialog(context, current),
+          ),
           Container(
             margin: const EdgeInsets.only(right: 16),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

@@ -66,6 +66,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final data = context.watch<AppDataProvider>();
+    final session = context.watch<SessionProvider>();
     final devices = data.devices;
 
     // Đảm bảo _currentTerrariumId luôn tồn tại trong danh sách terrariums từ Database
@@ -487,6 +488,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final l10n = AppLocalizations.of(context);
 
                 if (!session.isSignedIn) {
+                  if (session.isGuestMode) {
+                    session.leaveGuestMode();
+                    return;
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(l10n.sessionSignedOut)),
                   );
@@ -502,8 +507,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ScaffoldMessenger.of(context)
                     .showSnackBar(SnackBar(content: Text(l10n.signedOut)));
               },
-              icon: const Icon(Icons.logout, size: 18),
-              label: Text(AppLocalizations.of(context).signOut),
+              icon: Icon(session.isSignedIn ? Icons.logout : Icons.login, size: 18),
+              label: Text(session.isSignedIn ? AppLocalizations.of(context).signOut : 'Đăng nhập / Thoát khách'),
             ),
           ),
           const SizedBox(height: 24),

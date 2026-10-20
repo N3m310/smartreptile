@@ -104,10 +104,10 @@ void main() {
     settings = SettingsProvider();
     await settings.setLocale(Locale(languageCode));
     session = permissions == null
-        ? SessionProvider(
+        ? (SessionProvider(
             api: ApiClient(baseUrl: 'http://localhost'),
             store: TokenStore.inMemory(),
-          )
+          )..enterGuestMode())
         : await sessionHolding(permissions);
   }
 
@@ -217,14 +217,23 @@ void main() {
       reason: 'the administration screens read the API, so the simulated-data notice would be untrue over them',
     );
     expect(
-      find.text('Cần quyền data.read.any'),
-      findsNWidgets(2),
-      reason: 'the overview and the get-all lists are both behind data.read.any',
+      find.text('Toàn cảnh hệ thống'),
+      findsOneWidget,
+      reason: 'the overview is behind data.read.any and available',
     );
     expect(
-      find.text('Cần quyền user.read'),
+      find.text('Toàn bộ dữ liệu'),
+      findsOneWidget,
+      reason: 'the get-all lists is behind data.read.any and available',
+    );
+    expect(
+      find.text('Tạo, sửa, khoá, xoá và đổi vai trò cho tài khoản.'),
       findsNothing,
-      reason: 'accounts and roles need user.read, which this session does not hold',
+    );
+    expect(
+      find.text('Vai trò và quyền'),
+      findsNothing,
+      reason: 'roles needs user.read, which this session does not hold',
     );
   });
 
@@ -238,14 +247,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('Cần quyền user.read'),
+      find.text('Tài khoản'),
       findsNWidgets(2),
-      reason: 'the accounts list and the role matrix are both behind user.read',
+      reason: 'both the session summary card header and the accounts entry card title read Tài khoản',
     );
     expect(
-      find.text('Cần quyền data.read.any'),
+      find.text('Vai trò và quyền'),
+      findsOneWidget,
+      reason: 'the role matrix is behind user.read and available',
+    );
+    expect(
+      find.text('Toàn cảnh hệ thống'),
       findsNothing,
       reason: 'the deployment view needs data.read.any, which this session does not hold',
+    );
+    expect(
+      find.text('Toàn bộ dữ liệu'),
+      findsNothing,
+      reason: 'the data lists need data.read.any, which this session does not hold',
     );
   });
 }

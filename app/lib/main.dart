@@ -45,7 +45,7 @@ Future<void> main() async {
   final clock = Clock.system();
   final api = ApiClient(baseUrl: Env.apiBase);
   final settings = SettingsProvider();
-  final appData = AppDataProvider();
+  final appData = AppDataProvider(api: api);
   final pushRegistration = messaging == null
       ? null
       : PushRegistrationService(
@@ -80,8 +80,15 @@ Future<void> main() async {
       admin.clear();
       accounts.clear();
       roles.clear();
+      appData.resetToMocks();
+    } else {
+      appData.loadAll();
     }
   });
+
+  if (session.isSignedIn) {
+    appData.loadAll();
+  }
 
   runApp(
     MultiProvider(

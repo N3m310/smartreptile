@@ -27,35 +27,30 @@ class AdminHubScreen extends StatelessWidget {
       permission: Permissions.dataReadAny,
       icon: Icons.insights_outlined,
       title: (l10n) => l10n.adminOverviewEntry,
-      caption: (l10n) => l10n.adminOverviewEntryCaption,
       build: () => const AdminOverviewScreen(),
     ),
     _AdminEntry(
       permission: Permissions.dataReadAny,
       icon: Icons.grid_view_outlined,
       title: (l10n) => l10n.adminListsEntry,
-      caption: (l10n) => l10n.adminListsEntryCaption,
       build: () => const AdminListsScreen(),
     ),
     _AdminEntry(
       permission: Permissions.userRead,
       icon: Icons.manage_accounts_outlined,
       title: (l10n) => l10n.adminAccountsEntry,
-      caption: (l10n) => l10n.adminAccountsEntryCaption,
       build: () => const AccountsScreen(),
     ),
     _AdminEntry(
       permission: Permissions.userRead,
       icon: Icons.admin_panel_settings_outlined,
       title: (l10n) => l10n.adminRolesEntry,
-      caption: (l10n) => l10n.adminRolesEntryCaption,
       build: () => const RolesScreen(),
     ),
   ];
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
     final session = context.watch<SessionProvider>();
     final available = [
       for (final entry in _entries)
@@ -65,15 +60,6 @@ class AdminHubScreen extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text(
-          l10n.adminSubtitle,
-          style: const TextStyle(
-            fontSize: 12,
-            height: 1.4,
-            color: AppColors.textMuted,
-          ),
-        ),
-        const SizedBox(height: 12),
         if (session.user != null) _SessionSummary(user: session.user!),
         const SizedBox(height: 4),
         if (available.isEmpty)
@@ -128,36 +114,13 @@ class _EntryCard extends StatelessWidget {
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.title(l10n),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textMain,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      entry.caption(l10n),
-                      style: const TextStyle(
-                        fontSize: 11,
-                        height: 1.3,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      l10n.adminRequiresPermission(entry.permission),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  entry.title(l10n),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textMain,
+                  ),
                 ),
               ),
               const Icon(
@@ -185,7 +148,7 @@ class _SessionSummary extends StatelessWidget {
 
     return AdminSection(
       title: l10n.sessionTitle,
-      caption: l10n.sessionPermissionsHint,
+      caption: null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -212,13 +175,11 @@ class _AdminEntry {
     required this.permission,
     required this.icon,
     required this.title,
-    required this.caption,
     required this.build,
   });
 
   final String permission;
   final IconData icon;
   final String Function(AppLocalizations l10n) title;
-  final String Function(AppLocalizations l10n) caption;
   final Widget Function() build;
 }
