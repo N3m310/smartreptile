@@ -276,7 +276,7 @@ export const Settings: React.FC = () => {
             await signOut();
             navigate('/');
           }}
-          className="px-5 py-2.5 bg-[#e05530]/15 hover:bg-[#e05530] text-[#e05530] hover:text-white border border-[#e05530]/30 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 cursor-pointer"
+          className="px-5 py-2.5 bg-[#e8613a]/15 hover:bg-[#e8613a] text-[#e8613a] hover:text-white border border-[#e8613a]/30 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
           <span>Đăng xuất ngay</span>
