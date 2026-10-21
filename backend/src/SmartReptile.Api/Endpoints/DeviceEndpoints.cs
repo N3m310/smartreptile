@@ -157,7 +157,8 @@ public static class DeviceEndpoints
                 request,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                RequestActor.From(context));
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
 
             if (outcome.Problem is { } problem)
             {
@@ -189,7 +190,8 @@ public static class DeviceEndpoints
                 request,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                RequestActor.From(context));
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
 
             if (outcome.Problem is { } problem)
             {
