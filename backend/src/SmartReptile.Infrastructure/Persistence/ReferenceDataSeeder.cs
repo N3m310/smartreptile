@@ -277,6 +277,93 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
         return created;
     }
 
+    /// <summary>
+    /// Keeps the metric catalogue in step with <see cref="MetricDictionary"/>, which is what owns the rows.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this exists when the migration already inserts the seven rows.</b> A metric added to the dictionary in
+    /// a later release must appear here without a migration — the same reasoning as the permission catalogue, and the
+    /// same safe direction: a row that is missing is inserted, a row whose label drifted is corrected, and nothing is
+    /// ever removed (a catalogue row a reading still points at cannot be deleted anyway, and deleting one by hand is a
+    /// decision this step must not take back).
+    /// </remarks>
+    public async Task<int> SeedMetricCatalogueAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await db.Metrics
+            .ToDictionaryAsync(metric => metric.Code, cancellationToken)
+            .ConfigureAwait(false);
+
+        var created = 0;
+        var updated = 0;
+        var order = 0;
+
+        foreach (var definition in MetricDictionary.All)
+        {
+            order++;
+
+            if (existing.TryGetValue(definition.Code, out var row))
+            {
+                if (row.ApiKey == definition.ApiKey
+                    && row.PayloadKey == definition.PayloadKey
+                    && row.DisplayName == definition.DisplayName
+                    && row.Unit == definition.Unit
+                    && row.Precision == definition.Precision
+                    && row.PlausibleMin == definition.PlausibleMin
+                    && row.PlausibleMax == definition.PlausibleMax
+                    && row.IsCore == definition.IsCore
+                    && row.Family == definition.Family
+                    && row.SortOrder == order)
+                {
+                    continue;
+                }
+
+                row.ApiKey = definition.ApiKey;
+                row.PayloadKey = definition.PayloadKey;
+                row.DisplayName = definition.DisplayName;
+                row.Unit = definition.Unit;
+                row.Precision = definition.Precision;
+                row.PlausibleMin = definition.PlausibleMin;
+                row.PlausibleMax = definition.PlausibleMax;
+                row.IsCore = definition.IsCore;
+                row.Family = definition.Family;
+                row.SortOrder = order;
+                updated++;
+
+                continue;
+            }
+
+            db.Metrics.Add(new MetricReference
+            {
+                Code = definition.Code,
+                ApiKey = definition.ApiKey,
+                PayloadKey = definition.PayloadKey,
+                DisplayName = definition.DisplayName,
+                Unit = definition.Unit,
+                Precision = definition.Precision,
+                PlausibleMin = definition.PlausibleMin,
+                PlausibleMax = definition.PlausibleMax,
+                IsCore = definition.IsCore,
+                Family = definition.Family,
+                SortOrder = order,
+            });
+
+            created++;
+        }
+
+        if (created > 0 || updated > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Metric catalogue: {Created} created, {Updated} brought back in step, {Total} in the dictionary",
+                created,
+                updated,
+                MetricDictionary.All.Count);
+        }
+
+        return created;
+    }
+
     /// <summary>Seeds the built-in profiles if they are missing.</summary>
     public async Task<int> SeedAsync(CancellationToken cancellationToken = default)
     {

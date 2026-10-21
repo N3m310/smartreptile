@@ -73,12 +73,5 @@ public static class AuditEndpoints
     /// </summary>
     /// <param name="problem">Failure to map.</param>
     private static IResult Problem(AuditProblem problem) =>
-        Results.Problem(
-            title: problem.Message,
-            statusCode: StatusCodes.Status400BadRequest,
-            type: $"https://smartreptile.example/problems/{problem.Code}",
-            extensions: new Dictionary<string, object?>
-            {
-                ["code"] = problem.Code,
-            });
+        ApiProblem.Create(problem.Code, problem.Message, StatusCodes.Status400BadRequest);
 }

@@ -172,10 +172,11 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
     public Task<Terrarium?> FindOwnedTerrariumAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false) =>
         Task.FromResult(_terrariums.FirstOrDefault(
             terrarium => terrarium.Id == terrariumId
-                         && terrarium.UserId == ownerUserId
+                         && (mayReachAnyAccount || terrarium.UserId == ownerUserId)
                          && terrarium.Status == TerrariumStatus.Active));
 
     public Task<bool> TerrariumHasDeviceAsync(Guid terrariumId, CancellationToken cancellationToken) =>
@@ -187,6 +188,13 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
         Task.FromResult<IReadOnlyList<Device>>(
             [.. _devices
                 .Where(device => device.UserId == ownerUserId)
+                .OrderBy(device => device.DeviceName)
+                .ThenBy(device => device.PublicId)]);
+
+    /// <summary>Every board in the deployment, ordered the way the adapter orders it for the admin list.</summary>
+    public Task<IReadOnlyList<Device>> ListAllAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<Device>>(
+            [.. _devices
                 .OrderBy(device => device.DeviceName)
                 .ThenBy(device => device.PublicId)]);
 

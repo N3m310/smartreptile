@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/formatting.dart';
 import '../core/problem.dart';
 import '../core/status.dart';
+import '../theme/app_theme.dart';
 import 'generated/app_localizations.dart';
 
 /// Maps API status values to localised labels.
@@ -67,7 +68,7 @@ IconData deviceStatusIcon(String status) =>
 
 /// Colour for a device status string.
 Color deviceStatusColor(String status) =>
-    status == 'online' ? const Color(0xFF2E7D32) : const Color(0xFF616161);
+    status == 'online' ? AppColors.statusNormal : AppColors.textMuted;
 
 // -------------------------------------------------------------------------------------------------------------
 // The administrator's surfaces. Same rule as above: the API's vocabulary is mapped to a label in exactly one
@@ -98,8 +99,8 @@ IconData alertFamilyIcon(String key) => switch (key) {
 /// Colour for an alert family key.
 Color alertFamilyColor(String key) => switch (key) {
   'enclosure' => const Color(0xFF2E86C1),
-  'species' => const Color(0xFFC87F3A),
-  _ => const Color(0xFF616161),
+  'species' => AppColors.accent,
+  _ => AppColors.textMuted,
 };
 
 /// Localised label for a device status as the REST surface spells it (`Online`, `Provisioning`, …).
@@ -114,10 +115,10 @@ String deviceStatusLabel(AppLocalizations l10n, String status) => switch (status
 
 /// Colour for a device status.
 Color deviceStatusPillColor(String status) => switch (status) {
-  'Online' => const Color(0xFF2E7D32),
-  'Provisioning' => const Color(0xFFED6C02),
-  'Maintenance' => const Color(0xFF616161),
-  _ => const Color(0xFFC62828),
+  'Online' => AppColors.statusNormal,
+  'Provisioning' => AppColors.statusWarning,
+  'Maintenance' => AppColors.textMuted,
+  _ => AppColors.statusDanger,
 };
 
 /// Localised label for an alert state (`Open`, `Acknowledged`, `Resolved`).
@@ -138,10 +139,10 @@ String severityLabel(AppLocalizations l10n, String severity) => switch (severity
 
 /// Colour for an alert severity. Critical reads as the danger token, not as a shade of the same red as Warning.
 Color severityColor(String severity) => switch (severity) {
-  'Info' => const Color(0xFF616161),
-  'Warning' => const Color(0xFFED6C02),
-  'Critical' => const Color(0xFFC62828),
-  _ => const Color(0xFF616161),
+  'Info' => AppColors.textMuted,
+  'Warning' => AppColors.statusWarning,
+  'Critical' => AppColors.statusDanger,
+  _ => AppColors.textMuted,
 };
 
 /// Localised label for what produced an alert.
@@ -182,6 +183,14 @@ String failureMessage(AppLocalizations l10n, AppFailure failure) {
       return l10n.rateLimited;
     case 'unauthenticated':
       return l10n.unauthenticated;
+    case 'registrationInvalid':
+      return l10n.registrationInvalid;
+    case 'usernameTaken':
+      return l10n.usernameTaken;
+    case 'recoveryFailed':
+      return l10n.recoveryFailed;
+    case 'identifierUnknown':
+      return l10n.identifierUnknown;
     case 'errorForbidden':
       return l10n.errorForbidden;
     case 'adminAccountNotFound':

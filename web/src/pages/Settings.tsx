@@ -1,283 +1,155 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  User,
-  Bell,
-  Sliders,
-  LogOut,
-  Save,
-  Check,
-  ShieldCheck,
-  Mail,
-  Phone,
-} from 'lucide-react';
+import { Bell, Save, Sliders, User } from 'lucide-react';
+import * as api from '../api/endpoints';
+import { ApiError } from '../api/client';
+import type { TimeZoneList } from '../api/types';
+import { useI18n } from '../i18n';
+import { describeError } from '../lib/messages';
+import { usePolled } from '../lib/usePolled';
+import { useSession } from '../state/session';
+
+interface ProfileDraft {
+  preferredLanguage: string;
+  timeZoneId: string;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  minNotifySeverity: string;
+  channelFcmEnabled: boolean;
+  channelEmailEnabled: boolean;
+}
+
+const initialDraft = (profile: ReturnType<typeof useSession>['user']): ProfileDraft => ({
+  preferredLanguage: profile?.preferredLanguage ?? 'vi',
+  timeZoneId: profile?.timeZoneId ?? 'Asia/Ho_Chi_Minh',
+  quietHoursStart: profile?.quietHoursStart ?? '',
+  quietHoursEnd: profile?.quietHoursEnd ?? '',
+  minNotifySeverity: profile?.minNotifySeverity ?? 'warning',
+  channelFcmEnabled: profile?.channelFcmEnabled ?? false,
+  channelEmailEnabled: profile?.channelEmailEnabled ?? false,
+});
 
 export const Settings: React.FC = () => {
+  const { t, setLang } = useI18n();
   const navigate = useNavigate();
+  const { user, refreshProfile } = useSession();
+  const timeZones = usePolled<TimeZoneList>(() => api.listTimeZones(), null);
+  const [draft, setDraft] = useState<ProfileDraft>(() => initialDraft(user));
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Profile state
-  const [profile, setProfile] = useState({
-    name: 'Nguyễn Văn Quản Trị',
-    email: 'admin@vivariumguard.vn',
-    phone: '0987 654 321',
-  });
-  const [profileSaved, setProfileSaved] = useState(false);
+  useEffect(() => {
+    setDraft(initialDraft(user));
+  }, [user]);
 
-  // Notification toggles
-  const [notifications, setNotifications] = useState({
-    tempAlert: true,
-    humidityAlert: true,
-    deviceOffline: true,
-    dailyReport: false,
-  });
+  const update = <K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) =>
+    setDraft((current) => ({ ...current, [key]: value }));
 
-  // Threshold editing lives on the terrarium's own page now, so this screen keeps no threshold state at all.
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaved(false);
+    setError(null);
+    setValidationError(null);
+    if (Boolean(draft.quietHoursStart) !== Boolean(draft.quietHoursEnd)) {
+      setValidationError('Vui lòng nhập đủ giờ bắt đầu và giờ kết thúc yên tĩnh, hoặc để trống cả hai.');
+      return;
+    }
 
-  const handleProfileSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 2500);
+    setBusy(true);
+    try {
+      await api.updateMyProfile({
+        preferredLanguage: draft.preferredLanguage,
+        timeZoneId: draft.timeZoneId,
+        quietHoursStart: draft.quietHoursStart,
+        quietHoursEnd: draft.quietHoursEnd,
+        minNotifySeverity: draft.minNotifySeverity,
+        channelFcmEnabled: draft.channelFcmEnabled,
+        channelEmailEnabled: draft.channelEmailEnabled,
+      });
+      await refreshProfile();
+      if (draft.preferredLanguage === 'vi' || draft.preferredLanguage === 'en') {
+        setLang(draft.preferredLanguage);
+      }
+      setSaved(true);
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
   };
 
+  const fieldClass = 'mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink';
+
   return (
-    <div className="space-y-8 max-w-5xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-heading font-extrabold text-[#dcd5c4]">
-          Cài đặt Hệ thống
-        </h1>
-        <p className="text-sm text-[#8e9e8f] mt-1">
-          Quản lý tài khoản và cấu hình nhận thông báo cảnh báo
-        </p>
-      </div>
+    <div className="max-w-4xl space-y-6">
+      <header>
+        <h1 className="font-heading text-2xl font-bold text-ink">Cài đặt cá nhân</h1>
+        <p className="mt-1 text-sm text-muted">Cập nhật ngôn ngữ, múi giờ và cách nhận thông báo.</p>
+      </header>
 
-      {/* 1. Account Profile Card */}
-      <div className="bg-[#112016] border border-[#1e3825] rounded-3xl p-6 sm:p-8 space-y-6">
-        <div className="flex items-center gap-3 pb-4 border-b border-[#1e3825]">
-          <div className="p-2.5 rounded-2xl bg-[#4a9e6a]/15 text-[#4a9e6a]">
-            <User className="w-5 h-5" />
+      {error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, error)}</p>}
+      {validationError && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{validationError}</p>}
+      {saved && <p role="status" className="rounded-lg border border-accent/30 bg-accent/5 p-3 text-sm text-ink">Đã lưu cài đặt cá nhân.</p>}
+
+      <form onSubmit={(event) => void submit(event)} className="space-y-6">
+        <section className="rounded-2xl border border-hairline bg-surface p-5 sm:p-6">
+          <div className="mb-5 flex items-center gap-3 border-b border-hairline pb-4">
+            <User className="h-5 w-5 text-brand" aria-hidden="true" />
+            <div><h2 className="font-heading font-semibold text-ink">Tài khoản</h2><p className="text-xs text-muted">Tên đăng nhập và email chỉ đọc; API hiện không hỗ trợ đổi hai thông tin này.</p></div>
           </div>
-          <div>
-            <h2 className="text-lg font-heading font-bold text-[#dcd5c4]">
-              Thông tin Người quản lý
-            </h2>
-            <p className="text-xs text-[#8e9e8f]">
-              Cập nhật hồ sơ cá nhân và phương thức liên hệ nhận thông báo
-            </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-medium text-muted">Tên đăng nhập<input readOnly value={user?.username ?? ''} className={`${fieldClass} opacity-70`} /></label>
+            <label className="text-xs font-medium text-muted">Email<input readOnly value={user?.email ?? ''} className={`${fieldClass} opacity-70`} /></label>
+            <label className="text-xs font-medium text-muted">Ngôn ngữ giao diện
+              <select value={draft.preferredLanguage} onChange={(event) => update('preferredLanguage', event.target.value)} className={fieldClass}>
+                <option value="vi">Tiếng Việt</option><option value="en">English</option>
+              </select>
+            </label>
+            <label className="text-xs font-medium text-muted">Múi giờ
+              <select required value={draft.timeZoneId} onChange={(event) => update('timeZoneId', event.target.value)} className={fieldClass}>
+                {timeZones.data?.items.map((zone) => <option key={zone.ianaId} value={zone.ianaId}>{zone.displayName} ({zone.utcOffset})</option>)}
+              </select>
+            </label>
           </div>
+          {timeZones.error && <p role="alert" className="mt-3 text-xs text-critical">{describeError(t, timeZones.error)}</p>}
+        </section>
+
+        <section className="rounded-2xl border border-hairline bg-surface p-5 sm:p-6">
+          <div className="mb-5 flex items-center gap-3 border-b border-hairline pb-4">
+            <Bell className="h-5 w-5 text-brand" aria-hidden="true" />
+            <div><h2 className="font-heading font-semibold text-ink">Thông báo</h2><p className="text-xs text-muted">Cài đặt này được lưu trực tiếp vào hồ sơ tài khoản.</p></div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-medium text-muted">Mức cảnh báo tối thiểu
+              <select value={draft.minNotifySeverity} onChange={(event) => update('minNotifySeverity', event.target.value)} className={fieldClass}>
+                <option value="info">Thông tin trở lên</option><option value="warning">Cảnh báo trở lên</option><option value="critical">Chỉ mức nguy hiểm</option>
+              </select>
+            </label>
+            <fieldset className="space-y-3 text-sm text-ink">
+              <legend className="mb-2 text-xs font-medium text-muted">Kênh nhận thông báo</legend>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={draft.channelEmailEnabled} onChange={(event) => update('channelEmailEnabled', event.target.checked)} className="accent-brand" /> Email</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={draft.channelFcmEnabled} onChange={(event) => update('channelFcmEnabled', event.target.checked)} className="accent-brand" /> Thông báo đẩy{user?.hasFcmToken ? '' : ' (chưa đăng ký thiết bị nhận)'}</label>
+            </fieldset>
+            <label className="text-xs font-medium text-muted">Bắt đầu giờ yên tĩnh<input type="time" value={draft.quietHoursStart} onChange={(event) => update('quietHoursStart', event.target.value)} className={fieldClass} /></label>
+            <label className="text-xs font-medium text-muted">Kết thúc giờ yên tĩnh<input type="time" value={draft.quietHoursEnd} onChange={(event) => update('quietHoursEnd', event.target.value)} className={fieldClass} /></label>
+            <p className="text-xs text-muted sm:col-span-2">Để trống cả hai ô giờ yên tĩnh để tắt khoảng thời gian này.</p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-hairline bg-surface p-5 sm:p-6">
+          <div className="mb-3 flex items-center gap-3"><Sliders className="h-5 w-5 text-brand" aria-hidden="true" /><h2 className="font-heading font-semibold text-ink">Ngưỡng bể nuôi</h2></div>
+          <p className="text-sm text-muted">Ngưỡng được cấu hình riêng theo từng bể nuôi.</p>
+          <button type="button" onClick={() => navigate('/terrariums')} className="mt-3 inline-flex text-sm font-medium text-accent hover:underline">Mở danh sách bể nuôi</button>
+        </section>
+
+        <div className="flex justify-end">
+          <button disabled={busy || timeZones.loading} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+            <Save className="h-4 w-4" aria-hidden="true" />{busy ? 'Đang lưu…' : 'Lưu cài đặt'}
+          </button>
         </div>
-
-        <form onSubmit={handleProfileSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase text-[#8e9e8f] mb-1.5">
-                Họ và tên
-              </label>
-              <input
-                type="text"
-                value={profile.name}
-                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                className="w-full px-4 py-2.5 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-xs text-[#dcd5c4] outline-none focus:border-[#4a9e6a]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase text-[#8e9e8f] mb-1.5">
-                Email nhận tin
-              </label>
-              <input
-                type="email"
-                value={profile.email}
-                onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                className="w-full px-4 py-2.5 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-xs text-[#dcd5c4] outline-none focus:border-[#4a9e6a]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase text-[#8e9e8f] mb-1.5">
-                Số điện thoại (SMS / Zalo)
-              </label>
-              <input
-                type="text"
-                value={profile.phone}
-                onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-                className="w-full px-4 py-2.5 bg-[#0b1a0d] border border-[#1e3825] rounded-xl text-xs text-[#dcd5c4] outline-none focus:border-[#4a9e6a]"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end pt-2">
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-[#4a9e6a] hover:bg-[#3d8558] text-white text-xs font-semibold rounded-xl shadow-md shadow-[#4a9e6a]/20 flex items-center gap-2 cursor-pointer"
-            >
-              {profileSaved ? (
-                <>
-                  <Check className="w-4 h-4" />
-                  <span>Đã lưu thông tin!</span>
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" />
-                  <span>Lưu thay đổi hồ sơ</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* 2. Notification Preferences */}
-      <div className="bg-[#112016] border border-[#1e3825] rounded-3xl p-6 sm:p-8 space-y-6">
-        <div className="flex items-center gap-3 pb-4 border-b border-[#1e3825]">
-          <div className="p-2.5 rounded-2xl bg-[#c87f3a]/15 text-[#c87f3a]">
-            <Bell className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-heading font-bold text-[#dcd5c4]">
-              Kênh & Loại Cảnh báo
-            </h2>
-            <p className="text-xs text-[#8e9e8f]">
-              Chọn các trường hợp gửi thông báo tức thì đến người quản lý
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <label className="flex items-center justify-between p-4 rounded-2xl bg-[#0b1a0d] border border-[#1e3825] cursor-pointer hover:border-[#4a9e6a]/40">
-            <div>
-              <p className="text-sm font-semibold text-[#dcd5c4]">
-                Cảnh báo nhiệt độ vượt ngưỡng
-              </p>
-              <p className="text-xs text-[#8e9e8f] mt-0.5">
-                Gửi ngay khi phát hiện nhiệt vượt quá Min/Max
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifications.tempAlert}
-              onChange={(e) =>
-                setNotifications({ ...notifications, tempAlert: e.target.checked })
-              }
-              className="w-5 h-5 accent-[#4a9e6a]"
-            />
-          </label>
-
-          <label className="flex items-center justify-between p-4 rounded-2xl bg-[#0b1a0d] border border-[#1e3825] cursor-pointer hover:border-[#4a9e6a]/40">
-            <div>
-              <p className="text-sm font-semibold text-[#dcd5c4]">
-                Cảnh báo độ ẩm vi phạm
-              </p>
-              <p className="text-xs text-[#8e9e8f] mt-0.5">
-                Cảnh báo khi độ ẩm quá thấp hoặc quá cao
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifications.humidityAlert}
-              onChange={(e) =>
-                setNotifications({
-                  ...notifications,
-                  humidityAlert: e.target.checked,
-                })
-              }
-              className="w-5 h-5 accent-[#4a9e6a]"
-            />
-          </label>
-
-          <label className="flex items-center justify-between p-4 rounded-2xl bg-[#0b1a0d] border border-[#1e3825] cursor-pointer hover:border-[#4a9e6a]/40">
-            <div>
-              <p className="text-sm font-semibold text-[#dcd5c4]">
-                Thiết bị mất kết nối (Offline)
-              </p>
-              <p className="text-xs text-[#8e9e8f] mt-0.5">
-                Thông báo khi node ESP32 không gửi tin sau 3 phút
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifications.deviceOffline}
-              onChange={(e) =>
-                setNotifications({
-                  ...notifications,
-                  deviceOffline: e.target.checked,
-                })
-              }
-              className="w-5 h-5 accent-[#4a9e6a]"
-            />
-          </label>
-
-          <label className="flex items-center justify-between p-4 rounded-2xl bg-[#0b1a0d] border border-[#1e3825] cursor-pointer hover:border-[#4a9e6a]/40">
-            <div>
-              <p className="text-sm font-semibold text-[#dcd5c4]">
-                Báo cáo tổng kết mỗi ngày
-              </p>
-              <p className="text-xs text-[#8e9e8f] mt-0.5">
-                Gửi email bản tóm tắt trung bình chỉ số vào 21:00
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifications.dailyReport}
-              onChange={(e) =>
-                setNotifications({
-                  ...notifications,
-                  dailyReport: e.target.checked,
-                })
-              }
-              className="w-5 h-5 accent-[#4a9e6a]"
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* 3. Threshold Configuration - editing lives on the terrarium page (real API), not here. */}
-      <div className="bg-[#112016] border border-[#1e3825] rounded-3xl p-6 sm:p-8 space-y-4">
-        <div className="flex items-center gap-3 pb-4 border-b border-[#1e3825]">
-          <div className="p-2.5 rounded-2xl bg-[#4a9e6a]/15 text-[#4a9e6a]">
-            <Sliders className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-heading font-bold text-[#dcd5c4]">
-              Ngưỡng vi khí hậu (Threshold)
-            </h2>
-            <p className="text-xs text-[#8e9e8f]">
-              Cấu hình theo từng bể nuôi, trên dữ liệu thật của máy chủ
-            </p>
-          </div>
-        </div>
-        <p className="text-xs text-[#8e9e8f] leading-relaxed">
-          Mở một bể nuôi để xem ngưỡng hiệu lực của từng chỉ số (kèm nguồn: hồ sơ loài hoặc ghi đè) và sửa
-          trực tiếp tại đó. Form nhập tay trước đây trên màn hình này đã bỏ, vì nút "lưu" ở đó không gửi gì
-          lên máy chủ.
-        </p>
-        <button
-          type="button"
-          onClick={() => navigate('/terrariums')}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#4a9e6a] hover:bg-[#3d8558] text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
-        >
-          <Sliders className="w-4 h-4" />
-          <span>Mở danh sách bể nuôi</span>
-        </button>
-      </div>
-
-      {/* 4. Logout Session */}
-      <div className="bg-[#112016] border border-[#1e3825] rounded-3xl p-6 sm:p-8 flex items-center justify-between gap-4">
-        <div>
-          <h3 className="text-base font-heading font-bold text-[#dcd5c4]">
-            Đăng xuất khỏi phiên làm việc
-          </h3>
-          <p className="text-xs text-[#8e9e8f] mt-0.5">
-            Xóa token xác thực và chuyển hướng quay lại màn hình đăng nhập
-          </p>
-        </div>
-        <button
-          onClick={() => navigate('/')}
-          className="px-5 py-2.5 bg-[#e05530]/15 hover:bg-[#e05530] text-[#e05530] hover:text-white border border-[#e05530]/30 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 cursor-pointer"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Đăng xuất ngay</span>
-        </button>
-      </div>
+      </form>
     </div>
   );
 };
-

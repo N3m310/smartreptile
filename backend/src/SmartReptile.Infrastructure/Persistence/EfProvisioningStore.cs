@@ -59,10 +59,11 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
     public Task<Terrarium?> FindOwnedTerrariumAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false) =>
         db.Terrariums.FirstOrDefaultAsync(
             terrarium => terrarium.Id == terrariumId
-                         && terrarium.UserId == ownerUserId
+                         && (mayReachAnyAccount || terrarium.UserId == ownerUserId)
                          && terrarium.Status != TerrariumStatus.Deleted,
             cancellationToken);
 
@@ -78,6 +79,15 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
         // list has no use for them, and the fewer queries that materialise a hash the better.
         await db.Devices
             .Where(device => device.UserId == ownerUserId)
+            .Include(device => device.Terrarium)
+            .OrderBy(device => device.DeviceName)
+            .ThenBy(device => device.PublicId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Device>> ListAllAsync(CancellationToken cancellationToken) =>
+        await db.Devices
             .Include(device => device.Terrarium)
             .OrderBy(device => device.DeviceName)
             .ThenBy(device => device.PublicId)

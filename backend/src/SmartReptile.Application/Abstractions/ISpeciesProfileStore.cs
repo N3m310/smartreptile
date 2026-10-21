@@ -29,14 +29,25 @@ public interface ISpeciesProfileStore
     Task<SpeciesProfile?> FindAsync(Guid profileId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// True when the account already holds a profile with this name. The table's unique index is
-    /// <c>(CreatedByUserId, Name)</c>, so this is a courtesy check that lets the route answer `409 profile_name_taken`
-    /// with the offending name instead of letting the index fail the insert. Comparison is case-insensitive.
+    /// True when the profile with this name already exists in the namespace it would belong to. The table's unique
+    /// index is <c>(CreatedByUserId, Name)</c>, so this is a courtesy check that lets the route answer
+    /// <c>409 profile_name_taken</c> with the offending name instead of letting the index fail the insert.
+    /// Comparison is case-insensitive.
     /// </summary>
-    /// <param name="userId">Owner the name would belong to.</param>
+    /// <remarks>
+    /// The namespace is the <b>profile's</b> owner, not the caller: an administrator editing someone else's profile
+    /// renames it among that account's profiles, and a rename leaves the row's own name in place, hence
+    /// <paramref name="excludingProfileId"/>.
+    /// </remarks>
+    /// <param name="ownerUserId">Owner whose namespace the name would occupy; null for a built-in.</param>
     /// <param name="name">Candidate name.</param>
+    /// <param name="excludingProfileId">Rows to leave out, normally the profile being renamed.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<bool> NameTakenAsync(Guid userId, string name, CancellationToken cancellationToken);
+    Task<bool> NameTakenAsync(
+        Guid? ownerUserId,
+        string name,
+        Guid? excludingProfileId,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// True when a terrarium is assigned to this profile. Soft-deleted terrariums count: their rows still hold the
@@ -86,4 +97,13 @@ public interface ISpeciesProfileStore
     /// <summary>Commits the staged work.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task SaveChangesAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Commits the staged work, answering <c>false</c> instead of throwing when another request changed the row
+    /// first (<see cref="ITerrariumStore.TrySaveChangesAsync"/>'s convention). A profile carries a <c>RowVersion</c>, so two edits of one
+    /// profile can genuinely interleave; the caller turns that into <c>409 profile_conflict</c>, which tells the
+    /// editor to reload and try again rather than reporting a server fault.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken);
 }

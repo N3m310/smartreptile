@@ -28,7 +28,7 @@ semantics and status vocabulary are shared; the component implementations are no
 | S16 | Diagnostics | `/settings/diagnostics` | Coverage %, last sample, rates (read-only, honest numbers) | FR-18 |
 | S17 | Administration hub | `/admin` | The administrator's entry point, shown **only** when the session holds an administrative permission | FR-19 |
 | S18 | Deployment overview | `/admin/overview` | Get-all: deployment counts, both alert families with their metric keys and open counts, and every account with its holdings | FR-19 |
-| S19 | Accounts | `/admin/accounts` | List/search/page, create, edit, reset password, change role, disable, enable, delete (soft or purge) | FR-19 |
+| S19 | Accounts | `/admin/accounts` | List/search/page, create, edit, reset password, change role, disable, enable, delete (hard delete, with a typed confirmation) | FR-19 |
 | S20 | Roles | `/admin/roles` | The permission matrix: a role's grants against the catalogue, create a custom role, edit, delete | FR-19 |
 | S21 | Deployment lists | `/admin/lists` | Every account's enclosures, boards and alerts, each with its owner and family | FR-19 |
 

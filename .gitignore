@@ -9,7 +9,10 @@
 *.pem
 *.key
 secrets/
+API_ACCOUNTS_AND_KEYS.txt
 firebase-service-account*.json
+/google-services.json
+/app/android/app/google-services.json
 
 # ---- .NET ----
 bin/

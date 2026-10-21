@@ -1,240 +1,347 @@
-import React, { useState } from 'react';
-import {
-  AlertTriangle,
-  CheckCircle,
-  Check,
-  Clock,
-  Filter,
-  Thermometer,
-  Droplets,
-  WifiOff,
-  Sun,
-  ShieldAlert,
-} from 'lucide-react';
-import { initialAlerts, AlertItem } from '../data/mockData';
+import React, { useEffect, useMemo, useState } from 'react';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
+import { AlertTriangle, Check, Clock, Droplets, ShieldAlert, Sun, Thermometer, WifiOff } from 'lucide-react';
+import { apiBaseUrl, ApiError, readSession } from '../api/client';
+import * as api from '../api/endpoints';
+import type { AlertDetail, AlertPage, AlertTimelineEntry, MetricSilence, TerrariumList } from '../api/types';
+import { useI18n } from '../i18n';
+import { describeError } from '../lib/messages';
+import { usePolled } from '../lib/usePolled';
+import { useSession } from '../state/session';
+
+const POLL_MS = 30_000;
+type AlertStateFilter = 'all' | 'Open' | 'Acknowledged' | 'Resolved';
+type ResolveReason = 'Recovered' | 'FalsePositive' | 'SensorFault' | 'Accepted';
 
 export const Alerts: React.FC = () => {
-  const [alerts, setAlerts] = useState<AlertItem[]>(initialAlerts);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'resolved'>('all');
+  const { t, lang } = useI18n();
+  const { hasPermission } = useSession();
+  const [stateFilter, setStateFilter] = useState<AlertStateFilter>('all');
+  const [severityFilter, setSeverityFilter] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [extraItems, setExtraItems] = useState<AlertPage['items']>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<AlertDetail | null>(null);
+  const [timeline, setTimeline] = useState<AlertTimelineEntry[]>([]);
+  const [silences, setSilences] = useState<MetricSilence[]>([]);
+  const [panelError, setPanelError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [resolveOpen, setResolveOpen] = useState(false);
+  const [resolveReason, setResolveReason] = useState<ResolveReason>('Recovered');
+  const [resolveNote, setResolveNote] = useState('');
+  const [silenceReason, setSilenceReason] = useState('');
+  const [silenceMetric, setSilenceMetric] = useState('');
+  const [silenceHours, setSilenceHours] = useState(1);
+  const [liveState, setLiveState] = useState<'connecting' | 'connected' | 'offline'>('connecting');
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const terrariums = usePolled<TerrariumList>(() => api.listTerrariums(), POLL_MS);
+  const list = usePolled<AlertPage>(
+    () => api.listAlerts({
+      ...(stateFilter === 'all' ? {} : { state: stateFilter }),
+      ...(severityFilter ? { severity: severityFilter } : {}),
+      ...(from ? { from: new Date(from).toISOString() } : {}),
+      ...(to ? { to: new Date(to).toISOString() } : {}),
+      pageSize: 50,
+    }),
+    POLL_MS,
+    [stateFilter, severityFilter, from, to]
+  );
+  const canWrite = hasPermission('alert.write');
+  const canSilence = hasPermission('silence.write');
+  const canRead = hasPermission('alert.read');
+  const items = useMemo(() => [...(list.data?.items ?? []), ...extraItems], [list.data?.items, extraItems]);
+  const names = useMemo(() => new Map((terrariums.data?.items ?? []).map((item) => [item.id, item.name])), [terrariums.data?.items]);
+  const openCount = items.filter((item) => item.state === 'Open' || item.state === 'Acknowledged').length;
 
-  const handleResolveAlert = (id: string) => {
-    setAlerts((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status: 'resolved',
-              resolvedAt: 'Vừa xong bởi Quản trị viên',
-            }
-          : item
-      )
-    );
-  };
+  useEffect(() => {
+    setExtraItems([]);
+    setCursor(undefined);
+  }, [stateFilter, severityFilter, from, to]);
 
-  const filteredAlerts = alerts.filter((a) => {
-    if (statusFilter === 'all') return true;
-    return a.status === statusFilter;
-  });
+  useEffect(() => {
+    setCursor(list.data?.nextCursor ?? undefined);
+  }, [list.data]);
 
-  const pendingCount = alerts.filter((a) => a.status === 'pending').length;
+  useEffect(() => {
+    if (!canRead || !terrariums.data) return;
+    const terrariumIds = terrariums.data.items.map((item) => item.id);
+    if (terrariumIds.length === 0) {
+      setLiveState('offline');
+      return;
+    }
+    let cancelled = false;
+    const connection = new HubConnectionBuilder()
+      .withUrl(`${apiBaseUrl}/hubs/telemetry`, {
+        accessTokenFactory: () => readSession()?.accessToken ?? '',
+      })
+      .withAutomaticReconnect()
+      .configureLogging(LogLevel.Error)
+      .build();
+    const joinGroups = async () => {
+      await Promise.all(terrariumIds.map((id) => connection.invoke('JoinTerrarium', id)));
+    };
 
-  const getAlertIcon = (type: AlertItem['type']) => {
-    switch (type) {
-      case 'temp_high':
-      case 'temp_low':
-        return <Thermometer className="w-5 h-5" />;
-      case 'humidity_low':
-      case 'humidity_high':
-        return <Droplets className="w-5 h-5" />;
-      case 'device_offline':
-        return <WifiOff className="w-5 h-5" />;
-      case 'light_abnormal':
-        return <Sun className="w-5 h-5" />;
-      default:
-        return <AlertTriangle className="w-5 h-5" />;
+    connection.on('alertChanged', () => list.reload());
+    connection.onreconnected(async () => {
+      try {
+        await joinGroups();
+        if (!cancelled) {
+          setLiveState('connected');
+          setLiveError(null);
+        }
+      } catch (cause) {
+        if (!cancelled) {
+          setLiveState('offline');
+          setLiveError(cause instanceof Error ? cause.message : 'Không thể đăng ký nhận cập nhật trực tiếp.');
+        }
+      }
+    });
+    void connection.start().then(async () => {
+      await joinGroups();
+      if (!cancelled) {
+        setLiveState('connected');
+        setLiveError(null);
+      }
+    }).catch((cause: unknown) => {
+      if (!cancelled) {
+        setLiveState('offline');
+        setLiveError(cause instanceof Error ? cause.message : 'Không thể kết nối cập nhật trực tiếp.');
+      }
+    });
+    return () => {
+      cancelled = true;
+      void connection.stop();
+    };
+  }, [canRead, terrariums.data?.items.map((item) => item.id).join('|')]);
+
+  useEffect(() => {
+    if (selectedId === null) {
+      setDetail(null);
+      setTimeline([]);
+      setSilences([]);
+      return;
+    }
+    let cancelled = false;
+    setPanelError(null);
+    void Promise.all([
+      api.getAlert(selectedId),
+      api.getAlertTimeline(selectedId),
+    ]).then(([nextDetail, nextTimeline]) => {
+      if (!cancelled) {
+        setDetail(nextDetail);
+        setTimeline(nextTimeline.items);
+      }
+    }).catch((cause) => {
+      if (!cancelled) {
+        setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!detail || !canSilence) return;
+    let cancelled = false;
+    void api.listTerrariumSilences(detail.alert.terrariumId).then((result) => {
+      if (!cancelled) setSilences(result.items);
+    }).catch((cause) => {
+      if (!cancelled) setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    });
+    return () => { cancelled = true; };
+  }, [detail?.alert.terrariumId, canSilence]);
+
+  const formatDate = (value: string) =>
+    new Intl.DateTimeFormat(lang === 'vi' ? 'vi-VN' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+  const metricName = (metric: string | null) => ({
+    tempC: 'Nhiệt độ',
+    humidityPct: 'Độ ẩm',
+    lightLux: 'Ánh sáng',
+    uvIndex: 'UV',
+    surfaceTempC: 'Nhiệt độ bề mặt',
+  }[metric ?? ''] ?? (metric ?? 'Sự cố thiết bị'));
+
+  const refreshSelected = async () => {
+    list.reload();
+    if (selectedId !== null) {
+      const [nextDetail, nextTimeline] = await Promise.all([
+        api.getAlert(selectedId),
+        api.getAlertTimeline(selectedId),
+      ]);
+      setDetail(nextDetail);
+      setTimeline(nextTimeline.items);
     }
   };
 
+  const acknowledge = async (alertId: number) => {
+    setBusy(true);
+    setPanelError(null);
+    try {
+      await api.acknowledgeAlert(alertId);
+      await refreshSelected();
+    } catch (cause) {
+      setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resolve = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (selectedId === null) return;
+    setBusy(true);
+    setPanelError(null);
+    try {
+      await api.resolveAlert(selectedId, { reason: resolveReason, ...(resolveNote.trim() ? { note: resolveNote.trim() } : {}) });
+      setResolveOpen(false);
+      setResolveNote('');
+      await refreshSelected();
+    } catch (cause) {
+      setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createSilence = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!detail || !silenceReason.trim()) return;
+    setBusy(true);
+    setPanelError(null);
+    try {
+      await api.createTerrariumSilence(detail.alert.terrariumId, {
+        ...(silenceMetric ? { metric: silenceMetric } : {}),
+        untilUtc: new Date(Date.now() + silenceHours * 60 * 60 * 1000).toISOString(),
+        reason: silenceReason.trim(),
+      });
+      setSilenceReason('');
+      const result = await api.listTerrariumSilences(detail.alert.terrariumId);
+      setSilences(result.items);
+    } catch (cause) {
+      setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelSilence = async (silence: MetricSilence) => {
+    if (!detail) return;
+    setBusy(true);
+    setPanelError(null);
+    try {
+      await api.cancelTerrariumSilence(detail.alert.terrariumId, silence.id);
+      setSilences((current) => current.filter((item) => item.id !== silence.id));
+    } catch (cause) {
+      setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (!list.data?.nextCursor) return;
+    setBusy(true);
+    try {
+      const page = await api.listAlerts({
+        ...(stateFilter === 'all' ? {} : { state: stateFilter }),
+        ...(severityFilter ? { severity: severityFilter } : {}),
+        ...(from ? { from: new Date(from).toISOString() } : {}),
+        ...(to ? { to: new Date(to).toISOString() } : {}),
+        cursor,
+        pageSize: 50,
+      });
+      setExtraItems((current) => [...current, ...page.items]);
+      setCursor(page.nextCursor ?? undefined);
+    } catch (cause) {
+      setPanelError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!canRead) {
+    return <p className="rounded-xl border border-hairline bg-surface p-5 text-sm text-muted">{t('errorForbidden')}</p>;
+  }
+
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-heading font-extrabold text-[#dcd5c4]">
-            Hệ thống Cảnh báo Ngưỡng
-          </h1>
-          <p className="text-sm text-[#8e9e8f] mt-1">
-            Logic so sánh vi khí hậu trực tiếp (Không AI) – Phát hiện bất thường ngay khi giá trị vượt min/max
-          </p>
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div><h1 className="font-heading text-2xl font-bold text-ink">Cảnh báo</h1><p className="mt-1 text-sm text-muted">Theo dõi và xử lý cảnh báo từ các bể nuôi.</p></div>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs text-muted"><ShieldAlert className="h-4 w-4 text-warning" aria-hidden="true" />{openCount} cần xử lý</span>
+          <span className={`text-xs ${liveState === 'connected' ? 'text-accent' : 'text-muted'}`}>{liveState === 'connected' ? 'Cập nhật trực tiếp' : 'Đang đồng bộ định kỳ'}</span>
         </div>
+      </header>
+      {liveError && <p role="status" className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-muted">Cập nhật trực tiếp tạm thời không khả dụng; danh sách vẫn tự làm mới mỗi 30 giây.</p>}
+      {list.error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, list.error)}</p>}
+      {terrariums.error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, terrariums.error)}</p>}
 
-        <div className="flex items-center gap-2">
-          {pendingCount > 0 ? (
-            <span className="px-3.5 py-1.5 rounded-xl bg-[#e05530]/20 border border-[#e05530]/40 text-xs font-bold text-[#e05530] flex items-center gap-1.5 animate-pulse">
-              <ShieldAlert className="w-4 h-4" />
-              <span>{pendingCount} cảnh báo cần xử lý</span>
-            </span>
-          ) : (
-            <span className="px-3.5 py-1.5 rounded-xl bg-[#4a9e6a]/20 border border-[#4a9e6a]/40 text-xs font-bold text-[#4a9e6a] flex items-center gap-1.5">
-              <CheckCircle className="w-4 h-4" />
-              <span>Tất cả đã an toàn</span>
-            </span>
-          )}
-        </div>
-      </div>
+      <section className="grid gap-3 rounded-xl border border-hairline bg-surface p-4 md:grid-cols-4">
+        <label className="text-xs text-muted">Trạng thái<select value={stateFilter} onChange={(event) => setStateFilter(event.target.value as AlertStateFilter)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="all">Tất cả</option><option value="Open">Đang mở</option><option value="Acknowledged">Đã tiếp nhận</option><option value="Resolved">Đã xử lý</option></select></label>
+        <label className="text-xs text-muted">Mức độ<select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="">Tất cả mức độ</option><option value="Info">Thông tin</option><option value="Warning">Cảnh báo</option><option value="Critical">Nguy hiểm</option></select></label>
+        <label className="text-xs text-muted">Từ ngày<input type="datetime-local" value={from} onChange={(event) => setFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
+        <label className="text-xs text-muted">Đến ngày<input type="datetime-local" value={to} onChange={(event) => setTo(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
+      </section>
 
-      {/* Filter Tabs */}
-      <div className="flex items-center justify-between p-2 rounded-2xl bg-[#112016] border border-[#1e3825]">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              statusFilter === 'all'
-                ? 'bg-[#4a9e6a] text-white shadow-md shadow-[#4a9e6a]/20'
-                : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
-            }`}
-          >
-            Tất cả ({alerts.length})
-          </button>
-          <button
-            onClick={() => setStatusFilter('pending')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              statusFilter === 'pending'
-                ? 'bg-[#e05530] text-white shadow-md shadow-[#e05530]/20'
-                : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
-            }`}
-          >
-            Chưa xử lý ({pendingCount})
-          </button>
-          <button
-            onClick={() => setStatusFilter('resolved')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-              statusFilter === 'resolved'
-                ? 'bg-[#162a1d] text-[#4a9e6a] border border-[#4a9e6a]/40'
-                : 'text-[#8e9e8f] hover:text-[#dcd5c4]'
-            }`}
-          >
-            Đã xử lý ({alerts.length - pendingCount})
-          </button>
-        </div>
+      {list.loading && !list.data ? <p className="py-8 text-center text-sm text-muted">Đang tải cảnh báo…</p> : null}
+      {!list.loading && !list.error && items.length === 0 ? <p className="rounded-xl border border-hairline bg-surface p-8 text-center text-sm text-muted">Không có cảnh báo phù hợp với bộ lọc.</p> : null}
 
-        <div className="text-xs text-[#8e9e8f] hidden sm:block pr-2">
-          Quy tắc: <code className="text-[#4a9e6a] font-mono">if (value &gt; max || value &lt; min) trigger</code>
-        </div>
-      </div>
-
-      {/* Alerts List */}
-      <div className="space-y-4">
-        {filteredAlerts.map((alert) => {
-          const isDanger = alert.severity === 'danger';
-          const isResolved = alert.status === 'resolved';
-
-          return (
-            <div
-              key={alert.id}
-              className={`p-5 rounded-3xl border transition-all duration-300 flex flex-col md:flex-row md:items-center justify-between gap-5 ${
-                isResolved
-                  ? 'bg-[#112016]/40 border-[#1e3825] opacity-75'
-                  : isDanger
-                  ? 'bg-[#112016] border-[#e05530]/40 shadow-lg shadow-[#e05530]/5 hover:border-[#e05530]'
-                  : 'bg-[#112016] border-[#e8a832]/40 shadow-lg shadow-[#e8a832]/5 hover:border-[#e8a832]'
-              }`}
-            >
-              {/* Alert Left Info */}
-              <div className="flex items-start gap-4">
-                <div
-                  className={`p-3 rounded-2xl shrink-0 ${
-                    isResolved
-                      ? 'bg-[#1e3825] text-[#8e9e8f]'
-                      : isDanger
-                      ? 'bg-[#e05530]/20 text-[#e05530]'
-                      : 'bg-[#e8a832]/20 text-[#e8a832]'
-                  }`}
-                >
-                  {getAlertIcon(alert.type)}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)]">
+        <div className="space-y-3">
+          {items.map((alert) => {
+            const active = alert.state !== 'Resolved';
+            return (
+              <article key={alert.id} className={`rounded-xl border bg-surface p-4 ${selectedId === alert.id ? 'border-brand' : 'border-hairline'}`}>
+                <button type="button" onClick={() => { setSelectedId(alert.id); setResolveOpen(false); }} className="w-full text-left">
+                  <div className="flex items-start gap-3">
+                    <span className={`mt-0.5 rounded-lg p-2 ${alert.severity === 'Critical' ? 'bg-critical/10 text-critical' : alert.severity === 'Warning' ? 'bg-warning/10 text-warning' : 'bg-raised text-muted'}`}>
+                      {alert.metric === 'tempC' || alert.metric === 'surfaceTempC' ? <Thermometer className="h-4 w-4" /> : alert.metric === 'humidityPct' ? <Droplets className="h-4 w-4" /> : alert.metric === 'lightLux' ? <Sun className="h-4 w-4" /> : alert.metric === null ? <WifiOff className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2"><strong className="text-sm text-ink">{metricName(alert.metric)}</strong><span className="rounded-full bg-raised px-2 py-0.5 text-[10px] text-muted">{alert.severity}</span><span className="rounded-full bg-raised px-2 py-0.5 text-[10px] text-muted">{alert.state}</span></span>
+                      <span className="mt-1 block text-xs text-muted">{names.get(alert.terrariumId) ?? alert.terrariumId} · {alert.deviceId}</span>
+                      <span className="mt-1 block text-xs text-muted">{alert.peakValue ?? alert.triggeringValue ?? '—'}{alert.bandMin !== null || alert.bandMax !== null ? ` · Ngưỡng ${alert.bandMin ?? '—'}–${alert.bandMax ?? '—'}` : ''}</span>
+                      <span className="mt-2 flex items-center gap-1 text-[11px] text-muted"><Clock className="h-3.5 w-3.5" aria-hidden="true" />{formatDate(alert.triggeredAt)}</span>
+                    </span>
+                  </div>
+                </button>
+                <div className="mt-3 flex justify-end gap-2">
+                  {active && canWrite && alert.state === 'Open' && <button type="button" disabled={busy} onClick={() => void acknowledge(alert.id)} className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink disabled:opacity-50">Tiếp nhận</button>}
+                  {active && canWrite && <button type="button" disabled={busy} onClick={() => { setSelectedId(alert.id); setResolveOpen(true); }} className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"><Check className="h-3.5 w-3.5" aria-hidden="true" />Xử lý</button>}
                 </div>
+              </article>
+            );
+          })}
+          {cursor && <button type="button" disabled={busy} onClick={() => void loadMore()} className="w-full rounded-lg border border-hairline bg-surface px-4 py-2 text-sm text-ink disabled:opacity-50">Tải cảnh báo cũ hơn</button>}
+        </div>
 
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <span className="font-mono text-xs font-bold text-[#8e9e8f]">
-                      {alert.id}
-                    </span>
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                        isResolved
-                          ? 'bg-[#1e3825] text-[#8e9e8f]'
-                          : isDanger
-                          ? 'bg-[#e05530] text-white'
-                          : 'bg-[#e8a832] text-black'
-                      }`}
-                    >
-                      {isResolved
-                        ? 'Đã xử lý'
-                        : isDanger
-                        ? 'Nguy hiểm'
-                        : 'Cảnh báo'}
-                    </span>
-                    <span className="text-xs font-semibold text-[#c87f3a]">
-                      {alert.terrariumName}
-                    </span>
-                  </div>
-
-                  <h3 className="text-base font-heading font-bold text-[#dcd5c4]">
-                    {alert.title}
-                  </h3>
-                  <p className="text-xs text-[#8e9e8f] leading-relaxed max-w-2xl">
-                    {alert.message}
-                  </p>
-
-                  <div className="flex items-center gap-3 text-[11px] text-[#8e9e8f] pt-1">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
-                      {alert.timestamp}
-                    </span>
-                    {alert.resolvedAt && (
-                      <span className="text-[#4a9e6a] flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5" />
-                        {alert.resolvedAt}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Button */}
-              <div className="shrink-0 flex items-center gap-3 self-end md:self-center">
-                {!isResolved ? (
-                  <button
-                    onClick={() => handleResolveAlert(alert.id)}
-                    className="px-4 py-2.5 bg-[#4a9e6a] hover:bg-[#3d8558] text-white text-xs font-semibold rounded-xl shadow-lg shadow-[#4a9e6a]/20 transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>Đã kiểm tra & Xử lý</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-xs text-[#4a9e6a] font-semibold px-3 py-1.5 rounded-xl bg-[#4a9e6a]/10 border border-[#4a9e6a]/20">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Hoàn tất</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-
-        {filteredAlerts.length === 0 && (
-          <div className="text-center py-16 bg-[#112016] border border-[#1e3825] rounded-3xl text-[#8e9e8f]">
-            <CheckCircle className="w-10 h-10 text-[#4a9e6a] mx-auto mb-2 opacity-60" />
-            <p className="text-sm font-semibold text-[#dcd5c4]">
-              Không có cảnh báo nào trong mục này
-            </p>
-            <p className="text-xs text-[#8e9e8f] mt-1">
-              Hệ thống vi khí hậu đang hoạt động ổn định trong phạm vi ngưỡng cho phép.
-            </p>
-          </div>
+        {selectedId !== null && (
+          <aside className="h-fit space-y-4 rounded-xl border border-hairline bg-surface p-4 xl:sticky xl:top-4">
+            <div className="flex items-start justify-between gap-3"><div><h2 className="font-heading font-semibold text-ink">Chi tiết cảnh báo #{selectedId}</h2><p className="mt-1 text-xs text-muted">{detail ? `${names.get(detail.alert.terrariumId) ?? detail.alert.terrariumId} · ${metricName(detail.alert.metric)}` : 'Đang tải…'}</p></div><button type="button" onClick={() => { setSelectedId(null); setResolveOpen(false); }} className="text-xs text-muted hover:text-ink">Đóng</button></div>
+            {panelError && <p role="alert" className="text-sm text-critical">{describeError(t, panelError)}</p>}
+            {detail && <>
+              <dl className="grid grid-cols-2 gap-2 text-xs">
+                <Info label="Giá trị kích hoạt" value={detail.alert.triggeringValue === null ? '—' : String(detail.alert.triggeringValue)} />
+                <Info label="Giá trị cao nhất" value={detail.alert.peakValue === null ? '—' : String(detail.alert.peakValue)} />
+                <Info label="Pha đánh giá" value={detail.alert.phase} />
+                <Info label="Nguồn" value={detail.alert.source} />
+              </dl>
+              {detail.series.length > 0 && <div><h3 className="mb-2 text-xs font-semibold text-ink">Diễn biến ({detail.series.length} điểm)</h3><ul className="max-h-36 space-y-1 overflow-auto text-xs text-muted">{detail.series.map((point) => <li key={point.at} className="flex justify-between gap-2"><time>{formatDate(point.at)}</time><span>{point.value}</span></li>)}</ul></div>}
+              {detail.seriesTruncated && <p className="text-[11px] text-muted">Chỉ hiển thị một phần dữ liệu của sự cố.</p>}
+              {resolveOpen && canWrite && <form onSubmit={(event) => void resolve(event)} className="space-y-3 border-t border-hairline pt-3"><h3 className="text-sm font-semibold text-ink">Xác nhận xử lý</h3><label className="block text-xs text-muted">Lý do<select required value={resolveReason} onChange={(event) => setResolveReason(event.target.value as ResolveReason)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="Recovered">Đã phục hồi</option><option value="FalsePositive">Cảnh báo không chính xác</option><option value="SensorFault">Lỗi cảm biến</option><option value="Accepted">Chấp nhận rủi ro</option></select></label><label className="block text-xs text-muted">Ghi chú (không bắt buộc)<textarea maxLength={500} value={resolveNote} onChange={(event) => setResolveNote(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setResolveOpen(false)} className="rounded-lg border border-hairline px-3 py-2 text-xs text-muted">Huỷ</button><button disabled={busy} className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Xác nhận xử lý</button></div></form>}
+              {canSilence && <section className="space-y-3 border-t border-hairline pt-3"><h3 className="text-sm font-semibold text-ink">Tạm tắt thông báo</h3><form onSubmit={(event) => void createSilence(event)} className="space-y-2"><label className="block text-xs text-muted">Phạm vi<select value={silenceMetric} onChange={(event) => setSilenceMetric(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="">Tất cả chỉ số</option><option value="tempC">Nhiệt độ</option><option value="humidityPct">Độ ẩm</option><option value="lightLux">Ánh sáng</option><option value="uvIndex">UV</option><option value="surfaceTempC">Nhiệt độ bề mặt</option></select></label><label className="block text-xs text-muted">Thời lượng<select value={silenceHours} onChange={(event) => setSilenceHours(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink">{[1, 2, 4, 8, 12, 24].map((hour) => <option key={hour} value={hour}>{hour} giờ</option>)}</select></label><label className="block text-xs text-muted">Lý do<input required maxLength={200} value={silenceReason} onChange={(event) => setSilenceReason(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label><button disabled={busy} className="rounded-lg border border-hairline px-3 py-2 text-xs text-ink disabled:opacity-50">Tạo khoảng tắt</button></form>
+                {silences.map((silence) => <div key={silence.id} className="flex items-center justify-between gap-2 text-xs"><span className="text-muted">{silence.metric ?? 'Tất cả'} đến {formatDate(silence.untilUtc)}</span><button type="button" disabled={busy} onClick={() => void cancelSilence(silence)} className="text-accent hover:underline">Huỷ</button></div>)}
+              </section>}
+              <section className="border-t border-hairline pt-3"><h3 className="mb-2 text-sm font-semibold text-ink">Lịch sử xử lý</h3>{timeline.length ? <ol className="space-y-2 text-xs">{timeline.map((entry, index) => <li key={`${entry.event}-${entry.at}-${index}`} className="flex justify-between gap-3 text-muted"><span>{entry.event}{entry.reason ? ` · ${entry.reason}` : ''}{entry.note ? ` — ${entry.note}` : ''}</span><time className="shrink-0">{formatDate(entry.at)}</time></li>)}</ol> : <p className="text-xs text-muted">Chưa có sự kiện.</p>}</section>
+            </>}
+          </aside>
         )}
       </div>
     </div>
   );
 };
 
+const Info: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="rounded-lg border border-hairline p-2"><dt className="text-muted">{label}</dt><dd className="mt-1 font-medium text-ink">{value}</dd></div>
+);

@@ -81,6 +81,7 @@ and asserts the returned `DecisionKind` plus the mutated state.
 | TC-U-18 | Cold excursion uses `TargetMin` | value 24.0 with target 26–32 | `Open(Warning)`, direction = cold, peak tracking minimises | 1 | FR-11 |
 | TC-U-19 | Quality flag excludes evaluation | sample with quality bit 2 and value 40 | `None` — no alert from a bad reading | 1 | FR-11 |
 | TC-U-20 | Any-phase metric ignores the day/night split | `Phase = Any`, night time | evaluates with the Any band | 2 | FR-11 |
+| TC-U-60 | Per-device event-time reorder window | samples arrive out of `RecordedAt` order; a later arrival is behind the persisted watermark | ordered samples release after 30 s; late sample is skipped for live evaluation and state does not regress | 1 | FR-11 |
 
 > **Built 2026-10-09 — `TC-U-10…20` are green, 19 cases in `ThresholdDecisionTests`.** `ThresholdDecision.Decide`
 > is the procedure of `02-design/03` §4.2 and nothing else: `SampleEvaluator` resolves the band, calls it, and writes
@@ -182,8 +183,17 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 > probes are two entries — which `sensor_recovered` closes as `Recovered`. `DeviceClockSkewPolicy` reads V-09's
 > flag (which is also where V-08's exclusion of a long back-fill lives, so an honest back-fill is never a clock
 > fault) and the recorder opens one **Info** entry per episode, refreshed while the clock stays wrong and closed by
-> the first trusted sample. `TC-U-30` and `TC-U-31` are the two SHOULD signals of §4.3 and belong with 3.6, where
-> the accumulated light-hours of `TC-U-31` come from.
+> the first trusted sample.
+>
+> **`TC-U-30` and `TC-U-31` are green (2026-10-19, roadmap 3.6).** `GradientWarningPolicyTests` pins the boundary —
+> 44.0/31.9 raises at 12.1 °C, 43.9/32.0 stays silent at 11.9 °C, exactly 12.0 does not raise, and a missing
+> reading is not a gradient — and five `SampleEvaluatorTests` cases drive it through the evaluator: open, silent,
+> continue-without-a-second-row, needs-both-readings, and close-on-recovery. `LightDeficitPolicyTests` pins the
+> arithmetic (6 h against 8 h is 2.0 h, never negative) and the 21:00 boundary (20:59 is not due, 21:00 is), and
+> seven `LightDeficitMonitorTests` cases drive the sweep over the documented fixture: six lit hours in
+> `Asia/Ho_Chi_Minh` raise exactly one 2.0 h signal with **no** per-sample light alert, a second sweep touches it,
+> a day that met the requirement opens nothing, a back-filled requirement closes it, the next local day closes it,
+> and an unresolvable zone is skipped rather than failing the sweep.
 >
 > **`TC-I-09`'s "no metric alerts from missing data" holds by construction rather than by a guard**: a silent node
 > publishes no readings, so the band engine has nothing to judge — and a *faulted* metric is excluded from it by
@@ -272,18 +282,24 @@ public void GivenValueAboveTargetForFiveMinutes_ThenOneAlertIsOpenedAndBackDated
 > cap coalesces the push while the inbox entry and one digest still appear. `TC-I-12`'s "fake FCM client + a local
 > SMTP sink" is satisfied in halves: the fake client is the channel seam the dispatcher tests use, and the sink is
 > the Mailpit service the development stack now runs (see `02-design/05` §3).
-> **One line of the acceptance is not measured:** a real FCM push, which needs a Google service-account file and a
-> device registration token. The live run of 2026-10-16 recorded the inbox half end to end instead — one Vietnamese
-> entry, one `notified` timeline entry, `notifications_sent_total = 1` — and `TC-E2E-03` stays open with it.
+> **Real FCM receipt verified (2026-10-19):** with the service-account credential mounted and the emulator token
+> registered, a synthetic `DeviceSilent` alert produced an FCM send that Android 16 posted as a system notification
+> on the emulator. The notification appeared 113 s after the dispatcher recorded `Sent`, so the ≤90 s timing and
+> full excursion/escalation/recovery sequence in `TC-E2E-03` remain open; the earlier 2026-10-16 run recorded the
+> inbox half end to end — one Vietnamese entry, one `notified` timeline entry, `notifications_sent_total = 1`.
 
 ### B7. Summaries, exposure index, coverage
 
-> **As built (2026-10-16).** The maths of this block has been in `Domain/Summaries/` since 3.6's first half
-> (`ExposureCalculator`, `CoverageMath`, `MinuteGrid`) and `TC-U-46…50` have been green since then — 18
-> `ExposureCalculatorTests` and 10 `MinuteGridTests` cases. What roadmap 3.6 still owes is not these numbers but
-> their **persistence and schedule**: the `TelemetryHourlyRollup` and `DailyEnvironmentalSummary` tables, the two
-> workers that write them, and `TC-I-06`'s recomputation after a back-fill. `GET /terrariums/{id}/summaries` is
-> therefore still unbuilt and says so in `07-appendices/03` §4.2.
+> **As built (2026-10-19).** `ExposureCalculator`, `CoverageMath` and `MinuteGrid` provide the core maths;
+> `TC-U-46…50` pass. The `TelemetryHourlyRollup` and `DailyEnvironmentalSummary` tables are persisted by
+> `SummaryWorker`, which rebuilds the last 48 hours and today/yesterday in local time. `SummaryRecomputationTests`
+> verifies that inserting a back-filled sample updates the existing hourly and daily rows without duplication
+> against SQL Server, and `EvaluationThroughPipelineTests` covers the other half of `TC-I-06`: the `daily` fixture
+> played back through the real evaluator produces exactly one back-dated alert with the right peak, and the rollup
+> and daily summary that follow agree with hand-computed values (33.667 °C average and 1.666667 °C·h for the hour,
+> 27.152 °C and 1.6667 °C·h for the day, one counted episode). The two SHOULD signals `TC-U-30`/`TC-U-31` are green
+> as of the same date; see `B4`. `GET /terrariums/{id}/summaries` is a later read-surface item and remains
+> unbuilt; see `07-appendices/03` §4.2.
 
 Reference dataset: target 26–32 °C, 40 min at 34.0 °C then 20 min at 33.0 °C, otherwise in range, no gaps.
 
@@ -401,6 +417,15 @@ public void GivenOutOfRangeMinutes_ThenExposureMatchesWorkedExample(
 > (`brokerDown` and `databaseDown` went into the ARB with the `/system` page that needed them). `TC-I-15`'s i18n
 > half now covers the shipped client and passes in CI.
 
+> **TC-I-15 measured (2026-10-19; M3.7).** With the running API's `ingest_samples_total` at 7, nine authenticated
+> MQTT batches carrying 1,000 synthetic samples raised it to 1,007 exactly; `ingest_rejected_total` stayed at 0,
+> and SQL Server confirmed all 1,000 sequences (`9000000000000`–`9000000000999`) were persisted.
+> A separate API probe forced the in-process broker to fail startup by binding it to an unassigned address:
+> `/health/ready` returned `503` (`database: Healthy`, `mqtt-broker: Unhealthy`) while authenticated
+> `GET /api/v1/auth/me` remained `200`. The temporary probe was removed and the normal API returned to Healthy.
+> `npm run check:strings` passed: 509 English/Vietnamese keys, identical, and every web-referenced key defined.
+> The audit-query scope/cursor half is covered by the existing five integration cases.
+
 > **Which surface that gate applies to changed on 2026-10-07 (`ADR-019`).** It used to be
 > `web/legacy/js/i18n.js`, which `web/legacy/` carried until task 4.19 retired it in favour of the TERRAGUARD React
 > client. Task 4.18 gave that client the app's key set instead of its own, and put the parity check in CI, so the
@@ -472,8 +497,8 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | Suite | Cases | Target |
 |---|---|---|
 | Firmware native (TC-U-FW-*) | 12 | all green before flashing a release build |
-| Backend unit (TC-U-*) | 64 | ≥ 70% line coverage on Domain + Application |
+| Backend unit (TC-U-*) | 65 | ≥ 70% line coverage on Domain + Application |
 | Backend integration | 19 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
 | E2E | 6 | executed per milestone, results recorded |
-| **Total** | **115** | |
+| **Total** | **116** | |

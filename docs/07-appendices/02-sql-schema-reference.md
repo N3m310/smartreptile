@@ -23,7 +23,7 @@ Conventions: `Id` = `uniqueidentifier` (Guid) unless stated; `bigint identity` f
 | 7 | `ThresholdSnapshot` | Effective bands at a point in time | small | indefinite (explains history) |
 | 8 | `Device` | Node, claim state, config, calibration | tiny | account lifetime |
 | 9 | `DeviceCredential` | Hashed device secrets + rotation history | small | indefinite (audit) |
-| 10 | `Metric` | Metric dictionary (code, unit, precision) | static | seeded |
+| 10 | `Metric` | The metric catalogue every column that names a metric points at: code, wire keys, unit, precision, plausibility bounds, alert family | static | seeded; `ReferenceDataSeeder` reconciles it |
 | 11 | `TelemetrySample` | One device report | **high** | 90 days |
 | 12 | `MetricReading` | One value per metric per sample | **high** | 90 days |
 | 13 | `DeviceHealthSample` | RSSI, uptime, heap, battery | low | 90 days |
@@ -83,11 +83,11 @@ back-filled it from that timestamp so no previously deleted enclosure came back 
 |---|---|---|---|
 | `Id` | bigint identity PK | no | |
 | `SampleId` | bigint FK → `TelemetrySample` (cascade) | no | |
-| `MetricId` | int FK → `Metric` | no | |
+| `Metric` | int FK → `Metric(Code)` (no action) | no | DI-06; the value is `MetricCode`, 1…7 |
 | `Value` | decimal(9,3) | no | post-calibration, used for evaluation |
 | `RawValue` | decimal(9,3) | yes | sensor output, diagnostics only |
 
-**Indexes:** `UX_Reading_Sample_Metric` unique `(SampleId, MetricId)` (DI-03); `IX_Reading_Metric` `(MetricId, SampleId)`.
+**Indexes:** `UX_Reading_Sample_Metric` unique `(SampleId, Metric)` (DI-03); `IX_Reading_Metric` `(Metric, SampleId)`.
 
 ### 2.3 `DeviceHealthSample`
 `(Id bigint, DeviceId, TerrariumId, RecordedAt, RssiDbm smallint, UptimeSeconds int, FreeHeapKb int, BatteryPct decimal(5,2) null, PowerSource tinyint, FirmwareVersion varchar(16))`
@@ -181,16 +181,29 @@ Indexes: unique filtered `(TerrariumId) WHERE TerrariumId IS NOT NULL AND Status
 `(Id, DeviceId FK, SecretHash varbinary(32), Salt varbinary(16), IssuedAt, ExpiresAt null, RevokedAt null, GraceUntil null, IssuedByUserId null)`
 Index: `(DeviceId, RevokedAt)`.
 
-### 3.7 `Metric` (seeded dictionary)
-| Id | Code | DisplayName | Unit | Precision | PlausibleMin | PlausibleMax | IsCore |
-|---|---|---|---|---|---|---|---|
-| 1 | `TempC` | Air temperature | °C | 2 | −10 | 60 | 1 |
-| 2 | `HumidityPct` | Relative humidity | %RH | 2 | 0 | 100 | 1 |
-| 3 | `LightLux` | Illuminance | lx | 1 | 0 | 200 000 | 1 |
-| 4 | `UvIndex` | UV index | UVI | 2 | 0 | 15 | 1 |
-| 5 | `SurfaceTempC` | Surface temperature | °C | 2 | −10 | 80 | 0 |
-| 6 | `BatteryPct` | Battery | % | 1 | 0 | 100 | 0 |
-| 7 | `RssiDbm` | Wi-Fi signal | dBm | 0 | −120 | 0 | 0 |
+### 3.7 `Metric` (the catalogue, and the target of eight foreign keys)
+| `Code` | `ApiKey` | `PayloadKey` | `DisplayName` | `Unit` | `Precision` | `PlausibleMin` | `PlausibleMax` | `IsCore` | `Family` | `SortOrder` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `tempC` | `tf` | Air temperature | °C | 2 | −10 | 60 | 1 | Species | 1 |
+| 2 | `humidityPct` | `rh` | Relative humidity | %RH | 2 | 0 | 100 | 1 | Enclosure | 2 |
+| 3 | `lightLux` | `lux` | Illuminance | lx | 1 | 0 | 200 000 | 1 | Enclosure | 3 |
+| 4 | `uvIndex` | `uvi` | UV index | UVI | 2 | 0 | 15 | 1 | Species | 4 |
+| 5 | `surfaceTempC` | `st` | Surface temperature | °C | 2 | −10 | 80 | 0 | Species | 5 |
+| 6 | `batteryPct` | `bat` | Battery | % | 1 | 0 | 100 | 0 | Enclosure | 6 |
+| 7 | `rssiDbm` | `rssi` | Wi-Fi signal | dBm | 0 | −120 | 0 | 0 | Enclosure | 7 |
+
+`Code` is the primary key and the value stored everywhere else, so the eight metric columns below are **foreign
+keys into this table** rather than bare numbers (DI-06, added 2026-10-20): `MetricReading`, `Threshold`,
+`ThresholdOverride`, `MetricSilence`, `TelemetryHourlyRollup`, `Alert`, `DeviceEvent` and `EvaluationState`. All eight
+use `ON DELETE NO ACTION` — a catalogue row a reading still points at cannot be deleted — and the three whose column is
+nullable (`Alert`, `DeviceEvent`, `MetricSilence`) use `NULL` to mean "no metric / every metric", which is why a
+device-level alert has no metric at all.
+
+The rows are written by the migration that creates the table (so the constraints can be added to a database that
+already holds readings) and reconciled at start-up by `ReferenceDataSeeder.SeedMetricCatalogueAsync`, which inserts a
+metric the dictionary has gained and corrects a label that drifted. `MetricDictionary` in
+`Domain/Metrics/MetricDictionary.cs` remains what owns the values, because a metric is only meaningful together with
+its plausibility window; the table is the relational half of the same fact.
 
 **Which alert family each metric belongs to is a property of the dictionary, not of a row** (2026-10-17):
 `MetricDefinition.Family` in `Metrics/MetricDictionary.cs` maps 1, 4 and 5 to `Species` — the animal's thermal and
@@ -437,6 +450,19 @@ CREATE INDEX [IX_TelemetrySample_TerrariumId_RecordedAt]
 CREATE UNIQUE INDEX [IX_MetricReading_SampleId_Metric] ON [MetricReading]([SampleId], [Metric]);
 ALTER TABLE [MetricReading] ADD CONSTRAINT [FK_MetricReading_TelemetrySample_SampleId]
   FOREIGN KEY ([SampleId]) REFERENCES [TelemetrySample]([Id]) ON DELETE CASCADE;
+
+-- DI-06 (2026-10-20): the metric columns stopped being bare numbers. Every one of these is a foreign key to the
+-- catalogue row the code defines, and none cascades: a metric a stored row still names cannot be deleted.
+CREATE TABLE [Metric] (
+  [Code] int NOT NULL PRIMARY KEY, [ApiKey] nvarchar(24) NOT NULL, [PayloadKey] nvarchar(8) NOT NULL,
+  [DisplayName] nvarchar(60) NOT NULL, [Unit] nvarchar(8) NOT NULL, [Precision] int NOT NULL,
+  [PlausibleMin] decimal(9,3) NOT NULL, [PlausibleMax] decimal(9,3) NOT NULL,
+  [IsCore] bit NOT NULL, [Family] int NOT NULL, [SortOrder] int NOT NULL);
+CREATE UNIQUE INDEX [IX_Metric_ApiKey] ON [Metric]([ApiKey]);
+ALTER TABLE [MetricReading] ADD CONSTRAINT [FK_MetricReading_Metric_Metric]
+  FOREIGN KEY ([Metric]) REFERENCES [Metric]([Code]) ON DELETE NO ACTION;
+-- ...the same constraint on Threshold, ThresholdOverride, MetricSilence, TelemetryHourlyRollup, Alert, DeviceEvent
+-- and EvaluationState; the three nullable columns accept NULL, which is how "no metric" is expressed.
 
 CREATE UNIQUE INDEX [IX_Alert_DedupeKey] ON [Alert]([DedupeKey]) WHERE [State] <> 2;
 CREATE UNIQUE INDEX [IX_Device_TerrariumId] ON [Device]([TerrariumId])

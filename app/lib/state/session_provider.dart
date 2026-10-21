@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../core/problem.dart';
 import '../data/api_client.dart';
 import '../data/token_store.dart';
 import '../models/session_models.dart';
+import '../services/push_registration_service.dart';
 
 /// Who is signed in, and therefore what the app may show.
 ///
@@ -17,19 +20,25 @@ import '../models/session_models.dart';
 /// has to be stored at all.
 class SessionProvider extends ChangeNotifier {
   /// Creates the provider and wires the client's renewal hook.
-  SessionProvider({required this._api, TokenStore? store})
-    : _store = store ?? TokenStore.secure() {
+  SessionProvider({
+    required this._api,
+    TokenStore? store,
+    PushRegistrationService? pushRegistration,
+  }) : _store = store ?? TokenStore.secure() {
+    _pushRegistration = pushRegistration;
     _api.onUnauthorized = _renew;
   }
 
   final ApiClient _api;
   final TokenStore _store;
+  late final PushRegistrationService? _pushRegistration;
 
   AccountProfile? _user;
   String? _refreshToken;
   bool _isRestoring = false;
   bool _isBusy = false;
   bool _isRenewing = false;
+  bool _isGuestMode = false;
   AppFailure? _lastFailure;
 
   /// The signed-in account, or null while nobody is.
@@ -37,6 +46,21 @@ class SessionProvider extends ChangeNotifier {
 
   /// True once an account is signed in.
   bool get isSignedIn => _user != null;
+
+  /// True if keeper has bypassed login to explore in guest / demo mode.
+  bool get isGuestMode => _isGuestMode;
+
+  /// Sets guest / demo mode.
+  void enterGuestMode() {
+    _isGuestMode = true;
+    notifyListeners();
+  }
+
+  /// Leaves guest mode to return to login.
+  void leaveGuestMode() {
+    _isGuestMode = false;
+    notifyListeners();
+  }
 
   /// True while a stored session is being restored; the shell waits rather than flashing the signed-out state.
   bool get isRestoring => _isRestoring;
@@ -46,6 +70,12 @@ class SessionProvider extends ChangeNotifier {
 
   /// Why the last sign-in attempt failed, if it did.
   AppFailure? get lastFailure => _lastFailure;
+
+  /// Clears the last failure state.
+  void clearLastFailure() {
+    _lastFailure = null;
+    notifyListeners();
+  }
 
   /// True when the account holds [code].
   bool hasPermission(String code) => _user?.hasPermission(code) ?? false;
@@ -78,6 +108,7 @@ class SessionProvider extends ChangeNotifier {
       );
       _apply(AuthSession.fromJson(payload));
       await _writeRefreshToken(_refreshToken);
+      unawaited(_pushRegistration?.signedIn());
     } on AppFailure catch (failure) {
       if (failure.isNetworkFailure) {
         _lastFailure = failure;
@@ -105,11 +136,124 @@ class SessionProvider extends ChangeNotifier {
         body: {'usernameOrEmail': usernameOrEmail, 'password': password},
       );
       _apply(AuthSession.fromJson(payload));
+      _isGuestMode = false;
       await _writeRefreshToken(_refreshToken);
+      unawaited(_pushRegistration?.signedIn());
       return true;
     } on AppFailure catch (failure) {
       _lastFailure = failure;
       return false;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Registers a new account, returning the newly issued single-use backup recovery code.
+  Future<String> register({
+    required String username,
+    required String email,
+    required String password,
+    String? preferredLanguage,
+  }) async {
+    _isBusy = true;
+    _lastFailure = null;
+    notifyListeners();
+
+    try {
+      final payload = await _api.postJson(
+        '/api/v1/auth/register',
+        body: {
+          'username': username,
+          'email': email,
+          'password': password,
+          'preferredLanguage': ?preferredLanguage,
+        },
+      );
+      return (payload['recoveryCode'] as String?) ?? '';
+    } on AppFailure catch (failure) {
+      _lastFailure = failure;
+      rethrow;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Recovers account using backup recovery code, rotating and returning the new backup code.
+  Future<String> recover({
+    required String usernameOrEmail,
+    required String recoveryCode,
+    required String newPassword,
+  }) async {
+    _isBusy = true;
+    _lastFailure = null;
+    notifyListeners();
+
+    try {
+      final payload = await _api.postJson(
+        '/api/v1/auth/recover',
+        body: {
+          'usernameOrEmail': usernameOrEmail,
+          'recoveryCode': recoveryCode,
+          'newPassword': newPassword,
+        },
+      );
+      return (payload['recoveryCode'] as String?) ?? '';
+    } on AppFailure catch (failure) {
+      _lastFailure = failure;
+      rethrow;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Requests a server-issued reset code (delivered to logs/email).
+  Future<void> forgotPassword({
+    required String usernameOrEmail,
+  }) async {
+    _isBusy = true;
+    _lastFailure = null;
+    notifyListeners();
+
+    try {
+      await _api.postJson(
+        '/api/v1/auth/forgot-password',
+        body: {'usernameOrEmail': usernameOrEmail},
+      );
+    } on AppFailure catch (failure) {
+      _lastFailure = failure;
+      rethrow;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Resets password using a server-issued reset code, returning the new backup code.
+  Future<String> resetPassword({
+    required String usernameOrEmail,
+    required String resetCode,
+    required String newPassword,
+  }) async {
+    _isBusy = true;
+    _lastFailure = null;
+    notifyListeners();
+
+    try {
+      final payload = await _api.postJson(
+        '/api/v1/auth/reset-password',
+        body: {
+          'usernameOrEmail': usernameOrEmail,
+          'resetCode': resetCode,
+          'newPassword': newPassword,
+        },
+      );
+      return (payload['recoveryCode'] as String?) ?? '';
+    } on AppFailure catch (failure) {
+      _lastFailure = failure;
+      rethrow;
     } finally {
       _isBusy = false;
       notifyListeners();
@@ -127,6 +271,7 @@ class SessionProvider extends ChangeNotifier {
     final token = _refreshToken;
 
     try {
+      await _pushRegistration?.signedOut();
       if (token != null && token.isNotEmpty) {
         await _api.postJson(
           '/api/v1/auth/logout',
@@ -137,6 +282,7 @@ class SessionProvider extends ChangeNotifier {
       // Ignored on purpose: the local session is cleared below either way.
     } finally {
       await _forget();
+      _isGuestMode = false;
       _isBusy = false;
       notifyListeners();
     }

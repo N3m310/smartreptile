@@ -39,6 +39,7 @@ public static class TerrariumEndpoints
         // An empty suffix makes the group prefix the whole route, so this answers "/api/v1/terrariums" — the path
         // the clients, the spec and the report snapshots all use.
         group.MapGet(string.Empty, async (
+            Guid? speciesProfileId,
             ClaimsPrincipal principal,
             TerrariumService service,
             CancellationToken cancellationToken) =>
@@ -46,7 +47,8 @@ public static class TerrariumEndpoints
             var outcome = await service.ListAsync(
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                principal.CanReadAnyAccount());
+                principal.CanReadAnyAccount(),
+                speciesProfileId);
 
             return outcome.Succeeded
                 ? Results.Ok(new { items = outcome.Terrariums })
@@ -55,7 +57,9 @@ public static class TerrariumEndpoints
         .WithSummary("List the signed-in account's terrariums")
         .WithDescription("Each entry carries the device state, the newest sample time and the open-alert count. An "
                        + "administrator sees every account's terrariums, and each entry then names its owner "
-                       + "(`ownerUserId`).");
+                       + "(`ownerUserId`). `?speciesProfileId=` narrows the answer to the enclosures assigned to one "
+                       + "species profile; it filters the set the caller may already see, so an unknown or foreign "
+                       + "profile answers an empty list rather than someone else's terrariums.");
 
         group.MapPost(string.Empty, async (
             CreateTerrariumRequest request,
@@ -382,17 +386,7 @@ public static class TerrariumEndpoints
             _ => StatusCodes.Status400BadRequest,
         };
 
-        var extensions = new Dictionary<string, object?>
-        {
-            ["code"] = problem.Code,
-        };
-
-        if (problem.Errors is { Count: > 0 } errors)
-        {
-            extensions["errors"] = errors
-                .Select(violation => new { violation.Field, violation.Code, violation.Message })
-                .ToArray();
-        }
+        var extensions = ApiProblem.Extensions(problem.Code, problem.Errors);
 
         return Results.Problem(
             title: problem.Message,

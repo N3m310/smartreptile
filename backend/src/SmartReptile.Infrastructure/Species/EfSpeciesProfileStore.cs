@@ -35,9 +35,15 @@ public sealed class EfSpeciesProfileStore(SmartReptileDbContext db) : ISpeciesPr
             .FirstOrDefaultAsync(profile => profile.Id == profileId, cancellationToken);
 
     /// <inheritdoc />
-    public Task<bool> NameTakenAsync(Guid userId, string name, CancellationToken cancellationToken) =>
+    public Task<bool> NameTakenAsync(
+        Guid? ownerUserId,
+        string name,
+        Guid? excludingProfileId,
+        CancellationToken cancellationToken) =>
         db.SpeciesProfiles.AnyAsync(
-            profile => profile.CreatedByUserId == userId && profile.Name == name,
+            profile => profile.CreatedByUserId == ownerUserId
+                && profile.Name == name
+                && (excludingProfileId == null || profile.Id != excludingProfileId),
             cancellationToken);
 
     /// <inheritdoc />
@@ -83,4 +89,21 @@ public sealed class EfSpeciesProfileStore(SmartReptileDbContext db) : ISpeciesPr
 
     /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The rowversion moved between the read and this write: the caller's copy is stale, and the edit it
+            // never saw must not be overwritten. Answered rather than thrown so the route can say "reload and try
+            // again" instead of "server fault".
+            return false;
+        }
+    }
 }

@@ -4,14 +4,37 @@
 /// a LAN demo host and a tunnel. No secrets are ever compiled into the app (NFR-04).
 library;
 
+import 'package:flutter/foundation.dart';
+
 class Env {
   const Env._();
 
   /// API base URL, e.g. `http://10.0.2.2:8080` for the Android emulator.
-  static const String apiBase = String.fromEnvironment(
-    'API_BASE',
-    defaultValue: 'http://localhost:8080',
+  static String get apiBase {
+    const fromEnv = String.fromEnvironment('API_BASE');
+    if (fromEnv.isNotEmpty) return fromEnv;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return 'http://10.0.2.2:8080';
+    }
+    return 'http://localhost:8080';
+  }
+
+  /// Firebase Android app configuration. These values are public client identifiers, not server credentials.
+  static const firebaseApiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  static const firebaseAppId = String.fromEnvironment('FIREBASE_APP_ID');
+  static const firebaseProjectId = String.fromEnvironment(
+    'FIREBASE_PROJECT_ID',
   );
+  static const firebaseMessagingSenderId = String.fromEnvironment(
+    'FIREBASE_MESSAGING_SENDER_ID',
+  );
+
+  /// Whether this build has enough Firebase configuration to enable push registration.
+  static bool get firebaseConfigured =>
+      firebaseApiKey.isNotEmpty &&
+      firebaseAppId.isNotEmpty &&
+      firebaseProjectId.isNotEmpty &&
+      firebaseMessagingSenderId.isNotEmpty;
 
   /// Version string shown in the about/diagnostics screen; must match the release build (rubric evidence).
   static const String appVersion = String.fromEnvironment(

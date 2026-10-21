@@ -6,6 +6,7 @@ import '../l10n/generated/app_localizations.dart';
 import '../l10n/labels.dart';
 import '../models/metric_value.dart';
 import '../state/telemetry_provider.dart';
+import '../theme/app_theme.dart';
 import '../widgets/metric_card.dart';
 
 /// Dashboard (S4 in `02-design/04` §1.1): what the terrarium looks like right now.
@@ -52,7 +53,7 @@ class HomeScreen extends StatelessWidget {
             _Banner(
               icon: Icons.cloud_off,
               text: l10n.errorBackendUnreachable,
-              color: const Color(0xFFED6C02),
+              color: AppColors.statusWarning,
             ),
           ],
           if (device?.isMaintenance ?? false) ...[
@@ -60,7 +61,7 @@ class HomeScreen extends StatelessWidget {
             _Banner(
               icon: Icons.build_circle_outlined,
               text: l10n.maintenanceNotice,
-              color: const Color(0xFF616161),
+              color: AppColors.textMuted,
             ),
           ],
           const SizedBox(height: 12),

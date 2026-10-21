@@ -329,7 +329,7 @@ takes effect within one 15-minute access-token lifetime.
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/terrariums` | `terrarium.read` | list with device status summary |
+| GET | `/terrariums` | `terrarium.read` | list with device status summary; `?speciesProfileId=` narrows it to one profile's enclosures |
 | POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound |
 | GET | `/terrariums/{id}` | `terrarium.read` (member) | includes `device`, `openAlertCount`, `latestSampleAt`, `rowVersion` |
 | PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion` |
@@ -577,15 +577,16 @@ be probed (BR-02.2).
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/species-profiles` | `species.read` | built-ins + the user's own |
+| GET | `/species-profiles/{id}` | `species.read` | one profile, bands included; a foreign id is `404 not_found` |
 | POST | `/species-profiles` | `species.write` | custom profile; bands validated |
 | POST | `/species-profiles/{id}/duplicate` | `species.write` | copy a built-in into an editable custom profile |
-| PATCH | `/species-profiles/{id}` | `species.write` | built-ins return `403 builtin_immutable` |
-| DELETE | `/species-profiles/{id}` | `species.write` | `409 profile_in_use` if assigned to a terrarium |
+| PATCH | `/species-profiles/{id}` | `species.write` | built-ins return `403 builtin_immutable`; an administrator (`data.write.any`) may edit them and other accounts' profiles; a racing edit is `409 profile_conflict` |
+| DELETE | `/species-profiles/{id}` | `species.write` | `409 profile_in_use` if assigned to a terrarium; an administrator may delete a built-in |
 | POST | `/species-profiles/{id}/image` | `species.write` | `multipart/form-data`, one part named `file`; PNG/JPEG/WebP ≤ 2 MB; replaces any picture already there |
 | GET | `/species-profiles/{id}/image` | `species.read` | the picture's bytes; needs the bearer token, so a client fetches it rather than linking it |
 | DELETE | `/species-profiles/{id}/image` | `species.write` | idempotent; answers the profile, not `204` |
 
-**As built (roadmap 3.9, 2026-10-13; the picture added 2026-10-14).** All eight routes are implemented. What follows is contract rather than
+**As built (roadmap 3.9, 2026-10-13; the picture added 2026-10-14; the read-by-id route added 2026-10-20).** All nine routes are implemented. What follows is contract rather than
 implementation, because a client written against either reading would break:
 
 - **Reads name `species.read` and the writes `species.write`** — the catalogue is shared data, so it is the
@@ -596,9 +597,16 @@ implementation, because a client written against either reading would break:
 
 - **The list carries the bands**, and is unpaged. It is four built-ins plus whatever the account authored, and the
   picker in `POST /terrariums` needs all of them at once.
-- **Create and duplicate answer `200` with the profile, not `201` with a `Location`** — the contract has no
-  read-by-id route to point one at, the reading the silence routes took. The profile comes back whole, so a client
-  can render what it just made. A duplicate is named `"<source> (copy)"` when the body names nothing, and carries
+- **`GET /species-profiles/{id}` answers one profile in the same item shape the writes return**, bands included, so
+  a detail page renders from one payload. The item carries `canEdit`: true for a profile of the caller's own, false
+  for a built-in, which is edited by duplicating it — and true for an administrator throughout, who edits any
+  profile in place. The client picks between the edit controls and the "duplicate it instead" affordance without
+  re-deriving the rule from `isBuiltIn`. A profile of another account is
+  `404 not_found`, indistinguishable from a made-up id (BR-02.2), exactly like the list never returning it.
+- **Create and duplicate answer `200` with the profile, not `201` with a `Location`** — a client renders what it just
+  made from one payload, and both writes have replied in the shape the reads use since they were built. The
+  read-by-id route added later would have allowed a `Location`; the answer stays `200` so a client written against
+  the original reading does not change. A duplicate is named `"<source> (copy)"` when the body names nothing, and carries
   its source's `sourceRef`, because a copy whose numbers lost their citation would be a second, quieter way of
   shipping an unsourced range.
 - **`PATCH` replaces the band set when `bands` is sent.** An omitted member is left alone and an empty string clears
@@ -607,6 +615,13 @@ implementation, because a client written against either reading would break:
   can offer to duplicate it), `404 not_found` (a foreign profile, indistinguishable from a made-up id, BR-02.2), and
   `409 profile_in_use`. Soft-deleted terrariums count towards "in use": their rows still hold the foreign key, so
   ignoring them would turn a documented `409` into a constraint violation.
+- **An administrator edits the catalogue in place** (2026-10-20). A caller holding `data.write.any` may patch or
+  delete a built-in and any account's profile without duplicating first; the change is audited with before and after
+  like every other, ownership does not move, and every band rule still applies. A caller who only holds
+  `species.write` keeps the two refusals above. `canEdit` on the item reports which case the caller is in, so a
+  client shows the edit controls or "duplicate it instead" without re-deriving the rule.
+- **A racing edit is `409 profile_conflict`** (2026-10-20). The profile row carries a `RowVersion`; when another
+  request committed first, the writer answers `409 profile_conflict` rather than `500`, and the editor reloads.
 - **`sourceUrl` stays reserved** for a verified citation: a custom band may carry `sourceRef`, and nothing this build
   writes sets a URL.
 - **`BR-10.5`'s climate-zone warning is the client's**, not this API's: `climateZone` travels on every profile so a
@@ -839,10 +854,13 @@ enumerate.
   after, and a change to the code the account already holds writes nothing.
 - **`POST /users/{id}/disable` and `/enable` are idempotent** (`account.disabled` / `account.enabled`). Disabling ends
   every session the account holds; re-enabling does not restore them, so the account signs in again.
-- **`DELETE /users/{id}` is a soft delete — a disable — by default**, and `?purge=true` erases the row instead. The
-  purge is refused with `409 account_in_use` when enclosures, boards or alerts still name the account, because a board
-  whose owner no longer exists is worse than an account that is merely disabled. Audited as `account.deleted` with the
-  mode used, and the answer describes the account as it was.
+- **`DELETE /users/{id}` is a hard delete** (2026-10-20). It erases the account and, in one transaction, everything
+  that would otherwise point at a row nobody can load: its boards are unbound (not revoked — they stay in the
+  deployment to be claimed again), its enclosures go with their readings, samples, alerts, summaries and overrides,
+  its own catalogue profiles go, and its inbox goes. There is no `?purge` switch and no soft-delete mode: the two
+  verbs for one act made the console's "delete" mean "disable" to whoever used it. `POST /users/{id}/disable` is the
+  reversible act. Audited as `account.deleted` with what went (`terrariums`, `devicesUnbound`, `speciesProfiles`,
+  `notifications`), distinct from `account.disabled`, and the answer describes the account as it was.
 
 ### 4.8 Administrative dashboard and permission matrix
 
@@ -850,6 +868,7 @@ enumerate.
 |---|---|---|---|
 | GET | `/admin/overview` | `data.read.any` | the header's counts, every account with its holdings, and both alert families with their metric keys and open counts |
 | GET | `/admin/terrariums?search=&skip=&take=` | `data.read.any` | every account's enclosures, newest first, paged with `total`; `search` matches the enclosure's name or its owner's username |
+| DELETE | `/admin/terrariums/{id}` | `data.write.any` | hard delete; boards are unbound (not revoked) and their broker sessions closed; `terrarium.deleted` plus one `device.unbound` per board; `404 not_found` for an unknown or already-deleted id |
 | GET | `/admin/devices?search=&skip=&take=` | `data.read.any` | every board, bound or not, last seen first with the never-published last; `search` matches the public id, the name or the owner's username |
 | GET | `/admin/alerts?family=&state=&skip=&take=` | `data.read.any` | every account's alerts, both families, newest first; `400 family_invalid` / `state_invalid` on an unknown key |
 | GET | `/admin/roles`, `/admin/roles/{id}` | `user.read` | the matrix: each role with its codes, whether the product ships it, how many accounts hold it, and which of its codes cross accounts |
@@ -869,6 +888,13 @@ console.
   when the caller holds `data.read.any`/`data.write.any`, checked by the service that scopes its own query
   (`02-design/06` §3.2) — but one id at a time is not a get-all page. That is why the matrix can say "Admin = toàn bộ
   dữ liệu": it is a fact about this group plus those two codes, not a branch inside the keeper's queries.
+- **`DELETE /admin/terrariums/{id}` is the administrator's hard delete** (2026-10-20). Unlike the keeper's own
+  `DELETE /terrariums/{id}` — a soft delete that keeps the readings — this removes the row and everything cascading
+  from it: samples, readings, alerts, summaries, threshold overrides. A bound board is **unbound, not revoked**: its
+  `terrariumId` clears, it returns to `Provisioning`, its owner and credentials stay, and its open broker sessions are
+  closed after the commit (ingest refuses an unbound device, so a session that lingers a moment writes nothing). Two
+  audit rows are staged on the same unit of work — `terrarium.deleted`, whose payload names the owner and the enclosure,
+  and one `device.unbound` per released board. An unknown id, or one its owner already deleted, is `404 not_found`.
 - **`GET /admin/overview` is one answer for the first screen**: `counts` (accounts, accounts that may sign in,
   enclosures, enclosures with a board, boards, boards online, open alerts — total, per family and critical — and
   species profiles), `accounts` (every account with its `role` code, `isActive`, its enclosures, boards, open alerts,
@@ -905,15 +931,29 @@ console.
 
 ```json
 {
-  "type": "https://smartreptile.example/problems/threshold-ordering-invalid",
-  "title": "Threshold band ordering is invalid",
+  "type": "https://smartreptile.example/problems/validation_failed",
+  "title": "The request was refused.",
   "status": 400,
-  "code": "threshold_ordering_invalid",
-  "detail": "TargetMin must be lower than TargetMax.",
+  "code": "validation_failed",
   "traceId": "00-4bf92f…-01",
-  "errors": { "targetMin": ["must be < targetMax"] }
+  "errors": [
+    { "field": "bands[0].targetMin", "code": "threshold_ordering_invalid", "message": "TargetMin must be lower than TargetMax." }
+  ]
 }
 ```
+
+**The client translates from `code`, never from `title`/`detail`** (2026-10-20, BE-05). Three members are
+contract:
+
+- **`code`** is stable, snake_case and documented in the table below. It is what a client maps to a localised
+  sentence, so adding one is a contract change even when the status does not move.
+- **`title`** and **`detail`** are English and exist for logs and as a last-resort fallback. No screen shows them
+  to a user.
+- **`errors`** is an **array** of `{ field, code, message }` — one entry per refused field, each with its own
+  stable code, and every violation present rather than only the first, so a form can mark all of its inputs from
+  one response. `field` is the wire path the client sent (`bands[0].targetMin`, `username`); a refusal that is not
+  about a field carries no `errors`. Every route projects this shape through one helper
+  (`Api/Endpoints/ApiProblem.cs`), so the seven route files cannot drift apart.
 
 | HTTP | Code | Meaning / typical cause |
 |---|---|---|
@@ -946,6 +986,7 @@ console.
 | 409 | `version_conflict` | Optimistic concurrency (`rowversion` mismatch) |
 | 409 | `profile_in_use` | Deleting an assigned profile — including a terrarium that was soft-deleted, whose row still holds the foreign key |
 | 409 | `profile_name_taken` | A custom species profile with that name already exists for this account (the unique index is `(createdByUserId, name)`) |
+| 409 | `profile_conflict` | A profile edit lost a race: another request changed the row's `RowVersion` first, so the editor reloads (2026-10-20) |
 | 400 | `profile_invalid` | `PATCH /auth/me`: the language is not `vi`/`en`, the zone is not in the catalogue, the quiet-hours pair is incomplete, or the severity is outside `info`/`warning`/`critical` (see `errors`) |
 | 400 | `device_invalid` | `PATCH /devices/{id}`: the name is longer than the column or an interval is outside 10–300 s (see `errors`) |
 | 400 | `family_invalid` | `GET /alerts` and `GET /admin/alerts`: the `family` filter is not `enclosure` or `species`; `/admin/alerts` answers `state_invalid` the same way (2026-10-17, the alert-family re-framing) |
@@ -958,7 +999,6 @@ console.
 | 409 | `last_administrator_refused` | `/users/*` and `/admin/roles/*`: the change would remove the last grant of `user.manage`, and no route could restore one. Counted by holders of the permission rather than by role code (2026-10-17, the role/permission re-framing) |
 | 409 | `system_role_immutable` | `DELETE /admin/roles/{id}`: the role is one of the four the product ships, and the next start-up would recreate it with the shipped defaults (2026-10-17) |
 | 409 | `role_in_use` | `DELETE /admin/roles/{id}`: accounts still hold the role; the refusal carries the count (2026-10-17) |
-| 409 | `account_in_use` | `DELETE /users/{id}?purge=true`: enclosures, boards or alerts still name the account (2026-10-17) |
 | 413 | `request_too_large` | The transport refused to read the body (an in-app limit such as `[RequestSizeLimit]`). Kestrel answers its own 30 MB default itself, before the application sees the request, so this row is defensive. **Not** the same as `400 payload_too_large`, which is the ingest endpoint's own batch limit |
 | 422 | `quality_rejected` | Sample accepted but excluded from evaluation (informational) |
 | 423 | `account_locked` | Login throttle active |

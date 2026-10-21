@@ -135,13 +135,6 @@ export const AdminRoles: React.FC = () => {
                 </li>
               </ul>
 
-              {/* Only when something crosses accounts: silence is the honest rendering of "this role sees nothing
-                  but its own account's data", and the editor says what the marker means. */}
-              {role.crossAccountPermissions.length > 0 ? (
-                <p className="mt-2 text-[11px] text-warning">
-                  {t('adminRoleCrossCount', { count: role.crossAccountPermissions.length })}
-                </p>
-              ) : null}
             </div>
 
             <div className="mt-4 flex items-center gap-2">

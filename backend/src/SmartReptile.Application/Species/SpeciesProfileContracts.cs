@@ -130,6 +130,11 @@ public sealed record SpeciesProfileBandView(
 /// <param name="ScientificName">Latin name, empty string when the profile has none.</param>
 /// <param name="ClimateZone">Zone the plausibility hint is judged against (BR-10.5).</param>
 /// <param name="IsBuiltIn">True for the seeded profiles, which are read-only (FR-10 A2).</param>
+/// <param name="CanEdit">
+/// True when this caller may edit the profile: it is one of their own rather than a built-in. The client uses it to
+/// decide between showing the edit controls and offering "duplicate it instead", so the rule lives here rather than
+/// being re-derived from <paramref name="IsBuiltIn"/> on the wire.
+/// </param>
 /// <param name="PhotoperiodHours">Length of the photoperiod.</param>
 /// <param name="LightsOnLocalTime"><c>HH:mm</c> the photoperiod starts.</param>
 /// <param name="LightThresholdLux">Illuminance above which time counts towards <c>lightHours</c>.</param>
@@ -152,6 +157,7 @@ public sealed record SpeciesProfileView(
     string ScientificName,
     string ClimateZone,
     bool IsBuiltIn,
+    bool CanEdit,
     decimal PhotoperiodHours,
     string LightsOnLocalTime,
     decimal LightThresholdLux,
@@ -270,6 +276,16 @@ public sealed record SpeciesProfileOutcome
         Failed(new SpeciesProfileProblem(
             "profile_in_use",
             "The profile is assigned to at least one terrarium. Move those terrariums to another profile first."));
+
+    /// <summary>
+    /// Another request changed the profile first, so this edit was written against a state that no longer exists.
+    /// `409` rather than `500`: nothing is broken, and the client's next step is to reload and try again — the
+    /// reason the row carries a <c>RowVersion</c> at all.
+    /// </summary>
+    public static SpeciesProfileOutcome ProfileConflict() =>
+        Failed(new SpeciesProfileProblem(
+            "profile_conflict",
+            "The profile was changed by someone else. Reload it and try again."));
 
     /// <summary>A failure of input validation, in the same field-level shape the other write surfaces use.</summary>
     /// <param name="errors">One entry per refused field.</param>

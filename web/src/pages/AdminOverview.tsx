@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { AlertTriangle, Box, Cpu, Leaf, RefreshCw, Users } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, Box, Cpu, Download, Leaf, RefreshCw, Users } from 'lucide-react';
 import * as api from '../api/endpoints';
 import type {
   AdminAlertView,
@@ -7,6 +8,8 @@ import type {
   AdminOverview as AdminOverviewData,
   AdminPage,
   AdminTerrariumView,
+  SpeciesProfileItem,
+  SpeciesProfileList,
 } from '../api/types';
 import { ADMIN_PAGE_SIZE, Pager, SearchField, useDebounced } from '../components/AdminList';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
@@ -18,6 +21,7 @@ import {
   alertSourceLabel,
   alertStateLabel,
   alertStateTextClass,
+  climateZoneLabel,
   deviceLifecycleLabel,
   deviceLifecycleTextClass,
   severityLabel,
@@ -40,21 +44,22 @@ import { usePolled } from '../lib/usePolled';
  * and UV, judged against the species profile. The metric keys of each family arrive with it, so this screen labels
  * them without carrying a list of its own that could fall out of date.
  *
- * The three paged lists load one at a time, with the tab that shows them: a console that fetched every table to
+ * The paged lists load one at a time, with the tab that shows them: a console that fetched every table to
  * render one of them would make the dashboard's first paint wait for data nobody asked to see.
  */
 
 const POLL_MS = 60_000;
 
-/** The get-all tables, one tab each — the lists `/api/v1/admin/*` publishes beside the overview. */
-type Tab = 'accounts' | 'terrariums' | 'devices' | 'alerts';
+/** The get-all tables, one tab each, alongside the species-profile catalogue. */
+type Tab = 'accounts' | 'terrariums' | 'devices' | 'alerts' | 'speciesProfiles';
 
-/** Each tab's label, so the four tabs are one list rather than four conditionals. */
+/** Each tab's label, so the five tabs are one list rather than five conditionals. */
 const TAB_LABEL_KEY: Record<Tab, string> = {
   accounts: 'adminAccountsEntry',
   terrariums: 'adminTabTerrariums',
   devices: 'adminTabDevices',
   alerts: 'adminTabAlerts',
+  speciesProfiles: 'adminTabSpeciesProfiles',
 };
 
 /** One pane's current question: its filter and how far down the list it has paged. */
@@ -211,7 +216,7 @@ export const AdminOverview: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-1 rounded-xl border border-hairline bg-field p-1 text-[11px]">
-            {(['accounts', 'terrariums', 'devices', 'alerts'] as const).map((option) => (
+            {(['accounts', 'terrariums', 'devices', 'alerts', 'speciesProfiles'] as const).map((option) => (
               <button
                 key={option}
                 type="button"
@@ -255,6 +260,8 @@ export const AdminOverview: React.FC = () => {
             lang={lang}
           />
         ) : null}
+
+        {tab === 'speciesProfiles' ? <SpeciesProfileTable /> : null}
       </section>
     </div>
   );
@@ -296,53 +303,168 @@ const CountTile: React.FC<{
  */
 const AccountRollupTable: React.FC<{ accounts: AdminOverviewData['accounts'] }> = ({ accounts }) => {
   const { t, lang } = useI18n();
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const roles = [...new Set(accounts.map((account) => account.role))].sort((left, right) =>
+    left.localeCompare(right)
+  );
+  const query = search.trim().toLocaleLowerCase();
+  const filteredAccounts = accounts.filter((account) => {
+    const matchesSearch =
+      !query ||
+      account.username.toLocaleLowerCase().includes(query) ||
+      account.email.toLocaleLowerCase().includes(query);
+    const matchesRole = !roleFilter || account.role === roleFilter;
+    const matchesState =
+      !stateFilter ||
+      (stateFilter === 'active' ? account.isActive : !account.isActive);
+    return matchesSearch && matchesRole && matchesState;
+  });
 
   if (accounts.length === 0) {
     return <EmptyPanel title={t('emptyStateTitle')} body={t('adminRollupEmpty')} />;
   }
 
   return (
-    <div className={TABLE_WRAP}>
-      <table className={TABLE}>
-        <thead className="border-b border-hairline text-muted">
-          <tr>
-            <th className={TH}>{t('adminColumnAccount')}</th>
-            <th className={TH}>{t('adminColumnRole')}</th>
-            <th className={TH}>{t('adminColumnState')}</th>
-            <th className={TH}>{t('adminColumnTerrariums')}</th>
-            <th className={TH}>{t('adminColumnDevices')}</th>
-            <th className={TH}>{t('adminColumnAlertsOpen')}</th>
-            <th className={TH}>{t('adminColumnCreated')}</th>
-            <th className={TH}>{t('adminColumnLastLogin')}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-hairline">
-          {accounts.map((account) => (
-            <tr key={account.userId} className="hover:bg-raised/40">
-              <td className={TD}>
-                <span className="block font-semibold text-ink">{account.username}</span>
-                <span className="block text-[11px] text-muted">{account.email}</span>
-              </td>
-              <td className={`${TD} font-mono`}>{account.role}</td>
-              <td className={TD}>
-                <AccountState active={account.isActive} />
-              </td>
-              <td className={`${TD} font-mono`}>{account.terrariums}</td>
-              <td className={`${TD} font-mono`}>{account.devices}</td>
-              <td className={`${TD} font-mono ${account.alertsOpen > 0 ? 'text-warning' : ''}`}>
-                {account.alertsOpen}
-              </td>
-              <td className={`${TD} whitespace-nowrap text-muted`}>{formatDate(account.createdAt, lang)}</td>
-              <td className={`${TD} whitespace-nowrap text-muted`}>
-                {formatDateTime(account.lastLoginAt, lang)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          label={t('adminSearchAccountsRollup')}
+          placeholder={t('adminSearchAccountsRollup')}
+        />
+        <label className="text-[11px] text-muted">
+          <span className="mb-1 block">{t('adminColumnRole')}</span>
+          <select
+            value={roleFilter}
+            onChange={(event) => setRoleFilter(event.target.value)}
+            className="rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+          >
+            <option value="">{t('adminFilterRoleAll')}</option>
+            {roles.map((role) => (
+              <option key={role} value={role}>{role}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-[11px] text-muted">
+          <span className="mb-1 block">{t('adminColumnStatus')}</span>
+          <select
+            value={stateFilter}
+            onChange={(event) => setStateFilter(event.target.value)}
+            className="rounded-lg border border-hairline bg-field px-3 py-2 text-xs text-ink outline-none focus:border-brand"
+          >
+            <option value="">{t('adminFilterAccountStateAll')}</option>
+            <option value="active">{t('adminBadgeActive')}</option>
+            <option value="disabled">{t('adminBadgeDisabled')}</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={filteredAccounts.length === 0}
+          onClick={() =>
+            downloadAccountsCsv(
+              [
+                t('adminColumnUsername'),
+                t('adminColumnEmail'),
+                t('adminColumnRole'),
+                t('adminColumnState'),
+                t('adminColumnTerrariums'),
+                t('adminColumnDevices'),
+                t('adminColumnAlertsOpen'),
+                t('adminColumnCreated'),
+                t('adminColumnLastLogin'),
+              ],
+              filteredAccounts.map((account) => [
+                account.username,
+                account.email,
+                account.role,
+                account.isActive ? t('adminBadgeActive') : t('adminBadgeDisabled'),
+                account.terrariums,
+                account.devices,
+                account.alertsOpen,
+                formatDate(account.createdAt, lang),
+                formatDateTime(account.lastLoginAt, lang),
+              ])
+            )
+          }
+          className="inline-flex items-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          {t('adminExportCsv')}
+        </button>
+      </div>
+      <p className="text-[11px] text-muted">
+        {t('adminFilterResults', { count: filteredAccounts.length, total: accounts.length })}
+      </p>
+
+      {filteredAccounts.length === 0 ? (
+        <EmptyPanel title={t('emptyStateTitle')} body={t('adminNoRows')} />
+      ) : (
+        <div className={TABLE_WRAP}>
+          <table className={TABLE}>
+            <thead className="border-b border-hairline text-muted">
+              <tr>
+                <th className={TH}>{t('adminColumnAccount')}</th>
+                <th className={TH}>{t('adminColumnRole')}</th>
+                <th className={TH}>{t('adminColumnState')}</th>
+                <th className={TH}>{t('adminColumnTerrariums')}</th>
+                <th className={TH}>{t('adminColumnDevices')}</th>
+                <th className={TH}>{t('adminColumnAlertsOpen')}</th>
+                <th className={TH}>{t('adminColumnCreated')}</th>
+                <th className={TH}>{t('adminColumnLastLogin')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {filteredAccounts.map((account) => (
+                <tr key={account.userId} className="hover:bg-raised/40">
+                  <td className={TD}>
+                    <span className="block font-semibold text-ink">{account.username}</span>
+                    <span className="block text-[11px] text-muted">{account.email}</span>
+                  </td>
+                  <td className={`${TD} font-mono`}>{account.role}</td>
+                  <td className={TD}>
+                    <AccountState active={account.isActive} />
+                  </td>
+                  <td className={`${TD} font-mono`}>{account.terrariums}</td>
+                  <td className={`${TD} font-mono`}>{account.devices}</td>
+                  <td className={`${TD} font-mono ${account.alertsOpen > 0 ? 'text-warning' : ''}`}>
+                    {account.alertsOpen}
+                  </td>
+                  <td className={`${TD} whitespace-nowrap text-muted`}>{formatDate(account.createdAt, lang)}</td>
+                  <td className={`${TD} whitespace-nowrap text-muted`}>
+                    {formatDateTime(account.lastLoginAt, lang)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
+
+function downloadAccountsCsv(headers: string[], rows: (string | number)[][]): void {
+  const escapeCell = (value: string | number): string => {
+    let text = String(value);
+    if (/^[\t\r ]*[=+\-@]/.test(text)) {
+      text = `'${text}`;
+    }
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const csv = `\uFEFF${[headers, ...rows]
+    .map((row) => row.map(escapeCell).join(','))
+    .join('\r\n')}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `admin-accounts-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 /** Enabled or disabled, in words — a soft-deleted account *is* a disabled one, and the list is where that shows. */
 const AccountState: React.FC<{ active: boolean }> = ({ active }) => {
@@ -408,7 +530,14 @@ const TerrariumTable: React.FC<{
                       <span className="block font-semibold text-ink">{row.name}</span>
                       <span className="block font-mono text-[11px] text-muted">{row.id}</span>
                     </td>
-                    <td className={TD}>{row.ownerUsername}</td>
+                    <td className={TD}>
+                      <Link
+                        to="/admin/accounts"
+                        className="text-brand transition-colors hover:text-ink hover:underline"
+                      >
+                        {row.ownerUsername}
+                      </Link>
+                    </td>
                     <td className={TD}>{row.speciesProfileName}</td>
                     <td className={`${TD} whitespace-nowrap`}>{terrariumStatusLabel(t, row.status)}</td>
                     <td className={TD}>
@@ -648,6 +777,126 @@ const AlertTable: React.FC<{
             </table>
           </div>
           <Pager total={page.data.total} skip={page.data.skip} take={page.data.take} onSkip={onSkip} />
+        </>
+      ) : null}
+    </div>
+  );
+};
+
+/** Every built-in and custom species profile, searchable like the mobile all-data list. */
+const SpeciesProfileTable: React.FC = () => {
+  const { t } = useI18n();
+  const [searchValue, setSearchValue] = useState('');
+  const [skip, setSkip] = useState(0);
+  const search = useDebounced(searchValue, 300);
+  const profiles = usePolled<SpeciesProfileList>(() => api.listSpeciesProfiles(), null);
+  const query = search.trim().toLocaleLowerCase();
+  const filtered = (profiles.data?.items ?? []).filter((profile) => {
+    if (!query) {
+      return true;
+    }
+    return (
+      profile.name.toLocaleLowerCase().includes(query) ||
+      profile.scientificName.toLocaleLowerCase().includes(query) ||
+      profile.climateZone.toLocaleLowerCase().includes(query)
+    );
+  });
+  const pageItems = filtered.slice(skip, skip + ADMIN_PAGE_SIZE);
+
+  useEffect(() => {
+    if (skip >= filtered.length && skip > 0) {
+      setSkip(Math.max(0, Math.floor((filtered.length - 1) / ADMIN_PAGE_SIZE) * ADMIN_PAGE_SIZE));
+    }
+  }, [filtered.length, skip]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchField
+          value={searchValue}
+          onChange={(value) => {
+            setSearchValue(value);
+            setSkip(0);
+          }}
+          label={t('adminSearchSpeciesProfiles')}
+          placeholder={t('adminSearchSpeciesProfiles')}
+        />
+        <button
+          type="button"
+          onClick={() => profiles.reload()}
+          aria-label={t('speciesProfileRefresh')}
+          title={t('speciesProfileRefresh')}
+          className="inline-flex items-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised"
+        >
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+          {t('speciesProfileRefresh')}
+        </button>
+      </div>
+
+      {profiles.error ? <ErrorPanel error={profiles.error} onRetry={() => profiles.reload()} /> : null}
+      {profiles.loading ? <LoadingPanel label={t('signingIn')} /> : null}
+
+      {!profiles.loading && profiles.data && filtered.length === 0 ? (
+        <EmptyPanel title={t('emptyStateTitle')} body={t('adminNoRows')} />
+      ) : null}
+
+      {pageItems.length > 0 ? (
+        <>
+          <div className={TABLE_WRAP}>
+            <table className={`${TABLE} min-w-[72rem]`}>
+              <thead className="border-b border-hairline text-muted">
+                <tr>
+                  <th className={TH}>{t('adminColumnSpeciesProfile')}</th>
+                  <th className={TH}>{t('profileClimateZone')}</th>
+                  <th className={TH}>{t('profilePhotoperiodHours')}</th>
+                  <th className={TH}>{t('profileLightsOn')}</th>
+                  <th className={TH}>{t('profileLightThreshold')}</th>
+                  <th className={TH}>{t('profileMinLightHours')}</th>
+                  <th className={TH}>{t('speciesProfileBands')}</th>
+                  <th className={TH}>{t('profileNotes')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {pageItems.map((profile: SpeciesProfileItem) => (
+                  <tr key={profile.id} className="hover:bg-raised/40">
+                    <td className={TD}>
+                      <span className="block font-semibold text-ink">{profile.name}</span>
+                      <span className="block text-[11px] italic text-muted">
+                        {profile.scientificName || '—'}
+                      </span>
+                      <span
+                        className={`mt-1 inline-flex rounded-full border border-hairline px-2 py-0.5 text-[10px] ${
+                          profile.isBuiltIn ? 'text-brand' : 'text-inrange'
+                        }`}
+                      >
+                        {profile.isBuiltIn ? t('speciesProfileBuiltIn') : t('speciesProfileMine')}
+                      </span>
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>
+                      {climateZoneLabel(t, profile.climateZone)}
+                    </td>
+                    <td className={`${TD} whitespace-nowrap font-mono`}>
+                      {profile.photoperiodHours.toFixed(1)} h
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>{profile.lightsOnLocalTime}</td>
+                    <td className={`${TD} whitespace-nowrap font-mono`}>
+                      {profile.lightThresholdLux.toLocaleString()} lx
+                    </td>
+                    <td className={`${TD} whitespace-nowrap font-mono`}>
+                      {profile.minLightHoursPerDay.toFixed(1)} h
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>
+                      {t('speciesProfileBandCount', { count: profile.bands.length })}
+                    </td>
+                    <td className="max-w-xs px-4 py-3 align-top text-ink">
+                      <span className="line-clamp-2">{profile.notes || '—'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager total={filtered.length} skip={skip} take={ADMIN_PAGE_SIZE} onSkip={setSkip} />
         </>
       ) : null}
     </div>

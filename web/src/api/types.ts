@@ -51,6 +51,23 @@ export interface UserProfile {
   permissions: string[];
   preferredLanguage: string;
   timeZoneId: string;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+  minNotifySeverity: string;
+  channelFcmEnabled: boolean;
+  channelEmailEnabled: boolean;
+  hasFcmToken: boolean;
+}
+
+export interface UpdateProfileBody {
+  preferredLanguage?: string;
+  timeZoneId?: string;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+  minNotifySeverity?: string;
+  channelFcmEnabled?: boolean;
+  channelEmailEnabled?: boolean;
+  fcmToken?: string;
 }
 
 /** `POST /auth/login`, `/auth/refresh`. Timestamps are ISO-8601 instants in UTC. */
@@ -135,8 +152,8 @@ export interface SpeciesProfileBand {
 }
 
 /**
- * The item shape of `GET /species-profiles`. The bands travel with the profile, so a picker needs one request
- * rather than one per row.
+ * The item shape of `GET /species-profiles` and of `GET /species-profiles/{id}`. The bands travel with the profile,
+ * so a picker needs one request rather than one per row.
  */
 export interface SpeciesProfileItem {
   id: string;
@@ -145,6 +162,11 @@ export interface SpeciesProfileItem {
   climateZone: string;
   /** True for the seeded profiles: read-only, and the ones a keeper copies to tune (FR-10 A2). */
   isBuiltIn: boolean;
+  /**
+   * True when this caller may edit the profile: it is one of their own rather than a built-in. The client shows the
+   * edit controls on it and offers "duplicate it instead" when it is false.
+   */
+  canEdit: boolean;
   photoperiodHours: number;
   lightsOnLocalTime: string;
   lightThresholdLux: number;
@@ -230,6 +252,58 @@ export interface DeviceItem {
 
 export interface DeviceList {
   items: DeviceItem[];
+}
+
+export interface AlertView {
+  id: number;
+  terrariumId: string;
+  deviceId: string;
+  metric: string | null;
+  family: string;
+  severity: string;
+  state: string;
+  source: string;
+  phase: string;
+  triggeringValue: number | null;
+  peakValue: number | null;
+  bandMin: number | null;
+  bandMax: number | null;
+  triggeredAt: string;
+  lastObservedAt: string | null;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  resolvedReason: string | null;
+  durationSeconds: number | null;
+}
+
+export interface AlertPage {
+  items: AlertView[];
+  nextCursor: string | null;
+}
+
+export interface AlertDetail {
+  alert: AlertView;
+  series: { at: string; value: number }[];
+  seriesTruncated: boolean;
+}
+
+export interface AlertTimelineEntry {
+  event: string;
+  at: string;
+  actorUserId: string | null;
+  reason: string | null;
+  note: string | null;
+}
+
+export interface MetricSilence {
+  id: string;
+  terrariumId: string;
+  metric: string | null;
+  untilUtc: string;
+  reason: string;
+  createdAt: string;
+  createdByUserId: string;
+  active: boolean;
 }
 
 /**

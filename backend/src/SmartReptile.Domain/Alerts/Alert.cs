@@ -50,16 +50,35 @@ public class Alert
     /// (<c>{terrariumId}:{metric}:{severity}:{phase}</c>). Severity is part of it deliberately: a critical episode
     /// that follows a resolved warning is a new row, not a reopened one, so the record shows both.
     /// </summary>
+    /// <remarks>
+    /// A derived signal appends its <see cref="AlertSource"/> to the key, and a band alert does not. Without that
+    /// suffix a <c>GradientWarning</c> on <c>SurfaceTempC</c> and a surface band alert would produce the same key for
+    /// the same severity and phase, and the filtered unique index would refuse the second one with a 2601 error
+    /// instead of keeping two facts that happen to be about the same metric. The suffix is added rather than the
+    /// format changed outright so the keys already in the database stay valid — nothing has to be rewritten by a
+    /// migration — and `02-design/02` §3.8 records the two shapes.
+    /// </remarks>
     /// <param name="terrariumId">Terrarium the alert belongs to.</param>
     /// <param name="metric">Metric, or null for a device-level alert.</param>
     /// <param name="severity">Severity the alert is at.</param>
     /// <param name="phase">Phase the value was evaluated in.</param>
+    /// <param name="source">
+    /// What is producing the alert. <see cref="AlertSource.Threshold"/> keeps the documented three-segment shape;
+    /// every derived signal names itself as a fourth segment.
+    /// </param>
     public static string DedupeKeyFor(
         Guid terrariumId,
         Metrics.MetricCode? metric,
         AlertSeverity severity,
-        Thresholds.ThresholdPhase phase) =>
-        $"{terrariumId}:{(int?)metric ?? 0}:{(int)severity}:{(int)phase}";
+        Thresholds.ThresholdPhase phase,
+        AlertSource source = AlertSource.Threshold)
+    {
+        var prefix = $"{terrariumId}:{(int?)metric ?? 0}:{(int)severity}:{(int)phase}";
+
+        // A band alert's key is the documented `{terrariumId}:{metric}:{severity}:{phase}` and stays byte-identical,
+        // because those are the keys already written by every episode the system has ever recorded.
+        return source == AlertSource.Threshold ? prefix : $"{prefix}:{(int)source}";
+    }
 
     /// <summary>
     /// The family an episode about <paramref name="metric"/> belongs to.

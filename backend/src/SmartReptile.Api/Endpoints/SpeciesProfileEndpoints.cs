@@ -13,15 +13,19 @@ namespace SmartReptile.Api.Endpoints;
 /// catalogue. The catalogue is unpaged on purpose: it is four built-ins plus whatever has been authored, and the
 /// picker in <c>POST /terrariums</c> needs all of them in one answer.
 /// <para>
-/// Create and duplicate answer <c>200</c> with the profile rather than <c>201</c> with a <c>Location</c>, because
-/// the contract has no read-by-id route to point one at. The profile comes back whole, bands included, so a client
-/// can render what it just made without that route ever existing — the reading the silence routes took for the same
-/// reason.
+/// Create and duplicate answer <c>200</c> with the profile rather than <c>201</c> with a <c>Location</c>: the profile
+/// comes back whole, bands included, so a client renders what it just made without a second request. The read-by-id
+/// route this surface gained later would have allowed a <c>Location</c>; the answer stays <c>200</c> on purpose,
+/// because both writes have always replied in the shape the reads use and a client written against that must not
+/// have to change.
 /// </para>
 /// <para>
 /// A built-in is <c>403 builtin_immutable</c>, a profile that belongs to someone else is <c>404 not_found</c>, and a
 /// profile a terrarium is assigned to is <c>409 profile_in_use</c>. The three are distinguished because the client
 /// does something different with each: offer "duplicate it instead", reload the list, or point at the terrariums.
+/// Both refusals are for the ordinary caller: an administrator (the holder of <c>data.write.any</c>) may edit a
+/// built-in or another account's profile in place, and the client learns that from <c>canEdit</c> rather than from
+/// re-deriving it (TASKS 2026-10-19).
 /// </para>
 /// <para>
 /// The picture is the one part of a profile that is not JSON: it arrives as a multipart part and leaves as bytes,
@@ -31,7 +35,7 @@ namespace SmartReptile.Api.Endpoints;
 /// </remarks>
 public static class SpeciesProfileEndpoints
 {
-    /// <summary>Maps list, create, duplicate, patch and delete.</summary>
+    /// <summary>Maps list, read, create, duplicate, patch and delete.</summary>
     public static IEndpointRouteBuilder MapSpeciesProfileEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/species-profiles")
@@ -43,7 +47,10 @@ public static class SpeciesProfileEndpoints
             SpeciesProfileService service,
             CancellationToken cancellationToken) =>
         {
-            var outcome = await service.ListAsync(principal.GetUserId() ?? Guid.Empty, cancellationToken);
+            var outcome = await service.ListAsync(
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken,
+                principal.CanEditAnySpeciesProfile());
 
             return outcome.Succeeded
                 ? Results.Ok(new SpeciesProfileList(outcome.Profiles!))
@@ -53,6 +60,29 @@ public static class SpeciesProfileEndpoints
         .WithSummary("List the species profiles this account may use")
         .WithDescription("The built-in profiles plus the account's own, each with its bands. This is the route that "
                        + "supplies the speciesProfileId POST /api/v1/terrariums requires.");
+
+        group.MapGet("/{profileId:guid}", async (
+            Guid profileId,
+            ClaimsPrincipal principal,
+            SpeciesProfileService service,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await service.GetAsync(
+                profileId,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken,
+                principal.CanEditAnySpeciesProfile());
+
+            return outcome.Succeeded
+                ? Results.Ok(outcome.Profile)
+                : Problem(outcome.Problem!);
+        })
+        .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
+        .WithSummary("One species profile, bands included")
+        .WithDescription("The built-ins and the account's own, the same set the list returns. A profile of another "
+                       + "account answers 404 not_found, exactly like a made-up id, so ids cannot be probed "
+                       + "(BR-02.2). `canEdit` says whether this caller may patch it: true for a profile of their "
+                       + "own, false for a built-in, which is edited by duplicating it.");
 
         group.MapPost(string.Empty, async (
             CreateSpeciesProfileRequest request,
@@ -116,7 +146,8 @@ public static class SpeciesProfileEndpoints
                 request,
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanEditAnySpeciesProfile());
 
             return outcome.Succeeded
                 ? Results.Ok(outcome.Profile)
@@ -124,9 +155,11 @@ public static class SpeciesProfileEndpoints
         })
         .RequireAuthorization(Permissions.SpeciesWrite)
         .Produces<SpeciesProfileView>(StatusCodes.Status200OK)
-        .WithSummary("Edit one of this account's own profiles")
+        .WithSummary("Edit a species profile")
         .WithDescription("Requires `species.write`. Omitted fields are left alone; sending bands replaces the whole "
-                       + "set. A built-in answers 403 builtin_immutable.");
+                       + "set. The caller must own the profile, or be an administrator (`data.write.any`), who may "
+                       + "edit a built-in or another account's profile too. Two requests racing on one profile answer "
+                       + "409 profile_conflict, which asks the editor to reload.");
 
         group.MapDelete("/{profileId:guid}", async (
             Guid profileId,
@@ -139,7 +172,8 @@ public static class SpeciesProfileEndpoints
                 profileId,
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanEditAnySpeciesProfile());
 
             return outcome.Succeeded
                 ? Results.NoContent()
@@ -147,8 +181,9 @@ public static class SpeciesProfileEndpoints
         })
         .RequireAuthorization(Permissions.SpeciesWrite)
         .Produces(StatusCodes.Status204NoContent)
-        .WithSummary("Delete one of this account's own profiles")
-        .WithDescription("Requires `species.write`. A profile assigned to a terrarium answers 409 profile_in_use, "
+        .WithSummary("Delete a species profile")
+        .WithDescription("Requires `species.write`. The caller must own the profile, or be an administrator, who may "
+                       + "delete a built-in too. A profile assigned to a terrarium answers 409 profile_in_use, "
                        + "including terrariums that were soft-deleted, because their rows still point at it.");
 
         group.MapPost("/{profileId:guid}/image", async (
@@ -174,7 +209,8 @@ public static class SpeciesProfileEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
                 new ProfileImageUpload(file.OpenReadStream(), file.ContentType),
-                cancellationToken);
+                cancellationToken,
+                principal.CanEditAnySpeciesProfile());
 
             return outcome.Succeeded
                 ? Results.Ok(outcome.Profile)
@@ -236,7 +272,8 @@ public static class SpeciesProfileEndpoints
                 profileId,
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanEditAnySpeciesProfile());
 
             return outcome.Succeeded
                 ? Results.Ok(outcome.Profile)
@@ -266,6 +303,7 @@ public static class SpeciesProfileEndpoints
             "builtin_immutable" => StatusCodes.Status403Forbidden,
             "profile_in_use" => StatusCodes.Status409Conflict,
             "profile_name_taken" => StatusCodes.Status409Conflict,
+            "profile_conflict" => StatusCodes.Status409Conflict,
             "not_found" => StatusCodes.Status404NotFound,
             // A visible profile with no picture: the same 404 status as a profile that does not exist, because the
             // client's request succeeded in both cases and the caches should treat them alike — but a code of its
@@ -275,17 +313,7 @@ public static class SpeciesProfileEndpoints
             _ => StatusCodes.Status400BadRequest,
         };
 
-        var extensions = new Dictionary<string, object?>
-        {
-            ["code"] = problem.Code,
-        };
-
-        if (problem.Errors is { Count: > 0 } errors)
-        {
-            extensions["errors"] = errors
-                .Select(violation => new { violation.Field, violation.Code, violation.Message })
-                .ToArray();
-        }
+        var extensions = ApiProblem.Extensions(problem.Code, problem.Errors);
 
         return Results.Problem(
             title: problem.Message,

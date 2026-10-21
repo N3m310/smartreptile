@@ -209,7 +209,6 @@ public static class UserEndpoints
 
         group.MapDelete("/{userId:guid}", async (
             Guid userId,
-            bool? purge,
             HttpContext context,
             ClaimsPrincipal principal,
             UserAdminService users,
@@ -217,7 +216,6 @@ public static class UserEndpoints
         {
             var outcome = await users.DeleteAsync(
                 userId,
-                purge ?? false,
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
                 cancellationToken);
@@ -225,14 +223,15 @@ public static class UserEndpoints
             return outcome.Succeeded ? Results.Ok(outcome.User) : Problem(outcome.Problem!);
         })
         .RequireAuthorization(Permissions.UserManage)
-        .WithSummary("Remove an account")
-        .WithDescription("Requires `user.manage`. Without `?purge=true` this is a **soft delete**: the account is "
-                       + "disabled and every row that names it — enclosures, alerts, audit trail — is kept. With "
-                       + "`?purge=true` the row is erased, which is allowed only when nothing references it; "
-                       + "otherwise `409 account_in_use` names what still does, because a board whose owner no "
-                       + "longer exists is worse than an account that is merely disabled. Audited as "
-                       + "`account.deleted` with the mode used. Answers the account as it was, so the console can "
-                       + "confirm which one went.");
+        .WithSummary("Delete an account")
+        .WithDescription("Requires `user.manage`. A **hard delete**: the account's enclosures and every reading, alert, "
+                       + "summary and override that belongs to them go, its boards are unbound (not revoked) and stay "
+                       + "in the deployment to be claimed again, its own catalogue profiles and its inbox are "
+                       + "removed, and the account row is erased — all in one transaction. To take an account out of "
+                       + "circulation reversibly, use `POST /users/{id}/disable` instead. Refused with "
+                       + "`409 self_change_refused` for the caller's own account and `409 last_administrator_refused` "
+                       + "for the last enabled account that can manage accounts. Audited as `account.deleted`. "
+                       + "Answers the account as it was, so the console can confirm which one went.");
 
         return app;
     }
@@ -247,28 +246,12 @@ public static class UserEndpoints
         var status = problem.Code switch
         {
             "user_not_found" => StatusCodes.Status404NotFound,
-            "self_change_refused" or "last_administrator_refused" or "account_in_use" =>
+            "self_change_refused" or "last_administrator_refused" =>
                 StatusCodes.Status409Conflict,
             "role_invalid" or "password_invalid" or "account_invalid" => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status400BadRequest,
         };
 
-        var extensions = new Dictionary<string, object?>
-        {
-            ["code"] = problem.Code,
-        };
-
-        if (problem.Errors.Count > 0)
-        {
-            extensions["errors"] = problem.Errors
-                .Select(violation => new { violation.Field, violation.Code, violation.Message })
-                .ToArray();
-        }
-
-        return Results.Problem(
-            title: problem.Message,
-            statusCode: status,
-            type: $"https://smartreptile.example/problems/{problem.Code}",
-            extensions: extensions);
+        return ApiProblem.Create(problem.Code, problem.Message, status, problem.Errors);
     }
 }

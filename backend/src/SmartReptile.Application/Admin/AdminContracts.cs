@@ -1,4 +1,5 @@
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 
 namespace SmartReptile.Application.Admin;
 
@@ -160,6 +161,23 @@ public sealed record AdminFamilyView(string Key, IReadOnlyList<string> Metrics, 
 public sealed record AdminPage<T>(IReadOnlyList<T> Items, int Total, int Skip, int Take);
 
 /// <summary>
+/// What an administrator's hard delete of an enclosure produced: whose it was, and which boards it released.
+/// </summary>
+/// <remarks>
+/// The board identifiers come back rather than being closed inside the store, because a broker session is not a row:
+/// the write is committed first, and only then are the devices disconnected. A session that outlives the commit by a
+/// moment is harmless — ingest already refuses an unbound device — while a device disconnected before a commit that
+/// then fails would be a live board with no explanation.
+/// </remarks>
+/// <param name="TerrariumId">The row that was removed.</param>
+/// <param name="OwnerUserId">Account the enclosure belonged to.</param>
+/// <param name="UnboundDevicePublicIds">Boards that were detached, as the API names them.</param>
+public sealed record AdminTerrariumDeletion(
+    Guid TerrariumId,
+    Guid OwnerUserId,
+    IReadOnlyList<string> UnboundDevicePublicIds);
+
+/// <summary>
 /// Everything the administrator's dashboard reads (TASKS 2026-10-14, item 13).
 /// </summary>
 /// <remarks>
@@ -235,5 +253,27 @@ public interface IAdminStore
     Task<int> CountAlertsAsync(
         AlertFamily? family,
         AlertState? state,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes one enclosure outright, whatever account owns it, after unbinding its boards. Null when no live
+    /// enclosure has that id, which the route answers as <c>404 not_found</c>.
+    /// </summary>
+    /// <remarks>
+    /// A hard delete, unlike the keeper's own <c>DELETE /terrariums/{id}</c>: the row and everything cascading from
+    /// it — readings, samples, alerts, summaries, overrides — are gone. It is what the administrator's "delete this
+    /// enclosure" means (TASKS 2026-10-19, BE-02), and the two audit rows it stages on the same unit of work are what
+    /// keeps the act answerable afterwards.
+    /// </remarks>
+    /// <param name="terrariumId">Enclosure to remove.</param>
+    /// <param name="actingUserId">Administrator performing the delete; recorded on both audit rows.</param>
+    /// <param name="actor">Request provenance for the audit rows.</param>
+    /// <param name="occurredAt">When the delete happened.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<AdminTerrariumDeletion?> DeleteTerrariumAsync(
+        Guid terrariumId,
+        Guid actingUserId,
+        AuditActor actor,
+        DateTimeOffset occurredAt,
         CancellationToken cancellationToken);
 }

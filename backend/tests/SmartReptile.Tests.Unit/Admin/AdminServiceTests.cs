@@ -1,6 +1,9 @@
 using FluentAssertions;
 using SmartReptile.Application.Admin;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
+using SmartReptile.Tests.Unit.Application;
+using SmartReptile.Tests.Unit.Devices;
 
 namespace SmartReptile.Tests.Unit.Admin;
 
@@ -12,9 +15,11 @@ namespace SmartReptile.Tests.Unit.Admin;
 public class AdminServiceTests
 {
     private readonly FakeAdminStore _store = new();
+    private readonly FakeDeviceSessionRegistry _sessions = new();
+    private readonly TestClock _clock = new() { UtcNow = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero) };
     private readonly AdminService _admin;
 
-    public AdminServiceTests() => _admin = new AdminService(_store);
+    public AdminServiceTests() => _admin = new AdminService(_store, _sessions, _clock);
 
     // ---- overview -----------------------------------------------------------------------------------
 
@@ -142,6 +147,44 @@ public class AdminServiceTests
         _store.AlertFilters.Should().Equal((null, null), (null, null));
     }
 
+    // ---- delete -------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Deleting_an_enclosure_disconnects_the_boards_it_released()
+    {
+        var terrariumId = Guid.NewGuid();
+        _store.Deletion = new AdminTerrariumDeletion(terrariumId, Guid.NewGuid(), ["sr-000001", "sr-000002"]);
+
+        var deleted = await _admin.DeleteTerrariumAsync(
+            terrariumId,
+            Guid.NewGuid(),
+            AuditActor.Unknown,
+            CancellationToken.None);
+
+        deleted.Should().BeTrue();
+
+        // Kicked after the commit, one per board the delete released — the row is what the delete is, the session is
+        // only its visible half.
+        _sessions.Kicks.Select(kick => kick.DeviceId).Should().Equal("sr-000001", "sr-000002");
+        _sessions.Kicks.Should().OnlyContain(kick => kick.Reason == "terrarium_deleted");
+        _store.DeletedAt.Should().Be(_clock.UtcNow, "the audit row and the delete share one instant");
+    }
+
+    [Fact]
+    public async Task An_unknown_enclosure_is_not_deleted_and_closes_no_session()
+    {
+        _store.Deletion = null;
+
+        var deleted = await _admin.DeleteTerrariumAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            AuditActor.Unknown,
+            CancellationToken.None);
+
+        deleted.Should().BeFalse();
+        _sessions.Kicks.Should().BeEmpty();
+    }
+
     /// <summary>Deployment-wide figures with the two families distinct, so a mix-up is visible.</summary>
     private static AdminCounts Counts() => new(
         Accounts: 2,
@@ -259,6 +302,24 @@ public class AdminServiceTests
             AlertFilters.Add((family, state));
 
             return Task.FromResult(AlertTotal);
+        }
+
+        /// <summary>What the store answers for a delete; null stands for "no such enclosure".</summary>
+        public AdminTerrariumDeletion? Deletion { get; set; }
+
+        /// <summary>When the delete was asked to happen, so the clock can be asserted.</summary>
+        public DateTimeOffset? DeletedAt { get; private set; }
+
+        public Task<AdminTerrariumDeletion?> DeleteTerrariumAsync(
+            Guid terrariumId,
+            Guid actingUserId,
+            AuditActor actor,
+            DateTimeOffset occurredAt,
+            CancellationToken cancellationToken)
+        {
+            DeletedAt = occurredAt;
+
+            return Task.FromResult(Deletion);
         }
 
         private static AdminTerrariumView Terrarium(string? search) => new(

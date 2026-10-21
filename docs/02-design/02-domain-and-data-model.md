@@ -224,17 +224,28 @@ enclosure rather than about the animal.
 | Index | `(MetricId, SampleId)` | for metric-scoped joins |
 
 ### 3.11 `TelemetryHourlyRollup`
-`(Id, TerrariumId, MetricId, HourStartUtc, MinValue, MaxValue, AvgValue, SampleCount, OutOfRangeMinutes, ExposureValue, ComputedAt)`
-with unique index `(TerrariumId, MetricId, HourStartUtc)`. Upsert-based, recomputable for the last 48 h
-(BR-15.3). `OutOfRangeMinutes` and `ExposureValue` are computed against the thresholds **in force at
-that hour**, which is why the rollup stores `ThresholdVersionId` — a nullable FK to a
-`ThresholdSnapshot` row (below) so a later threshold edit does not silently rewrite history.
+`(Id, TerrariumId, Metric, HourStartUtc, MinValue, MaxValue, AvgValue, SampleCount, OutOfRangeMinutes,
+ExposureValue, ThresholdSnapshotId NULL, ComputedAt)` with unique index
+`(TerrariumId, Metric, HourStartUtc)`. `Metric` is the domain metric code; the FK to the terrarium is
+cascading, while the nullable threshold-snapshot FK is `NO ACTION` to avoid SQL Server's multiple-cascade-path
+restriction. Upsert-based, recomputable for the last 48 h (BR-15.3). `AvgValue` is time-weighted on the one-minute
+grid, while min/max and sample count are based on valid samples. Missing grid cells stay missing.
+
+**Built 2026-10-19** (roadmap 3.6, migration `AddEnvironmentalSummaries`). `SummaryWorker` rebuilds the rolling
+48-hour window every 15 minutes, assigning the latest snapshot captured no later than the hour as provenance.
+The rule bands are resolved per minute using the terrarium's local phase.
 
 ### 3.12 `DailyEnvironmentalSummary`
 `(Id, TerrariumId, LocalDate, TimeZoneId, CoveragePct, TempMin/Max/Avg, HumidityMin/Max/Avg,
-LuxAvg, LightHours, UvMax, OutOfRangeMinutesJson, TempExposureDegCHours, HumidityExposurePctHours,
-LightDeficitHours, AlertCount, CriticalAlertCount, ComputedAt, IsLowConfidence)` with unique index
-`(TerrariumId, LocalDate)`. This is the row the report screen and the v2 dataset both read.
+LuxAvg, LightHours, UvMax, OutOfRangeMinutesJson, TempExposureDegCHours, HumidityDryExposurePctHours,
+HumidityWetExposurePctHours, LightDeficitHours, AlertCount, CriticalAlertCount, ComputedAt,
+IsLowConfidence)` with unique index `(TerrariumId, LocalDate)`. Humidity directions are stored separately, as
+required by §03-implementation/06 §5.2. This is the row the report screen and the v2 dataset both read.
+
+`SummaryWorker` maintains today and yesterday in each terrarium's timezone. It recomputes from raw readings, so a
+back-fill replaces the existing daily row and affected hourly rollups instead of being added twice. Coverage uses
+received telemetry samples divided by the expected samples for the elapsed local-day window; below 80% sets
+`IsLowConfidence`.
 
 ### 3.13 `ThresholdSnapshot`
 `(Id, TerrariumId, CapturedAtUtc, EffectiveThresholdsJson, ThresholdVersionHash)` — written whenever the
@@ -261,7 +272,7 @@ notes, each with its reason:
 | `Family` | tinyint | 0 Enclosure, 1 Species; taken from the metric at creation and `Enclosure` for an alert with no metric at all (2026-10-17, migration `20261016162814_AddAlertFamily`) |
 | `Severity` | tinyint | 1 Warning, 2 Critical (0 Info reserved) |
 | `Phase` | tinyint | as evaluated |
-| `DedupeKey` | varchar(80) | `{terrariumId}:{metric}:{severity}:{phase}` |
+| `DedupeKey` | varchar(80) | `{terrariumId}:{metric}:{severity}:{phase}` for a band alert; a derived signal appends `:{source}` so two different facts about one metric cannot collide (2026-10-19) |
 | `State` | tinyint | 0 Open, 1 Acknowledged, 2 Resolved |
 | `TriggeringValue` | decimal(9,3) NULL | value at first violation |
 | `PeakValue` | decimal(9,3) | extremum during the episode (max for hot, min for cold) |

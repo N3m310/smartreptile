@@ -130,6 +130,30 @@ flutter build apk --release --split-per-abi
 wrong for an emulator — `10.0.2.2` is the host from inside the emulator — and a phone on the LAN needs the host's
 address. No secrets are compiled into the app.
 
+#### Android push notifications (optional)
+
+Create a Firebase project, register the Android app with package name
+`com.smartreptile.smart_reptile`, and copy its API key, app ID, project ID and sender ID from the Firebase app
+settings. These are client configuration values, not the server credential. Supply them to the Flutter build:
+
+```bash
+flutter run -d android \
+  --dart-define=API_BASE=http://10.0.2.2:8080 \
+  --dart-define=FIREBASE_API_KEY=<api-key> \
+  --dart-define=FIREBASE_APP_ID=<android-app-id> \
+  --dart-define=FIREBASE_PROJECT_ID=<project-id> \
+  --dart-define=FIREBASE_MESSAGING_SENDER_ID=<sender-id>
+```
+
+When those values are absent, FCM remains disabled and the app continues to work. After sign-in, the app requests
+notification permission, registers its FCM token through `PATCH /api/v1/auth/me`, and updates it if Firebase
+rotates it. Sign-out clears that account's token. Test on an Android device or emulator image with Google Play.
+
+The server separately needs a Firebase service-account JSON, which must never be placed in the app or committed.
+Store it at `secrets/fcm.json`, set `FCM_ENABLED=true` and `FCM_SERVICE_ACCOUNT_PATH=/secrets/fcm.json` in the
+uncommitted root `.env`, then recreate the API container. Compose mounts `secrets/` read-only; `.gitignore` excludes
+it.
+
 Two UI modes are compiled from one entry point and only one is shown (`Env.prototypeMode`): the **app** by default —
 `lib/app.dart` and `lib/screens/`, the VIVARIUMGUARD shell a keeper sees — and the **clickable prototype** behind
 `--dart-define=PROTOTYPE=true` (fake data, real rule kernel, `app/PROTOTYPE.md`). The default was the prototype

@@ -135,7 +135,8 @@ public sealed class DeviceProvisioningService(
         ClaimRequest request,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var now = clock.UtcNow;
         var code = ClaimCode.Normalise(request.ClaimCode);
@@ -154,7 +155,7 @@ public sealed class DeviceProvisioningService(
                 "That claim code is not valid. Check the code shown on the device and try again.");
         }
 
-        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodCode, cancellationToken);
+        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodCode, cancellationToken, mayReachAnyAccount);
     }
 
     /// <summary>
@@ -177,11 +178,13 @@ public sealed class DeviceProvisioningService(
     /// <param name="ownerUserId">The authenticated caller; the terrarium must belong to them.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="actor">Request provenance for the audit row; omitted callers get <see cref="AuditActor.Unknown"/>.</param>
+    /// <param name="mayReachAnyAccount">Whether the caller has permissions across all accounts (admin).</param>
     public async Task<DeviceOutcome> ClaimByMacAsync(
         ClaimByMacRequest request,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var now = clock.UtcNow;
 
@@ -201,15 +204,29 @@ public sealed class DeviceProvisioningService(
 
         var device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
 
-        if (device is null || !DeviceProvisioningRules.IsClaimableByMac(device))
+        if (device is null)
+        {
+            var cleanMac = mac.Replace(":", "").Replace("-", "").ToLowerInvariant();
+            device = new Device
+            {
+                PublicId = await AllocatePublicIdAsync(cancellationToken),
+                DeviceName = "Node " + (mac.Length >= 5 ? mac[^5..] : mac),
+                ChipId = "esp32" + (cleanMac.Length > 26 ? cleanMac[..26] : cleanMac),
+                MacAddress = mac,
+                FirmwareVersion = "1.0.0",
+                Status = DeviceStatus.Provisioning,
+                Protocol = DeviceProtocol.Mqtt,
+            };
+            store.AddDevice(device);
+        }
+        else if (!DeviceProvisioningRules.IsClaimableByMac(device))
         {
             return DeviceOutcome.Failure(
-                "device_not_found",
-                "No unclaimed device matches that MAC address. Register the board first, and check that it is not "
-                + "already bound to another terrarium.");
+                "device_already_bound",
+                "This device is already bound to another terrarium or revoked.");
         }
 
-        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodMac, cancellationToken);
+        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodMac, cancellationToken, mayReachAnyAccount);
     }
 
     /// <summary>
@@ -227,6 +244,7 @@ public sealed class DeviceProvisioningService(
     /// <param name="now">Instant the binding is made at.</param>
     /// <param name="method">Which identification path was used, recorded on the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">Whether caller has permissions across all accounts.</param>
     private async Task<DeviceOutcome> BindAsync(
         Device device,
         Guid terrariumId,
@@ -234,9 +252,10 @@ public sealed class DeviceProvisioningService(
         AuditActor? actor,
         DateTimeOffset now,
         string method,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var terrarium = await store.FindOwnedTerrariumAsync(terrariumId, ownerUserId, cancellationToken);
+        var terrarium = await store.FindOwnedTerrariumAsync(terrariumId, ownerUserId, cancellationToken, mayReachAnyAccount);
 
         if (terrarium is null)
         {
@@ -249,7 +268,7 @@ public sealed class DeviceProvisioningService(
             return DeviceOutcome.Failure("terrarium_already_bound", "That terrarium already has a device bound to it.");
         }
 
-        var secret = StageBinding(device, terrarium.Id, ownerUserId, now, method, actor);
+        var secret = StageBinding(device, terrarium.Id, terrarium.UserId, now, method, actor);
 
         // The pre-check gives a clear message; this is the enforcement. Two claims of one terrarium can both pass
         // it, and the filtered unique index DI-04 then refuses the second binding — which is a documented 409, not
@@ -428,12 +447,13 @@ public sealed class DeviceProvisioningService(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var now = clock.UtcNow;
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || device.Status == DeviceStatus.Revoked || device.UserId != ownerUserId)
+        if (device is null || device.Status == DeviceStatus.Revoked || (!mayReachAnyAccount && device.UserId != ownerUserId))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -490,12 +510,13 @@ public sealed class DeviceProvisioningService(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var now = clock.UtcNow;
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || device.UserId != ownerUserId)
+        if (device is null || (!mayReachAnyAccount && device.UserId != ownerUserId))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -531,11 +552,12 @@ public sealed class DeviceProvisioningService(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || device.UserId != ownerUserId)
+        if (device is null || (!mayReachAnyAccount && device.UserId != ownerUserId))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -683,9 +705,15 @@ public sealed class DeviceProvisioningService(
     /// <summary>The caller's boards, ordered by display name (TASKS 2026-10-14, item 9b).</summary>
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task<DeviceOutcome> ListAsync(Guid ownerUserId, CancellationToken cancellationToken = default)
+    /// <param name="mayReachAnyAccount">When true, lists every device in the deployment (data.read.any).</param>
+    public async Task<DeviceOutcome> ListAsync(
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false)
     {
-        var devices = await store.ListOwnedAsync(ownerUserId, cancellationToken);
+        var devices = mayReachAnyAccount
+            ? await store.ListAllAsync(cancellationToken)
+            : await store.ListOwnedAsync(ownerUserId, cancellationToken);
 
         return DeviceOutcome.Listed([.. devices.Select(Describe)]);
     }
@@ -694,14 +722,16 @@ public sealed class DeviceProvisioningService(
     /// <param name="deviceId">Public id of the device.</param>
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">When true, allows reading any device in the deployment (data.read.any).</param>
     public async Task<DeviceOutcome> GetAsync(
         string deviceId,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false)
     {
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || !IsCallers(device, ownerUserId))
+        if (device is null || (!mayReachAnyAccount && !IsCallers(device, ownerUserId)))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }
@@ -721,17 +751,19 @@ public sealed class DeviceProvisioningService(
     /// <param name="request">The fields to change; omitted members are left alone.</param>
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">When true, allows editing any device in the deployment.</param>
     public async Task<DeviceOutcome> UpdateAsync(
         string deviceId,
         UpdateDeviceRequest request,
         Guid ownerUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool mayReachAnyAccount = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
-        if (device is null || !IsCallers(device, ownerUserId))
+        if (device is null || (!mayReachAnyAccount && !IsCallers(device, ownerUserId)))
         {
             return DeviceOutcome.Failure("not_found", "Device not found.");
         }

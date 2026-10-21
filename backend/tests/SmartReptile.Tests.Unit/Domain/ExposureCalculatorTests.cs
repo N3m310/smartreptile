@@ -1,5 +1,7 @@
 using FluentAssertions;
+using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Summaries;
+using SmartReptile.Domain.Thresholds;
 
 namespace SmartReptile.Tests.Unit.Domain;
 
@@ -165,5 +167,64 @@ public class ExposureCalculatorTests
         ExposureCalculator.TimeWeightedAverage(grid).Should().BeNull();
         ExposureCalculator.Min(grid).Should().BeNull();
         ExposureCalculator.Max(grid).Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-46")]
+    public void GivenMetricSamples_ThenGridSummaryCombinesOutOfRangeMinutesAndExposure()
+    {
+        var samples = Enumerable.Range(0, 60)
+            .Select(i => (Start.AddMinutes(i), i < 40 ? 34m : 33m))
+            .ToList();
+        var band = new ThresholdBand
+        {
+            Metric = MetricCode.TempC,
+            TargetMin = 26m,
+            TargetMax = 32m,
+        };
+
+        var summary = MetricGridSummarizer.Summarize(
+            MetricCode.TempC,
+            samples,
+            Start,
+            Start.AddHours(1),
+            _ => band,
+            lightThresholdLux: 1000m);
+
+        summary.SampleCount.Should().Be(60);
+        summary.MinValue.Should().Be(33m);
+        summary.MaxValue.Should().Be(34m);
+        summary.OutOfRangeMinutes.Should().Be(60);
+        summary.ExposureValue.Should().BeApproximately(1.67m, 0.02m);
+    }
+
+    [Fact]
+    [Trait("TestCase", "TC-U-47")]
+    public void GivenGap_ThenMetricGridSummaryDoesNotCountMissingMinutesAsInRange()
+    {
+        var samples = new[]
+        {
+            (Start, 25m),
+            (Start.AddHours(2), 50m),
+        };
+        var band = new ThresholdBand
+        {
+            Metric = MetricCode.HumidityPct,
+            TargetMin = 30m,
+            TargetMax = 40m,
+        };
+
+        var summary = MetricGridSummarizer.Summarize(
+            MetricCode.HumidityPct,
+            samples,
+            Start,
+            Start.AddHours(2).AddMinutes(1),
+            _ => band,
+            lightThresholdLux: 1000m);
+
+        summary.SampleCount.Should().Be(2);
+        summary.OutOfRangeMinutes.Should().Be(2);
+        summary.HumidityDryExposure.Should().BeApproximately(5m / 60m, 0.0001m);
+        summary.HumidityWetExposure.Should().BeApproximately(10m / 60m, 0.0001m);
     }
 }

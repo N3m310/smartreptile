@@ -8,6 +8,17 @@ export default defineConfig({
   server: {
     port: 8081,
     host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/hubs': {
+        target: 'http://localhost:8080',
+        ws: true,
+        changeOrigin: true,
+      },
+    },
     // The copy deck lives in `app/lib/l10n` and is imported from `src/i18n/strings.ts` as `?raw` — one deck,
     // two clients (`TC-I-15`). The dev server refuses to serve files outside its root unless told to.
     fs: { allow: ['..'] }

@@ -66,7 +66,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final data = context.watch<AppDataProvider>();
+    final session = context.watch<SessionProvider>();
     final devices = data.devices;
+
+    // Đảm bảo _currentTerrariumId luôn tồn tại trong danh sách terrariums từ Database
+    if (data.terrariums.isNotEmpty &&
+        !data.terrariums.any((t) => t.id == _currentTerrariumId)) {
+      _currentTerrariumId = data.terrariums.first.id;
+      final first = data.terrariums.first;
+      _tempMinCtrl.text = first.thresholds.tempMin.toString();
+      _tempMaxCtrl.text = first.thresholds.tempMax.toString();
+      _humMinCtrl.text = first.thresholds.humidityMin.toString();
+      _humMaxCtrl.text = first.thresholds.humidityMax.toString();
+      _lightMinCtrl.text = first.thresholds.lightMin.toString();
+      _lightMaxCtrl.text = first.thresholds.lightMax.toString();
+    }
+
+    final terrariumItems = data.terrariums;
+    final selectedValue = terrariumItems.any((t) => t.id == _currentTerrariumId)
+        ? _currentTerrariumId
+        : (terrariumItems.isNotEmpty ? terrariumItems.first.id : null);
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
@@ -100,29 +119,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: AppColors.textMain,
                       ),
                     ),
-                    DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _currentTerrariumId,
-                        dropdownColor: AppColors.bgCardHover,
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                    if (terrariumItems.isNotEmpty)
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedValue,
+                          dropdownColor: AppColors.bgCardHover,
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                          items: [
+                            for (final t in terrariumItems)
+                              DropdownMenuItem(value: t.id, child: Text(t.name)),
+                          ],
+                          onChanged: (id) {
+                            if (id != null) {
+                              final target = data.terrariums.firstWhere(
+                                (t) => t.id == id,
+                              );
+                              _loadTerrariumThresholds(target);
+                            }
+                          },
                         ),
-                        items: [
-                          for (final t in data.terrariums)
-                            DropdownMenuItem(value: t.id, child: Text(t.name)),
-                        ],
-                        onChanged: (id) {
-                          if (id != null) {
-                            final target = data.terrariums.firstWhere(
-                              (t) => t.id == id,
-                            );
-                            _loadTerrariumThresholds(target);
-                          }
-                        },
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -468,6 +488,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final l10n = AppLocalizations.of(context);
 
                 if (!session.isSignedIn) {
+                  if (session.isGuestMode) {
+                    session.leaveGuestMode();
+                    return;
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(l10n.sessionSignedOut)),
                   );
@@ -483,8 +507,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ScaffoldMessenger.of(context)
                     .showSnackBar(SnackBar(content: Text(l10n.signedOut)));
               },
-              icon: const Icon(Icons.logout, size: 18),
-              label: Text(AppLocalizations.of(context).signOut),
+              icon: Icon(session.isSignedIn ? Icons.logout : Icons.login, size: 18),
+              label: Text(session.isSignedIn ? AppLocalizations.of(context).signOut : 'Đăng nhập / Thoát khách'),
             ),
           ),
           const SizedBox(height: 24),

@@ -126,6 +126,29 @@ restarting the documented rotation and the only reset path
 log). Nothing is inserted that `PasswordPolicy` or `AccountIdentifierPolicy` would refuse; a refusal is logged and
 skipped, and the section being empty is not an error — it is the switch.
 
+**`DemoDataSeeder` runs after it, and is the only start-up step a deployment cannot switch on by accident**
+(2026-10-20, BE-07). It fills a development database with something to look at — three accounts on the seeded roles
+(`demo.owner`, `demo.technician`, `demo.viewer`, one documented password), three enclosures on three different
+built-in profiles, a board in each, seven days of one-minute samples with their readings, a few alerts in both
+states and an inbox — and it is doubly gated: `Seed:DemoData` must be true *and* the environment must be
+`Development`, the second check being code rather than configuration because a flag is what gets left on. It is
+idempotent by identity rather than by count (`demo.owner` present means "nothing to do"), it issues no device
+secrets (a credential exists only in a claim response, and a seeder has nobody to show one to), and it finishes by
+running `SummaryRecomputer` over what it wrote, so the rollups and daily summaries are derived from the readings
+rather than inserted beside them — a demo whose summary disagreed with its own data would be a bug report against
+the wrong layer.
+
+It fills **every table a screen reads**, not only the three lists: a `DeviceCredential` per board (random hash, so
+the device screen has an "issued at" and no secret exists), 28 six-hourly `DeviceHealthSample` rows per board, six
+`DeviceEvent` rows per board (boot, an unsynced clock, a probe that faulted and recovered, a calibration), two
+`ThresholdSnapshot` rows per enclosure — the set in force a week ago and the set in force now, with this enclosure's
+override applied — one `ThresholdOverride` on the first enclosure so the effective-thresholds table shows a row whose
+source is `override`, two `MetricSilence` windows (one still in force, one cancelled, because the list renders both
+states), and `AuditLog` rows for the claim and the edit that produced each enclosure. What it deliberately does not
+do is create the objects a demo is meant to create live; that is `scripts/demo-create.ps1`, which posts a new account,
+a new species profile and a new enclosure through the API so the ids, the validation and the role checks are the
+server's rather than a fixture's.
+
 **The 2026-10-17 re-framing added two migrations.** `20261016161825_AddRolesAndPermissions` creates `Permission`,
 `Role` and `RolePermission`, seeds the matrix from the same catalogue the seeder reads, and replaces `User.Role`
 with the non-null `User.RoleId` — added nullable, back-filled from the old `int` column and only then tightened,
@@ -367,7 +390,7 @@ skipped and nothing is evaluated twice.
 | Group | Endpoints (abbreviated) | Notes |
 |---|---|---|
 | `/api/v1/auth` | `register`, `login`, `refresh`, `logout`, `me`, `change-password`, `delete me`, `recover`, `forgot-password`, `reset-password` | Anonymous + `[Authorize]`; the three recovery routes are anonymous and share the credential throttle (`auth`, 10 / min / address), while `me`, `refresh` and `logout` carry the larger `authSession` budget because a signed-in client calls them as housekeeping. A password change ends every **other** session of the account (`ADR-022`). `PATCH /me` is the preference patch and `DELETE /me` disables the account (2026-10-14, TASKS item 9a — see below) |
-| `/api/v1/users` | **built:** `GET`, `POST`, `GET {id}`, `PATCH {id}`, `POST {id}/reset-password`, `PATCH {id}/role`, `POST {id}/disable`, `POST {id}/enable`, `DELETE {id}` | The group names `user.read` and every write adds `user.manage` on its own route, so a deployment can grant an auditor the first without the second. `UserAdminService` holds the three guards: no self-change, never the last account holding `user.manage`, and never a purge of an account something still references. `DELETE` without `?purge=true` is a disable; with it the row is erased only when nothing points at it (2026-10-14 TASKS item 12; the create/edit/reset/delete half and the permission codes, 2026-10-17) |
+| `/api/v1/users` | **built:** `GET`, `POST`, `GET {id}`, `PATCH {id}`, `POST {id}/reset-password`, `PATCH {id}/role`, `POST {id}/disable`, `POST {id}/enable`, `DELETE {id}` | The group names `user.read` and every write adds `user.manage` on its own route, so a deployment can grant an auditor the first without the second. `UserAdminService` holds the two guards: no self-change, and never the last account holding `user.manage`. `DELETE` is a hard delete (2026-10-20): board unbinding, enclosures and their data, the account's own profiles and its inbox go in one transaction, and `POST {id}/disable` is the reversible act (2026-10-14 TASKS item 12; the create/edit/reset/delete half and the permission codes, 2026-10-17) |
 | `/api/v1/time-zones` | `GET` | Reference data for every picker, read by any authenticated caller; the catalogue is the `TimeZone` table, seeded from `ReferenceDataSeeder.Catalogue` (2026-10-14, TASKS item 11) |
 
 Password recovery (FR-01, BR-01.5) is the group's largest deliberate piece of design, and one file owns it:

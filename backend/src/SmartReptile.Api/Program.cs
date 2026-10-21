@@ -493,11 +493,12 @@ await using (var scope = app.Services.CreateAsyncScope())
         var outcome = await initializer.InitializeAsync();
         logger.LogInformation(
             "Start-up complete: migrationsApplied={MigrationsApplied}, profilesSeeded={ProfilesSeeded}, "
-            + "timeZonesSeeded={TimeZonesSeeded}, adminSeeded={AdminSeeded}, version={Version}",
+            + "timeZonesSeeded={TimeZonesSeeded}, adminSeeded={AdminSeeded}, demoSeeded={DemoSeeded}, version={Version}",
             outcome.MigrationsApplied,
             outcome.ProfilesSeeded,
             outcome.TimeZonesSeeded,
             outcome.AdminSeeded,
+            outcome.Demo.Seeded,
             applicationVersion);
     }
     catch (Exception ex)

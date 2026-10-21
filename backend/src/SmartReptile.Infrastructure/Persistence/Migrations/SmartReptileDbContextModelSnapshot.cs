@@ -112,6 +112,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DeviceId");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("TriggeredAt");
 
                     b.HasIndex("TerrariumId", "State", "TriggeredAt")
@@ -153,6 +155,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetimeoffset(3)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Metric");
 
                     b.HasIndex("TerrariumId", "UntilUtc");
 
@@ -399,6 +403,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("TerrariumId");
 
                     b.HasIndex("DeviceId", "RecordedAt")
@@ -474,7 +480,14 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetimeoffset(3)");
 
+                    b.Property<DateTimeOffset?>("LastEvaluatedAtUtc")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
                     b.Property<long>("LastEvaluatedSampleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("LastEvaluatedSequence")
                         .HasColumnType("bigint");
 
                     b.Property<DateTimeOffset?>("LastNotificationAt")
@@ -493,6 +506,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("TerrariumId", "Metric", "Phase");
+
+                    b.HasIndex("Metric");
 
                     b.ToTable("EvaluationState", (string)null);
                 });
@@ -763,6 +778,61 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("User", (string)null);
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Metrics.MetricReference", b =>
+                {
+                    b.Property<int>("Code")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ApiKey")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("nvarchar(24)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("Family")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsCore")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("PayloadKey")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<decimal>("PlausibleMax")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal>("PlausibleMin")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<int>("Precision")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.HasKey("Code");
+
+                    b.HasIndex("ApiKey")
+                        .IsUnique();
+
+                    b.HasIndex("SortOrder");
+
+                    b.ToTable("Metric", (string)null);
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Notifications.NotificationLog", b =>
@@ -1087,6 +1157,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("SpeciesProfileId", "Metric", "Phase")
                         .IsUnique();
 
@@ -1156,6 +1228,8 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Metric");
+
                     b.HasIndex("TerrariumId", "Metric", "Phase")
                         .IsUnique();
 
@@ -1165,6 +1239,165 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_ThresholdOverride_TargetOrder", "[TargetMin] < [TargetMax]");
                         });
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Summaries.DailyEnvironmentalSummary", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("AlertCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("ComputedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<decimal>("CoveragePct")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("decimal(6,2)");
+
+                    b.Property<int>("CriticalAlertCount")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("HumidityAvg")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal>("HumidityDryExposurePctHours")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("decimal(12,4)");
+
+                    b.Property<decimal?>("HumidityMax")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal?>("HumidityMin")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal>("HumidityWetExposurePctHours")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("decimal(12,4)");
+
+                    b.Property<bool>("IsLowConfidence")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("LightDeficitHours")
+                        .HasPrecision(8, 3)
+                        .HasColumnType("decimal(8,3)");
+
+                    b.Property<decimal>("LightHours")
+                        .HasPrecision(8, 3)
+                        .HasColumnType("decimal(8,3)");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date");
+
+                    b.Property<decimal?>("LuxAvg")
+                        .HasPrecision(12, 3)
+                        .HasColumnType("decimal(12,3)");
+
+                    b.Property<string>("OutOfRangeMinutesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("TempAvg")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal>("TempExposureDegCHours")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("decimal(12,4)");
+
+                    b.Property<decimal?>("TempMax")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<decimal?>("TempMin")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<Guid>("TerrariumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<decimal?>("UvMax")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerrariumId", "LocalDate")
+                        .IsUnique();
+
+                    b.ToTable("DailyEnvironmentalSummary", (string)null);
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Summaries.TelemetryHourlyRollup", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal?>("AvgValue")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<DateTimeOffset>("ComputedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<decimal>("ExposureValue")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTimeOffset>("HourStartUtc")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<decimal?>("MaxValue")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<int>("Metric")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("MinValue")
+                        .HasPrecision(9, 3)
+                        .HasColumnType("decimal(9,3)");
+
+                    b.Property<int>("OutOfRangeMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SampleCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TerrariumId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ThresholdSnapshotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Metric");
+
+                    b.HasIndex("ThresholdSnapshotId");
+
+                    b.HasIndex("TerrariumId", "Metric", "HourStartUtc")
+                        .IsUnique();
+
+                    b.ToTable("TelemetryHourlyRollup", (string)null);
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Terrariums.Terrarium", b =>
@@ -1262,6 +1495,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1271,6 +1509,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Alerts.MetricSilence", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1312,6 +1555,11 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1329,6 +1577,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Evaluation.EvaluationState", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany()
                         .HasForeignKey("TerrariumId")
@@ -1386,6 +1640,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Readings.MetricReading", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Readings.TelemetrySample", "Sample")
                         .WithMany("Readings")
                         .HasForeignKey("SampleId")
@@ -1412,6 +1672,12 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Species.Threshold", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Species.SpeciesProfile", "SpeciesProfile")
                         .WithMany("Thresholds")
                         .HasForeignKey("SpeciesProfileId")
@@ -1423,11 +1689,46 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("SmartReptile.Domain.Species.ThresholdOverride", b =>
                 {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
                         .WithMany("ThresholdOverrides")
                         .HasForeignKey("TerrariumId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Summaries.DailyEnvironmentalSummary", b =>
+                {
+                    b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
+                        .WithMany()
+                        .HasForeignKey("TerrariumId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SmartReptile.Domain.Summaries.TelemetryHourlyRollup", b =>
+                {
+                    b.HasOne("SmartReptile.Domain.Metrics.MetricReference", null)
+                        .WithMany()
+                        .HasForeignKey("Metric")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SmartReptile.Domain.Terrariums.Terrarium", null)
+                        .WithMany()
+                        .HasForeignKey("TerrariumId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartReptile.Domain.Thresholds.ThresholdSnapshot", null)
+                        .WithMany()
+                        .HasForeignKey("ThresholdSnapshotId")
+                        .OnDelete(DeleteBehavior.NoAction);
                 });
 
             modelBuilder.Entity("SmartReptile.Domain.Terrariums.Terrarium", b =>

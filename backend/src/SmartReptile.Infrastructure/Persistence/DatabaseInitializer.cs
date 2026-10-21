@@ -14,6 +14,7 @@ public sealed class DatabaseInitializer(
     ReferenceDataSeeder seeder,
     IdentitySeeder identitySeeder,
     SystemAdminAccountSeeder adminSeeder,
+    DemoDataSeeder demoSeeder,
     IOptions<StartupOptions> options,
     ILogger<DatabaseInitializer> logger)
 {
@@ -48,6 +49,10 @@ public sealed class DatabaseInitializer(
 
         if (settings.SeedReferenceDataOnStartup)
         {
+            // The metric catalogue first: the built-in profiles below name metrics, and since DI-06 those names are
+            // foreign keys, so a row the dictionary knows has to exist before a band can point at it.
+            await seeder.SeedMetricCatalogueAsync(cancellationToken).ConfigureAwait(false);
+
             profilesSeeded = await seeder.SeedAsync(cancellationToken).ConfigureAwait(false);
 
             // The time-zone catalogue is seeded by the same switch, because it is read by the same clients: a
@@ -66,7 +71,15 @@ public sealed class DatabaseInitializer(
         // administrator disables this by saying nothing. It runs after the reference data because the catalogue is
         // what the account exists to author, and after the identity seed because the account needs a role to hold.
         var adminSeeded = await adminSeeder.SeedAsync(cancellationToken).ConfigureAwait(false);
-        return new InitializationOutcome(migrationsApplied, profilesSeeded, timeZonesSeeded, adminSeeded, identitySeed);
+
+        // Last, because it needs everything above: accounts on the seeded roles, enclosures on the seeded profiles,
+        // and a catalogue to choose them from. The seeder refuses outside Development and when the flag is off.
+        var demo = await demoSeeder.SeedAsync(cancellationToken).ConfigureAwait(false);
+
+        return new InitializationOutcome(migrationsApplied, profilesSeeded, timeZonesSeeded, adminSeeded, identitySeed)
+        {
+            Demo = demo,
+        };
     }
 }
 
@@ -81,4 +94,8 @@ public readonly record struct InitializationOutcome(
     int ProfilesSeeded,
     int TimeZonesSeeded,
     bool AdminSeeded,
-    IdentitySeedOutcome IdentitySeed);
+    IdentitySeedOutcome IdentitySeed)
+{
+    /// <summary>What the demo-data step did; <see cref="DemoSeedOutcome.NotRequested"/> unless it was asked for.</summary>
+    public DemoSeedOutcome Demo { get; init; }
+}
