@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Admin;
 using SmartReptile.Domain.Alerts;
+using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Devices;
 using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Metrics;
@@ -328,6 +330,95 @@ public sealed class EfAdminStore(SmartReptileDbContext db) : IAdminStore
     /// <inheritdoc />
     public Task<int> CountAlertsAsync(AlertFamily? family, AlertState? state, CancellationToken cancellationToken) =>
         FilterAlerts(family, state).CountAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<AdminTerrariumDeletion?> DeleteTerrariumAsync(
+        Guid terrariumId,
+        Guid actingUserId,
+        AuditActor actor,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
+        // The context's query filter excludes soft-deleted rows, which is deliberate: an enclosure its owner already
+        // removed answers 404 here rather than being deleted a second time.
+        var terrarium = await db.Terrariums
+            .FirstOrDefaultAsync(row => row.Id == terrariumId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (terrarium is null)
+        {
+            return null;
+        }
+
+        var devices = await db.Devices
+            .Where(device => device.TerrariumId == terrariumId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        // The row's own state as the audit row's payload, captured before the delete: once the row is gone, nothing
+        // else can say whose enclosure it was or what it was called.
+        var terrariumJson = JsonSerializer.Serialize(
+            new
+            {
+                terrarium.Id,
+                terrarium.Name,
+                terrarium.UserId,
+                terrarium.SpeciesProfileId,
+                Status = terrarium.Status.ToString(),
+            },
+            JsonSerializerOptions.Web);
+
+        var unbound = new List<string>(devices.Count);
+
+        foreach (var device in devices)
+        {
+            var beforeJson = JsonSerializer.Serialize(
+                new
+                {
+                    device.Id,
+                    device.PublicId,
+                    device.TerrariumId,
+                    Status = device.Status.ToString(),
+                },
+                JsonSerializerOptions.Web);
+
+            // Back to Provisioning, not Revoked: the board is fine, it just has no enclosure. Credentials and the
+            // owner are kept so the account can still revoke, rotate or re-claim it — the same rule the keeper's own
+            // delete applies.
+            device.TerrariumId = null;
+            device.Status = DeviceStatus.Provisioning;
+            device.ProvisionedAt = null;
+            device.ClaimCode = null;
+            device.ClaimCodeExpiresAt = null;
+
+            unbound.Add(device.PublicId);
+
+            db.AuditLogs.Add(AuditLog.ForDevice(
+                AuditAction.DeviceUnbound,
+                device.Id,
+                device.PublicId,
+                actingUserId,
+                actor,
+                occurredAt,
+                beforeJson: beforeJson));
+        }
+
+        db.AuditLogs.Add(AuditLog.ForTerrarium(
+            AuditAction.TerrariumDeleted,
+            terrarium.Id,
+            actingUserId,
+            actor,
+            occurredAt,
+            beforeJson: terrariumJson));
+
+        db.Terrariums.Remove(terrarium);
+
+        // One unit of work: the unbinding, both audit rows and the delete commit together, so a failure leaves the
+        // enclosure exactly as it was rather than with its boards already released.
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return new AdminTerrariumDeletion(terrariumId, terrarium.UserId, unbound);
+    }
 
     /// <summary>
     /// The enclosure query, filtered by the search both <c>list</c> and <c>count</c> use.

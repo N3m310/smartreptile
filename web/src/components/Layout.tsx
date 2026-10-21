@@ -13,7 +13,6 @@ import {
   LogOut,
   Menu,
   MonitorPlay,
-  ServerCog,
   Settings,
   ShieldCheck,
   User,
@@ -28,7 +27,6 @@ import { useI18n } from '../i18n';
 import { LANGUAGES } from '../i18n/strings';
 import { useSession } from '../state/session';
 import { describeChangePasswordError, fieldMessages } from '../lib/messages';
-import { MockDataNotice } from './MockDataNotice';
 
 /**
  * The shell. Everything in it is either the session's or the API's — the prototype's hard-coded
@@ -39,11 +37,8 @@ import { MockDataNotice } from './MockDataNotice';
  * defensively, because a session can be dropped from inside a request (a rotation failure) while the shell is
  * mounted.
  *
- * Devices, Alerts and Settings still render mock data. Only Settings carries the mock-data notice; the device and
- * alert screens keep their demo content without an extra banner in the way.
+ * Devices, Alerts and Settings use the API-backed account data.
  */
-
-const MOCK_ROUTES = ['/settings'];
 
 /**
  * One entry of the sidebar. `permission` is what the signed-in account's role must grant for the entry to appear —
@@ -70,8 +65,6 @@ export const Layout: React.FC = () => {
   const [changed, setChanged] = useState(false);
 
   const online = navigator.onLine;
-  const showsMockNotice = MOCK_ROUTES.some((route) => location.pathname.startsWith(route));
-
   const navItems: NavEntry[] = [
     { name: t('navDashboard'), path: '/dashboard', icon: LayoutDashboard, permission: null },
     { name: t('navTerrariums'), path: '/terrariums', icon: Box, permission: null },
@@ -80,9 +73,11 @@ export const Layout: React.FC = () => {
     { name: t('navAlerts'), path: '/alerts', icon: AlertTriangle, permission: null },
     { name: t('navHistory'), path: '/history', icon: History, permission: null },
     { name: t('navSettings'), path: '/settings', icon: Settings, permission: null },
-    { name: t('navSystem'), path: '/system', icon: ServerCog, permission: null },
     { name: t('navWallboard'), path: '/wallboard', icon: MonitorPlay, permission: null },
   ];
+
+  // `navSystem` was hidden from the sidebar on 2026-10-19 at the product owner's request; `/system` still resolves
+  // for anyone who types the URL, so retiring the menu entry does not retire the page.
 
   /**
    * The administrator's entries, shown only to an account whose role grants what the screens behind them need
@@ -344,11 +339,6 @@ export const Layout: React.FC = () => {
         </header>
 
         <main className="mx-auto w-full max-w-7xl flex-1 p-4 sm:p-8">
-          {showsMockNotice ? (
-            <div className="mb-6">
-              <MockDataNotice />
-            </div>
-          ) : null}
           <Outlet />
         </main>
       </div>

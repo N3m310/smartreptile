@@ -131,8 +131,11 @@ effect within one access-token lifetime (15 minutes). The console warns about th
   accounts. It is checked by *counting holders of `user.manage`* rather than by comparing role names, so a deployment
   that re-banded or split the administrator role is still protected — the same check runs before a role edit that
   would remove the permission from its last holder.
-- **In use.** `409 account_in_use` on a purge that would orphan enclosures, boards or alerts; those rows would be
-  data no screen could explain.
+- **Deleting an account erases it, with what it held.** `DELETE /users/{id}` (2026-10-20) unbinds its boards,
+  deletes its enclosures and everything cascading from them, deletes its own catalogue profiles and its inbox, and
+  then the row — in one transaction. A board whose owner no longer exists is not left behind pointing at nothing: it
+  is unbound and stays in the deployment for another account to claim. Disabling is the reversible act and the only
+  way to keep the data.
 - **Admin cannot be registered into existence.** `POST /auth/register` always produces an `Owner`. The one account
   that holds `Admin` is seeded at start-up from the `Admin` configuration section (`Admin:Username`, `Admin:Email`,
   `Admin:Password`, empty by default), which is also the credential's owner of record — editing `Admin:Password` and

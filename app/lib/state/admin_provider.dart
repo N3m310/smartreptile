@@ -24,6 +24,7 @@ class AdminProvider extends ChangeNotifier {
   PagedState<AdminTerrarium>? _terrariums;
   PagedState<AdminDevice>? _devices;
   PagedState<AdminAlert>? _alerts;
+  PagedState<AdminSpeciesProfile>? _speciesProfiles;
 
   String? _alertFamily;
   String? _alertState;
@@ -45,6 +46,9 @@ class AdminProvider extends ChangeNotifier {
 
   /// The alerts page, or null while it has never been read.
   PagedState<AdminAlert>? get alerts => _alerts;
+
+  /// The species profiles page, or null while it has never been read.
+  PagedState<AdminSpeciesProfile>? get speciesProfiles => _speciesProfiles;
 
   /// The family the alert list is filtered by, or null for both.
   String? get alertFamily => _alertFamily;
@@ -133,6 +137,51 @@ class AdminProvider extends ChangeNotifier {
     await loadAlerts();
   }
 
+  /// Reads one page of species profiles.
+  Future<void> loadSpeciesProfiles({String? search, int skip = 0}) async {
+    final filter = search ?? _speciesProfiles?.search ?? '';
+    _speciesProfiles = (_speciesProfiles ?? _initial<AdminSpeciesProfile>(filter))
+        .copyWith(search: filter, isLoading: true, clearFailure: true);
+    notifyListeners();
+
+    try {
+      final payload = await _api.getJson('/api/v1/species-profiles');
+      final list = (payload['items'] as List?) ?? const [];
+      final allProfiles = [
+        for (final item in list)
+          if (item is Map<String, dynamic>) AdminSpeciesProfile.fromJson(item),
+      ];
+
+      // Client-side filtering and slicing since GET /species-profiles returns the full list
+      final filtered = filter.trim().isEmpty
+          ? allProfiles
+          : allProfiles.where((p) {
+              final q = filter.toLowerCase();
+              return p.name.toLowerCase().contains(q) ||
+                  p.scientificName.toLowerCase().contains(q) ||
+                  p.climateZone.toLowerCase().contains(q);
+            }).toList();
+
+      final pagedItems = filtered.skip(skip).take(adminPageSize).toList();
+
+      _speciesProfiles = _speciesProfiles!.copyWith(
+        items: pagedItems,
+        total: filtered.length,
+        skip: skip,
+        take: adminPageSize,
+        isLoading: false,
+        clearFailure: true,
+      );
+    } on AppFailure catch (failure) {
+      _speciesProfiles = _speciesProfiles!.copyWith(
+        isLoading: false,
+        failure: failure,
+      );
+    } finally {
+      notifyListeners();
+    }
+  }
+
   /// Drops everything, so a sign-out cannot leave another account's data on screen.
   void clear() {
     _overview = null;
@@ -141,6 +190,7 @@ class AdminProvider extends ChangeNotifier {
     _terrariums = null;
     _devices = null;
     _alerts = null;
+    _speciesProfiles = null;
     _alertFamily = null;
     _alertState = null;
     notifyListeners();

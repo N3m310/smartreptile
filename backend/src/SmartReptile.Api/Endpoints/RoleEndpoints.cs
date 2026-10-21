@@ -153,22 +153,6 @@ public static class RoleEndpoints
             _ => StatusCodes.Status400BadRequest,
         };
 
-        var extensions = new Dictionary<string, object?>
-        {
-            ["code"] = problem.Code,
-        };
-
-        if (problem.Errors.Count > 0)
-        {
-            extensions["errors"] = problem.Errors
-                .Select(violation => new { violation.Field, violation.Code, violation.Message })
-                .ToArray();
-        }
-
-        return Results.Problem(
-            title: problem.Message,
-            statusCode: status,
-            type: $"https://smartreptile.example/problems/{problem.Code}",
-            extensions: extensions);
+        return ApiProblem.Create(problem.Code, problem.Message, status, problem.Errors);
     }
 }

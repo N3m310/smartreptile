@@ -39,7 +39,9 @@ class SpeciesProfileProvider extends ChangeNotifier {
       if (_searchQuery.trim().isNotEmpty) {
         final query = _searchQuery.trim().toLowerCase();
         final matchesName = profile.name.toLowerCase().contains(query);
-        final matchesScientific = profile.scientificName.toLowerCase().contains(query);
+        final matchesScientific = profile.scientificName.toLowerCase().contains(
+          query,
+        );
         if (!matchesName && !matchesScientific) {
           return false;
         }

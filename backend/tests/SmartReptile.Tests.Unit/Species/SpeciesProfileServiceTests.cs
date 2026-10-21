@@ -57,6 +57,79 @@ public class SpeciesProfileServiceTests
         outcome.Succeeded.Should().BeTrue();
         outcome.Profiles!.Select(profile => profile.Name).Should().Equal("Arid (desert)", "Mine");
         outcome.Profiles![0].IsBuiltIn.Should().BeTrue("a seeded profile is read-only in the UI");
+        outcome.Profiles![0].CanEdit.Should().BeFalse("a built-in is edited by duplicating it");
+        outcome.Profiles![1].CanEdit.Should().BeTrue("the account owns it");
+    }
+
+    // ---- read ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Get_returns_a_built_in_and_marks_it_read_only()
+    {
+        var builtIn = _store.AddBuiltIn("Arid (desert)", (MetricCode.TempC, 38m, 42m));
+
+        var outcome = await _service.GetAsync(builtIn.Id, _owner, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Profile!.Id.Should().Be(builtIn.Id);
+        outcome.Profile.Name.Should().Be("Arid (desert)");
+        outcome.Profile.IsBuiltIn.Should().BeTrue();
+        outcome.Profile.CanEdit.Should().BeFalse("a built-in is edited by duplicating it");
+        outcome.Profile.Bands.Should().ContainSingle().Which.Metric.Should().Be("tempC");
+    }
+
+    [Fact]
+    public async Task Get_marks_the_callers_own_profile_editable()
+    {
+        var mine = _store.AddProfile(_owner, "Mine", (MetricCode.HumidityPct, 30m, 40m));
+
+        var outcome = await _service.GetAsync(mine.Id, _owner, CancellationToken.None);
+
+        outcome.Profile!.CanEdit.Should().BeTrue("the account owns it");
+        outcome.Profile.ImageUrl.Should().BeNull("a profile without a picture says so with null");
+    }
+
+    [Fact]
+    public async Task Get_answers_a_foreign_profile_exactly_like_a_missing_one()
+    {
+        var foreign = _store.AddProfile(Guid.NewGuid(), "Someone else's", (MetricCode.TempC, 20m, 24m));
+
+        var foreignOutcome = await _service.GetAsync(foreign.Id, _owner, CancellationToken.None);
+        var missingOutcome = await _service.GetAsync(Guid.NewGuid(), _owner, CancellationToken.None);
+
+        foreignOutcome.Problem!.Code.Should().Be("not_found");
+        missingOutcome.Problem!.Code.Should().Be("not_found");
+        foreignOutcome.Problem.Message.Should().Be(
+            missingOutcome.Problem.Message,
+            "a foreign id has to stay indistinguishable from a made-up one (BR-02.2)");
+    }
+
+    [Fact]
+    public async Task Get_marks_a_built_in_editable_for_an_administrator()
+    {
+        var builtIn = _store.AddBuiltIn("Arid (desert)", (MetricCode.TempC, 38m, 42m));
+
+        var outcome = await _service.GetAsync(builtIn.Id, _owner, CancellationToken.None, mayEditAny: true);
+
+        outcome.Profile!.IsBuiltIn.Should().BeTrue();
+        outcome.Profile.CanEdit.Should().BeTrue("an administrator edits the built-ins in place");
+    }
+
+    [Fact]
+    public async Task Get_orders_the_bands_by_metric_then_phase()
+    {
+        var created = await _service.CreateAsync(
+            Create(bands: [Band("humidityPct", "night"), Band("tempC", "night"), Band("tempC", "day")]),
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None);
+
+        var outcome = await _service.GetAsync(created.Profile!.Id, _owner, CancellationToken.None);
+
+        // Ordered by metric — the dictionary's own order — and then by phase, so two reads of one profile agree
+        // and the client renders the array exactly as it arrives.
+        outcome.Profile!.Bands.Select(band => $"{band.Metric}/{band.Phase}")
+            .Should().Equal("tempC/day", "tempC/night", "humidityPct/night");
     }
 
     // ---- create -------------------------------------------------------------------------------------
@@ -333,6 +406,98 @@ public class SpeciesProfileServiceTests
         _store.SaveCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task Patch_lets_an_administrator_edit_a_built_in_in_place()
+    {
+        var builtIn = _store.AddBuiltIn("Arid (desert)", (MetricCode.TempC, 38m, 42m));
+
+        var outcome = await _service.UpdateAsync(
+            builtIn.Id,
+            new UpdateSpeciesProfileRequest("Arid (desert, revised)", null, null, 10m, null, null, null, null, null),
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayEditAny: true);
+
+        outcome.Succeeded.Should().BeTrue("an administrator edits the catalogue in place rather than duplicating it");
+        outcome.Profile!.Name.Should().Be("Arid (desert, revised)");
+        outcome.Profile.IsBuiltIn.Should().BeTrue("editing it does not turn a built-in into a custom profile");
+        outcome.Profile.CanEdit.Should().BeTrue("the administrator may edit it again");
+
+        var audit = _store.AuditEntries.Should().ContainSingle().Subject;
+        audit.Action.Should().Be(AuditAction.ProfileUpdated);
+        audit.BeforeJson.Should().Contain("Arid (desert)", "BR-10.4 wants the state before the change");
+        audit.AfterJson.Should().Contain("Arid (desert, revised)");
+    }
+
+    [Fact]
+    public async Task Patch_lets_an_administrator_edit_another_accounts_profile()
+    {
+        var otherOwner = Guid.NewGuid();
+        var foreign = _store.AddProfile(otherOwner, "Theirs", (MetricCode.TempC, 20m, 24m));
+
+        var outcome = await _service.UpdateAsync(
+            foreign.Id,
+            new UpdateSpeciesProfileRequest("Theirs, fixed", null, null, null, null, null, null, null, null),
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayEditAny: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Profile!.Name.Should().Be("Theirs, fixed");
+        outcome.Profile.CanEdit.Should().BeTrue();
+
+        _store.Profiles.Single(profile => profile.Id == foreign.Id)
+            .CreatedByUserId.Should().Be(otherOwner, "an administrator's edit does not take ownership of the row");
+    }
+
+    [Fact]
+    public async Task Patch_checks_a_rename_against_the_profiles_own_namespace()
+    {
+        var otherOwner = Guid.NewGuid();
+        var foreign = _store.AddProfile(otherOwner, "Theirs", (MetricCode.TempC, 20m, 24m));
+        _store.AddProfile(otherOwner, "Taken over there", (MetricCode.TempC, 22m, 26m));
+        _store.AddProfile(_owner, "Taken here", (MetricCode.TempC, 24m, 28m));
+
+        var collides = await _service.UpdateAsync(
+            foreign.Id,
+            new UpdateSpeciesProfileRequest("Taken over there", null, null, null, null, null, null, null, null),
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayEditAny: true);
+
+        // The administrator's own profile of this name is irrelevant: the row would join the other account's set.
+        var allowed = await _service.UpdateAsync(
+            foreign.Id,
+            new UpdateSpeciesProfileRequest("Taken here", null, null, null, null, null, null, null, null),
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayEditAny: true);
+
+        collides.Problem!.Code.Should().Be("profile_name_taken");
+        allowed.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Patch_answers_a_conflict_when_another_request_changed_the_row_first()
+    {
+        var profile = _store.AddProfile(_owner, "Mine", (MetricCode.TempC, 26m, 32m));
+        _store.ConflictOnSave = true;
+
+        var outcome = await _service.UpdateAsync(
+            profile.Id,
+            new UpdateSpeciesProfileRequest("Renamed", null, null, null, null, null, null, null, null),
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("profile_conflict", "a stale rowversion is a reload, not a server fault");
+        _store.SaveCount.Should().Be(0, "nothing was committed");
+    }
+
     // ---- delete -------------------------------------------------------------------------------------
 
     [Fact]
@@ -371,6 +536,23 @@ public class SpeciesProfileServiceTests
 
         outcome.Problem!.Code.Should().Be("builtin_immutable");
         _store.Profiles.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Delete_lets_an_administrator_remove_a_built_in()
+    {
+        var builtIn = SeedBuiltIn();
+
+        var outcome = await _service.DeleteAsync(
+            builtIn,
+            _owner,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayEditAny: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.Profiles.Should().BeEmpty();
+        _store.AuditEntries.Should().ContainSingle().Which.Action.Should().Be(AuditAction.ProfileDeleted);
     }
 
     private Guid SeedBuiltIn() =>

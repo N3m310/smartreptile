@@ -226,8 +226,10 @@ class SpeciesProfileView {
       isBuiltIn: (json['isBuiltIn'] as bool?) ?? false,
       photoperiodHours: (json['photoperiodHours'] as num?)?.toDouble() ?? 12.0,
       lightsOnLocalTime: (json['lightsOnLocalTime'] as String?) ?? '07:00',
-      lightThresholdLux: (json['lightThresholdLux'] as num?)?.toDouble() ?? 1000.0,
-      minLightHoursPerDay: (json['minLightHoursPerDay'] as num?)?.toDouble() ?? 8.0,
+      lightThresholdLux:
+          (json['lightThresholdLux'] as num?)?.toDouble() ?? 1000.0,
+      minLightHoursPerDay:
+          (json['minLightHoursPerDay'] as num?)?.toDouble() ?? 8.0,
       notes: json['notes'] as String?,
       bands: bandsList,
       imageUrl: json['imageUrl'] as String?,
@@ -250,7 +252,8 @@ class SpeciesProfileView {
     if (notes != null) 'notes': notes,
     'bands': bands.map((b) => b.toJson()).toList(),
     if (imageUrl != null) 'imageUrl': imageUrl,
-    if (imageUpdatedAt != null) 'imageUpdatedAt': imageUpdatedAt!.toIso8601String(),
+    if (imageUpdatedAt != null)
+      'imageUpdatedAt': imageUpdatedAt!.toIso8601String(),
   };
 
   SpeciesProfileView copyWith({

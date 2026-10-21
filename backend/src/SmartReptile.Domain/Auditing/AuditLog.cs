@@ -60,6 +60,13 @@ public static class AuditAction
     public const string TerrariumDeleted = "terrarium.deleted";
 
     /// <summary>
+    /// A board was detached from its enclosure without being revoked — it stays in the deployment, unbound and free to
+    /// be claimed again. Written when an administrator deletes an enclosure, because the board outliving it is the part
+    /// that would otherwise be invisible in the trail (TASKS 2026-10-19, BE-02).
+    /// </summary>
+    public const string DeviceUnbound = "device.unbound";
+
+    /// <summary>
     /// An account was disabled — by its owner deleting it, or by an administrator (FR-01, FR-18; TASKS 2026-10-14,
     /// items 9a and 12). One verb for both, because what happened to the account is the same; the row's payload says
     /// who asked.

@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using SmartReptile.Api.Security;
 using SmartReptile.Application.Admin;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Identity;
@@ -121,14 +123,45 @@ public static class AdminEndpoints
                        + "owner and enclosure, which is what makes the two families reviewable across the "
                        + "deployment rather than one account at a time.");
 
+        // Outside the read group on purpose: the group names `data.read.any`, and a write must not also demand the
+        // right to read every account's data — `data.write.any` is the permission this route is about (TASKS
+        // 2026-10-19, BE-02). Requiring both would refuse a role that may edit but not browse.
+        app.MapDelete("/api/v1/admin/terrariums/{terrariumId:guid}", async (
+            Guid terrariumId,
+            HttpContext context,
+            ClaimsPrincipal principal,
+            AdminService admin,
+            CancellationToken cancellationToken) =>
+        {
+            var deleted = await admin.DeleteTerrariumAsync(
+                terrariumId,
+                principal.GetUserId() ?? Guid.Empty,
+                RequestActor.From(context),
+                cancellationToken);
+
+            return deleted
+                ? Results.NoContent()
+                : ApiProblem.Create("not_found", "No such terrarium.", StatusCodes.Status404NotFound);
+        })
+        .WithTags("admin")
+        .RequireAuthorization(Permissions.DataWriteAny)
+        .Produces(StatusCodes.Status204NoContent)
+        .WithSummary("Delete any account's enclosure")
+        .WithDescription("Requires `data.write.any`. A hard delete: the enclosure, its readings, samples, alerts, "
+                       + "summaries and threshold overrides go, unlike the keeper's own soft delete. Boards bound to "
+                       + "it are unbound rather than revoked — they stay in the deployment for their account to "
+                       + "re-claim, and their open broker sessions are closed. Both facts are audited "
+                       + "(`terrarium.deleted`, and one `device.unbound` per board) on the same unit of work as the "
+                       + "delete. An unknown id, or one the owner already deleted, is 404 not_found.");
+
         return app;
     }
 
     /// <summary>Maps a filter refusal to RFC 7807, in the same shape the rest of the API uses.</summary>
     private static IResult Problem(string code, string message) =>
-        Results.Problem(
-            title: message,
-            statusCode: StatusCodes.Status400BadRequest,
-            type: $"https://smartreptile.example/problems/{code}",
-            extensions: new Dictionary<string, object?> { ["code"] = code });
+        Problem(code, message, StatusCodes.Status400BadRequest);
+
+    /// <summary>Maps a refusal with an explicit status to RFC 7807.</summary>
+    private static IResult Problem(string code, string message, int statusCode) =>
+        ApiProblem.Create(code, message, statusCode);
 }

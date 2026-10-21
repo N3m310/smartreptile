@@ -12,58 +12,13 @@ public readonly record struct TakenIdentifiers(bool Username, bool Email)
 }
 
 /// <summary>
-/// What an account owns. All zero is the precondition for a hard delete: a row the product can no longer reach
-/// (an enclosure whose owner is gone) is worse than an account that is merely disabled, so the delete refuses
-/// instead of cascading.
+/// What a hard delete removed, so the audit row can say what went with the account rather than only that it went.
 /// </summary>
-/// <remarks>
-/// The five are the rows whose foreign key points at the account and whose meaning depends on it.
-/// <c>Terrarium.UserId</c> is <c>RESTRICT</c>, so it would block the delete anyway; <c>Device.UserId</c> is
-/// <c>SET NULL</c> and <c>SpeciesProfile.CreatedByUserId</c> carries no key, so those two would be silently
-/// orphaned — which is why they are counted here rather than discovered later. Alerts need no count of their own:
-/// an alert belongs to a terrarium, so "no terrariums" already means no alerts.
-/// </remarks>
-/// <param name="Terrariums">Enclosures the account owns, deleted ones included.</param>
-/// <param name="Devices">Boards the account claimed.</param>
-/// <param name="SpeciesProfiles">Catalogue profiles the account authored.</param>
-/// <param name="Notifications">Rows in the account's inbox.</param>
-/// <param name="Sessions">Live refresh tokens.</param>
-public readonly record struct AccountFootprint(
-    int Terrariums,
-    int Devices,
-    int SpeciesProfiles,
-    int Notifications,
-    int Sessions)
-{
-    /// <summary>True when nothing meaningful references the account and it may be erased.</summary>
-    public bool IsEmpty => Terrariums == 0 && Devices == 0 && SpeciesProfiles == 0;
-
-    /// <summary>What still points at the account, for the refusal message.</summary>
-    public IReadOnlyList<string> HeldBy
-    {
-        get
-        {
-            var held = new List<string>(3);
-
-            if (Terrariums > 0)
-            {
-                held.Add("terrariums");
-            }
-
-            if (Devices > 0)
-            {
-                held.Add("devices");
-            }
-
-            if (SpeciesProfiles > 0)
-            {
-                held.Add("speciesProfiles");
-            }
-
-            return held;
-        }
-    }
-}
+/// <param name="Terrariums">Enclosures deleted, soft-deleted ones included.</param>
+/// <param name="Devices">Boards unbound from those enclosures; the boards themselves survive.</param>
+/// <param name="SpeciesProfiles">Catalogue profiles the account had authored; built-ins are never among them.</param>
+/// <param name="Notifications">Rows removed from the account's inbox.</param>
+public readonly record struct AccountPurge(int Terrariums, int Devices, int SpeciesProfiles, int Notifications);
 
 /// <summary>
 /// Persistence port for accounts and sessions. A port rather than a <c>DbContext</c> because the Application
@@ -168,16 +123,19 @@ public interface IUserStore
     void RemoveRole(Role role);
 
     /// <summary>
-    /// What an account owns, so a hard delete can refuse to orphan history rather than cascade it away. Counted
-    /// rather than guessed: the answer decides whether the delete is allowed.
+    /// Stages the ordered hard delete of an account and of everything that would otherwise outlive it: its boards are
+    /// unbound, its enclosures are removed with everything cascading from them, its own catalogue profiles and its
+    /// inbox are removed, and finally the account row.
     /// </summary>
-    /// <param name="userId">Account to measure.</param>
+    /// <remarks>
+    /// One unit of work, because the order is the point. <c>Terrarium.UserId</c> is <c>RESTRICT</c>, so an account
+    /// cannot be deleted while it owns an enclosure; unbinding first is also what keeps a board from pointing at a
+    /// row nobody can load. Soft-deleted enclosures are included: their rows still hold that foreign key, so leaving
+    /// them would make the delete fail in the database rather than here.
+    /// </remarks>
+    /// <param name="user">Account to erase.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<AccountFootprint> FindFootprintAsync(Guid userId, CancellationToken cancellationToken);
-
-    /// <summary>Stages an account for deletion. Only ever called after <see cref="FindFootprintAsync"/> is empty.</summary>
-    /// <param name="user">Account to remove.</param>
-    void RemoveUser(User user);
+    Task<AccountPurge> PurgeAccountAsync(User user, CancellationToken cancellationToken);
 
     /// <summary>
     /// Stages an audit row. It lives on this port rather than one of its own so the row is committed by the same

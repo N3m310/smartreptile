@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AlertTriangle, Box, Cpu, Download, Leaf, RefreshCw, Users } from 'lucide-react';
 import * as api from '../api/endpoints';
 import type {
@@ -7,6 +8,8 @@ import type {
   AdminOverview as AdminOverviewData,
   AdminPage,
   AdminTerrariumView,
+  SpeciesProfileItem,
+  SpeciesProfileList,
 } from '../api/types';
 import { ADMIN_PAGE_SIZE, Pager, SearchField, useDebounced } from '../components/AdminList';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
@@ -18,6 +21,7 @@ import {
   alertSourceLabel,
   alertStateLabel,
   alertStateTextClass,
+  climateZoneLabel,
   deviceLifecycleLabel,
   deviceLifecycleTextClass,
   severityLabel,
@@ -40,21 +44,22 @@ import { usePolled } from '../lib/usePolled';
  * and UV, judged against the species profile. The metric keys of each family arrive with it, so this screen labels
  * them without carrying a list of its own that could fall out of date.
  *
- * The three paged lists load one at a time, with the tab that shows them: a console that fetched every table to
+ * The paged lists load one at a time, with the tab that shows them: a console that fetched every table to
  * render one of them would make the dashboard's first paint wait for data nobody asked to see.
  */
 
 const POLL_MS = 60_000;
 
-/** The get-all tables, one tab each — the lists `/api/v1/admin/*` publishes beside the overview. */
-type Tab = 'accounts' | 'terrariums' | 'devices' | 'alerts';
+/** The get-all tables, one tab each, alongside the species-profile catalogue. */
+type Tab = 'accounts' | 'terrariums' | 'devices' | 'alerts' | 'speciesProfiles';
 
-/** Each tab's label, so the four tabs are one list rather than four conditionals. */
+/** Each tab's label, so the five tabs are one list rather than five conditionals. */
 const TAB_LABEL_KEY: Record<Tab, string> = {
   accounts: 'adminAccountsEntry',
   terrariums: 'adminTabTerrariums',
   devices: 'adminTabDevices',
   alerts: 'adminTabAlerts',
+  speciesProfiles: 'adminTabSpeciesProfiles',
 };
 
 /** One pane's current question: its filter and how far down the list it has paged. */
@@ -211,7 +216,7 @@ export const AdminOverview: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-1 rounded-xl border border-hairline bg-field p-1 text-[11px]">
-            {(['accounts', 'terrariums', 'devices', 'alerts'] as const).map((option) => (
+            {(['accounts', 'terrariums', 'devices', 'alerts', 'speciesProfiles'] as const).map((option) => (
               <button
                 key={option}
                 type="button"
@@ -255,6 +260,8 @@ export const AdminOverview: React.FC = () => {
             lang={lang}
           />
         ) : null}
+
+        {tab === 'speciesProfiles' ? <SpeciesProfileTable /> : null}
       </section>
     </div>
   );
@@ -523,7 +530,14 @@ const TerrariumTable: React.FC<{
                       <span className="block font-semibold text-ink">{row.name}</span>
                       <span className="block font-mono text-[11px] text-muted">{row.id}</span>
                     </td>
-                    <td className={TD}>{row.ownerUsername}</td>
+                    <td className={TD}>
+                      <Link
+                        to="/admin/accounts"
+                        className="text-brand transition-colors hover:text-ink hover:underline"
+                      >
+                        {row.ownerUsername}
+                      </Link>
+                    </td>
                     <td className={TD}>{row.speciesProfileName}</td>
                     <td className={`${TD} whitespace-nowrap`}>{terrariumStatusLabel(t, row.status)}</td>
                     <td className={TD}>
@@ -763,6 +777,126 @@ const AlertTable: React.FC<{
             </table>
           </div>
           <Pager total={page.data.total} skip={page.data.skip} take={page.data.take} onSkip={onSkip} />
+        </>
+      ) : null}
+    </div>
+  );
+};
+
+/** Every built-in and custom species profile, searchable like the mobile all-data list. */
+const SpeciesProfileTable: React.FC = () => {
+  const { t } = useI18n();
+  const [searchValue, setSearchValue] = useState('');
+  const [skip, setSkip] = useState(0);
+  const search = useDebounced(searchValue, 300);
+  const profiles = usePolled<SpeciesProfileList>(() => api.listSpeciesProfiles(), null);
+  const query = search.trim().toLocaleLowerCase();
+  const filtered = (profiles.data?.items ?? []).filter((profile) => {
+    if (!query) {
+      return true;
+    }
+    return (
+      profile.name.toLocaleLowerCase().includes(query) ||
+      profile.scientificName.toLocaleLowerCase().includes(query) ||
+      profile.climateZone.toLocaleLowerCase().includes(query)
+    );
+  });
+  const pageItems = filtered.slice(skip, skip + ADMIN_PAGE_SIZE);
+
+  useEffect(() => {
+    if (skip >= filtered.length && skip > 0) {
+      setSkip(Math.max(0, Math.floor((filtered.length - 1) / ADMIN_PAGE_SIZE) * ADMIN_PAGE_SIZE));
+    }
+  }, [filtered.length, skip]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchField
+          value={searchValue}
+          onChange={(value) => {
+            setSearchValue(value);
+            setSkip(0);
+          }}
+          label={t('adminSearchSpeciesProfiles')}
+          placeholder={t('adminSearchSpeciesProfiles')}
+        />
+        <button
+          type="button"
+          onClick={() => profiles.reload()}
+          aria-label={t('speciesProfileRefresh')}
+          title={t('speciesProfileRefresh')}
+          className="inline-flex items-center gap-2 rounded-lg border border-hairline bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-raised"
+        >
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+          {t('speciesProfileRefresh')}
+        </button>
+      </div>
+
+      {profiles.error ? <ErrorPanel error={profiles.error} onRetry={() => profiles.reload()} /> : null}
+      {profiles.loading ? <LoadingPanel label={t('signingIn')} /> : null}
+
+      {!profiles.loading && profiles.data && filtered.length === 0 ? (
+        <EmptyPanel title={t('emptyStateTitle')} body={t('adminNoRows')} />
+      ) : null}
+
+      {pageItems.length > 0 ? (
+        <>
+          <div className={TABLE_WRAP}>
+            <table className={`${TABLE} min-w-[72rem]`}>
+              <thead className="border-b border-hairline text-muted">
+                <tr>
+                  <th className={TH}>{t('adminColumnSpeciesProfile')}</th>
+                  <th className={TH}>{t('profileClimateZone')}</th>
+                  <th className={TH}>{t('profilePhotoperiodHours')}</th>
+                  <th className={TH}>{t('profileLightsOn')}</th>
+                  <th className={TH}>{t('profileLightThreshold')}</th>
+                  <th className={TH}>{t('profileMinLightHours')}</th>
+                  <th className={TH}>{t('speciesProfileBands')}</th>
+                  <th className={TH}>{t('profileNotes')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {pageItems.map((profile: SpeciesProfileItem) => (
+                  <tr key={profile.id} className="hover:bg-raised/40">
+                    <td className={TD}>
+                      <span className="block font-semibold text-ink">{profile.name}</span>
+                      <span className="block text-[11px] italic text-muted">
+                        {profile.scientificName || '—'}
+                      </span>
+                      <span
+                        className={`mt-1 inline-flex rounded-full border border-hairline px-2 py-0.5 text-[10px] ${
+                          profile.isBuiltIn ? 'text-brand' : 'text-inrange'
+                        }`}
+                      >
+                        {profile.isBuiltIn ? t('speciesProfileBuiltIn') : t('speciesProfileMine')}
+                      </span>
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>
+                      {climateZoneLabel(t, profile.climateZone)}
+                    </td>
+                    <td className={`${TD} whitespace-nowrap font-mono`}>
+                      {profile.photoperiodHours.toFixed(1)} h
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>{profile.lightsOnLocalTime}</td>
+                    <td className={`${TD} whitespace-nowrap font-mono`}>
+                      {profile.lightThresholdLux.toLocaleString()} lx
+                    </td>
+                    <td className={`${TD} whitespace-nowrap font-mono`}>
+                      {profile.minLightHoursPerDay.toFixed(1)} h
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>
+                      {t('speciesProfileBandCount', { count: profile.bands.length })}
+                    </td>
+                    <td className="max-w-xs px-4 py-3 align-top text-ink">
+                      <span className="line-clamp-2">{profile.notes || '—'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager total={filtered.length} skip={skip} take={ADMIN_PAGE_SIZE} onSkip={setSkip} />
         </>
       ) : null}
     </div>

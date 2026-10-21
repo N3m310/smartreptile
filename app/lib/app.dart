@@ -5,13 +5,14 @@ import 'core/env.dart';
 import 'core/permissions.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'screens/admin/admin_hub_screen.dart';
-import 'screens/alerts_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/terrariums_screen.dart';
+import 'screens/alerts_screen.dart';
+import 'screens/devices_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/settings_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/species_screen.dart';
-import 'screens/terrariums_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
@@ -95,19 +96,29 @@ class _RootShellState extends State<_RootShell> {
       ),
       const _ShellTab(
         destination: NavigationDestination(
-          icon: Icon(Icons.grass_outlined),
-          selectedIcon: Icon(Icons.grass),
+          icon: Icon(Icons.pets_outlined),
+          selectedIcon: Icon(Icons.pets),
           label: 'Terrarium',
         ),
         screen: TerrariumsScreen(),
+        isMock: false,
       ),
       const _ShellTab(
         destination: NavigationDestination(
-          icon: Icon(Icons.pets_outlined),
-          selectedIcon: Icon(Icons.pets),
+          icon: Icon(Icons.biotech_outlined),
+          selectedIcon: Icon(Icons.biotech),
           label: 'Hồ sơ loài',
         ),
         screen: SpeciesScreen(),
+        isMock: false,
+      ),
+      const _ShellTab(
+        destination: NavigationDestination(
+          icon: Icon(Icons.developer_board_outlined),
+          selectedIcon: Icon(Icons.developer_board),
+          label: 'Thiết bị IoT',
+        ),
+        screen: DevicesScreen(),
         isMock: false,
       ),
       _ShellTab(
@@ -143,14 +154,7 @@ class _RootShellState extends State<_RootShell> {
           label: 'Lịch sử',
         ),
         screen: HistoryScreen(),
-      ),
-      const _ShellTab(
-        destination: NavigationDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings),
-          label: 'Cài đặt',
-        ),
-        screen: SettingsScreen(),
+        isMock: false,
       ),
       if (session.hasAnyPermission(_administrativePermissions))
         _ShellTab(
@@ -162,6 +166,15 @@ class _RootShellState extends State<_RootShell> {
           screen: const AdminHubScreen(),
           isMock: false,
         ),
+      _ShellTab(
+        destination: NavigationDestination(
+          icon: const Icon(Icons.person_outline),
+          selectedIcon: const Icon(Icons.person),
+          label: l10n.navProfile,
+        ),
+        screen: const ProfileScreen(),
+        isMock: false,
+      ),
     ];
 
     // A sign-out while the administration tab is open removes it, so the index has to be clamped rather than
@@ -251,10 +264,13 @@ class _RootShellState extends State<_RootShell> {
           Expanded(child: tabs[index].screen),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (value) => setState(() => _index = value),
-        destinations: [for (final tab in tabs) tab.destination],
+      bottomNavigationBar: DefaultTextStyle.merge(
+        textAlign: TextAlign.center,
+        child: NavigationBar(
+          selectedIndex: index,
+          onDestinationSelected: (value) => setState(() => _index = value),
+          destinations: [for (final tab in tabs) tab.destination],
+        ),
       ),
     );
   }

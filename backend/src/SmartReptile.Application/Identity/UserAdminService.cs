@@ -517,17 +517,24 @@ public sealed class UserAdminService(IUserStore store, IPasswordHasher hasher, I
     }
 
     /// <summary>
-    /// Removes an account: by disabling it, or — when <paramref name="purge"/> is set and nothing references it —
-    /// by erasing the row.
+    /// Erases an account, together with the enclosures and inbox that would otherwise point at a row nobody can load.
     /// </summary>
-    /// <param name="userId">Account to remove.</param>
-    /// <param name="purge">True to erase the row rather than disable the account.</param>
-    /// <param name="actorUserId">The administrator removing it.</param>
+    /// <remarks>
+    /// A delete is a hard delete (TASKS 2026-10-19, BE-03). The <c>?purge</c> switch and the soft-delete branch are
+    /// gone, because two verbs for one act made the console's "delete" mean "disable" to whoever used it. The
+    /// reversible act is <c>POST /users/{id}/disable</c>, audited as <c>account.disabled</c>; this one is audited as
+    /// <c>account.deleted</c> and cannot be undone. What goes with the account is ordered in the store — boards
+    /// unbound, enclosures and their readings, alerts and summaries removed, the account's own catalogue profiles and
+    /// its inbox removed, then the row — because <c>Terrarium.UserId</c> is <c>RESTRICT</c> and would otherwise fail
+    /// the delete in the database. The two guards that protect the deployment are unchanged: an administrator may not
+    /// delete themselves, and the last enabled account able to manage accounts may not go either.
+    /// </remarks>
+    /// <param name="userId">Account to erase.</param>
+    /// <param name="actorUserId">The administrator performing it.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task<UserOutcome> DeleteAsync(
         Guid userId,
-        bool purge,
         Guid actorUserId,
         AuditActor? actor = null,
         CancellationToken cancellationToken = default)
@@ -547,14 +554,6 @@ public sealed class UserAdminService(IUserStore store, IPasswordHasher hasher, I
                 + "another administrator.");
         }
 
-        if (!purge)
-        {
-            // A soft delete is a disable, so it shares the disable's guards and its sessions rule; only the verb the
-            // caller used differs, and the route's own description says so.
-            return await SetDisabledAsync(userId, disabled: true, actorUserId, actor, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
         if (user.DisabledAt is null
             && await store.CountUsersWithPermissionAsync(Permissions.UserManage, user.Id, cancellationToken)
                 .ConfigureAwait(false) == 0)
@@ -565,40 +564,34 @@ public sealed class UserAdminService(IUserStore store, IPasswordHasher hasher, I
                 + "then delete this one.");
         }
 
-        var footprint = await store.FindFootprintAsync(userId, cancellationToken).ConfigureAwait(false);
-
-        if (!footprint.IsEmpty)
-        {
-            // Cascading would leave enclosures, boards and alerts whose owner no longer exists — rows the product
-            // can no longer reach and no screen can explain. Disabling keeps them, so that is the answer.
-            return UserOutcome.Failure(
-                "account_in_use",
-                $"This account still owns {string.Join(", ", footprint.HeldBy)}. Disable it instead, or reassign "
-                + "what it owns first.");
-        }
-
-        var now = clock.UtcNow;
-
-        store.RemoveUser(user);
+        var before = Describe(user);
+        var purge = await store.PurgeAccountAsync(user, cancellationToken).ConfigureAwait(false);
 
         store.AddAuditEntry(AuditLog.ForUser(
             AuditAction.AccountDeleted,
             user.Id,
             actorUserId,
             actor ?? AuditActor.Unknown,
-            now,
+            clock.UtcNow,
+            beforeJson: JsonSerializer.Serialize(new
+            {
+                before.Username,
+                before.Email,
+                before.Role,
+                before.DisabledAt,
+            }),
             afterJson: JsonSerializer.Serialize(new
             {
-                purge = true,
-                username = user.Username,
-                email = user.Email,
-                role = user.Role?.Code,
-                sessionsEnded = footprint.Sessions,
+                mode = "hard",
+                terrariums = purge.Terrariums,
+                devicesUnbound = purge.Devices,
+                speciesProfiles = purge.SpeciesProfiles,
+                notifications = purge.Notifications,
             })));
 
         await store.SaveChangesAsync(cancellationToken);
 
-        return UserOutcome.Found(Describe(user));
+        return UserOutcome.Found(before);
     }
 
     /// <summary>

@@ -49,7 +49,9 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
   Future<void> _openSpeciesFormDialog({SpeciesProfileView? existing}) async {
     final isEditing = existing != null;
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final sciNameCtrl = TextEditingController(text: existing?.scientificName ?? '');
+    final sciNameCtrl = TextEditingController(
+      text: existing?.scientificName ?? '',
+    );
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     final photoperiodCtrl = TextEditingController(
       text: (existing?.photoperiodHours ?? 12.0).toStringAsFixed(0),
@@ -129,7 +131,9 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          isEditing ? 'Tùy chỉnh hồ sơ loài' : 'Thêm hồ sơ loài mới',
+                          isEditing
+                              ? 'Tùy chỉnh hồ sơ loài'
+                              : 'Thêm hồ sơ loài mới',
                           style: const TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
@@ -138,7 +142,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                         ),
                         const Spacer(),
                         IconButton(
-                          icon: const Icon(Icons.close, color: AppColors.textMuted),
+                          icon: const Icon(
+                            Icons.close,
+                            color: AppColors.textMuted,
+                          ),
                           onPressed: () => Navigator.pop(modalCtx),
                         ),
                       ],
@@ -212,12 +219,15 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                         Expanded(
                           child: TextFormField(
                             controller: tempMinCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: const InputDecoration(
                               labelText: 'Nhiệt độ min (°C)',
                               prefixIcon: Icon(Icons.thermostat, size: 18),
                             ),
-                            validator: (val) => val == null || double.tryParse(val) == null
+                            validator: (val) =>
+                                val == null || double.tryParse(val) == null
                                 ? 'Nhập số hợp lệ'
                                 : null,
                           ),
@@ -226,7 +236,9 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                         Expanded(
                           child: TextFormField(
                             controller: tempMaxCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: const InputDecoration(
                               labelText: 'Nhiệt độ max (°C)',
                               prefixIcon: Icon(Icons.thermostat, size: 18),
@@ -255,7 +267,8 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                               labelText: 'Độ ẩm min (%)',
                               prefixIcon: Icon(Icons.water_drop, size: 18),
                             ),
-                            validator: (val) => val == null || double.tryParse(val) == null
+                            validator: (val) =>
+                                val == null || double.tryParse(val) == null
                                 ? 'Nhập số hợp lệ'
                                 : null,
                           ),
@@ -307,7 +320,8 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                       maxLines: 2,
                       decoration: const InputDecoration(
                         labelText: 'Ghi chú tập tính & chăm sóc',
-                        hintText: 'VD: Cần đèn sưởi basking spot, bổ sung canxi...',
+                        hintText:
+                            'VD: Cần đèn sưởi basking spot, bổ sung canxi...',
                         prefixIcon: Icon(Icons.notes, size: 18),
                       ),
                     ),
@@ -363,10 +377,13 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                             ),
                           );
                           if (updated != null) {
-                            _showNotification('Đã cập nhật hồ sơ loài "${updated.name}"');
+                            _showNotification(
+                              'Đã cập nhật hồ sơ loài "${updated.name}"',
+                            );
                           } else {
                             _showNotification(
-                              provider.errorMessage ?? 'Không thể cập nhật hồ sơ',
+                              provider.errorMessage ??
+                                  'Không thể cập nhật hồ sơ',
                               isSuccess: false,
                             );
                           }
@@ -382,10 +399,13 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                             ),
                           );
                           if (created != null) {
-                            _showNotification('Đã tạo thành công loài "${created.name}"');
+                            _showNotification(
+                              'Đã tạo thành công loài "${created.name}"',
+                            );
                           } else {
                             _showNotification(
-                              provider.errorMessage ?? 'Không thể tạo hồ sơ mới',
+                              provider.errorMessage ??
+                                  'Không thể tạo hồ sơ mới',
                               isSuccess: false,
                             );
                           }
@@ -393,7 +413,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                       },
                       child: Text(
                         isEditing ? 'Lưu thay đổi' : 'Tạo hồ sơ loài',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
                   ],
@@ -424,7 +447,11 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
             const Expanded(
               child: Text(
                 'Nhân bản hồ sơ loài',
-                style: TextStyle(color: AppColors.textMain, fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -437,7 +464,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
             children: [
               Text(
                 'Tạo một bản sao từ "${target.name}" để tự do tinh chỉnh các thông số vi khí hậu.',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 14),
               TextFormField(
@@ -459,7 +489,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hủy', style: TextStyle(color: AppColors.textMuted)),
+            child: const Text(
+              'Hủy',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -508,7 +541,11 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
             Expanded(
               child: Text(
                 item.name,
-                style: const TextStyle(color: AppColors.textMain, fontSize: 16, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -520,7 +557,11 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
             if (item.scientificName.isNotEmpty) ...[
               Text(
                 item.scientificName,
-                style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textMuted, fontSize: 13),
+                style: const TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: AppColors.textMuted,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 10),
             ],
@@ -536,15 +577,27 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
               ),
             ),
             const SizedBox(height: 12),
-            Text('• Vùng khí hậu: ${ClimateZones.labelOf(item.climateZone)}', style: const TextStyle(fontSize: 12, color: AppColors.textMain)),
-            Text('• Thời gian chiếu sáng: ${item.photoperiodHours.toStringAsFixed(0)} giờ/ngày', style: const TextStyle(fontSize: 12, color: AppColors.textMain)),
-            Text('• Số dải cảm biến: ${item.bands.length} dải', style: const TextStyle(fontSize: 12, color: AppColors.textMain)),
+            Text(
+              '• Vùng khí hậu: ${ClimateZones.labelOf(item.climateZone)}',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMain),
+            ),
+            Text(
+              '• Thời gian chiếu sáng: ${item.photoperiodHours.toStringAsFixed(0)} giờ/ngày',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMain),
+            ),
+            Text(
+              '• Số dải cảm biến: ${item.bands.length} dải',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMain),
+            ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Đóng', style: TextStyle(color: AppColors.textMuted)),
+            child: const Text(
+              'Đóng',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
@@ -598,7 +651,11 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                     color: AppColors.primary.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.pets, color: AppColors.primary, size: 24),
+                  child: const Icon(
+                    Icons.pets,
+                    color: AppColors.primary,
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 const Expanded(
@@ -616,7 +673,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                       SizedBox(height: 2),
                       Text(
                         'Danh mục loài và thiết lập thông số môi trường chuẩn',
-                        style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ],
                   ),
@@ -665,17 +725,27 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textMain,
                     side: const BorderSide(color: AppColors.border),
-                    padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 11,
+                      horizontal: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   onPressed: provider.isLoading || provider.isSaving
                       ? null
                       : () async {
                           await provider.fetchProfiles();
-                          _showNotification('Đã làm mới danh mục (${provider.profiles.length} loài).');
+                          _showNotification(
+                            'Đã làm mới danh mục (${provider.profiles.length} loài).',
+                          );
                         },
                   icon: const Icon(Icons.refresh, size: 16),
-                  label: const Text('Làm mới', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  label: const Text(
+                    'Làm mới',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
                 ),
                 const SizedBox(width: 10),
 
@@ -687,7 +757,9 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                       foregroundColor: Colors.black,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     onPressed: provider.isLoading || provider.isSaving
                         ? null
@@ -695,7 +767,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text(
                       'Thêm hồ sơ loài',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -763,14 +838,21 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                 ),
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white10,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     '${provider.profiles.length}',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
                   ),
                 ),
                 const Spacer(),
@@ -778,7 +860,10 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                   const SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
                   ),
               ],
             ),
@@ -791,7 +876,9 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
             child: provider.profiles.isEmpty
                 ? Center(
                     child: provider.isLoading
-                        ? const CircularProgressIndicator(color: AppColors.primary)
+                        ? const CircularProgressIndicator(
+                            color: AppColors.primary,
+                          )
                         : const Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -800,13 +887,19 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                               Text(
                                 'Chưa có hồ sơ loài nào trong danh mục.\nNhấn nút "Thêm hồ sơ loài" ở trên để điền thông tin.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textMuted,
+                                ),
                               ),
                             ],
                           ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                     itemCount: provider.profiles.length,
                     itemBuilder: (context, index) {
                       final item = provider.profiles[index];
@@ -838,13 +931,17 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                     decoration: BoxDecoration(
                                       color: item.isBuiltIn
                                           ? Colors.white10
-                                          : AppColors.primary.withValues(alpha: 0.15),
+                                          : AppColors.primary.withValues(
+                                              alpha: 0.15,
+                                            ),
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Icon(
                                       Icons.pets,
                                       size: 18,
-                                      color: item.isBuiltIn ? AppColors.textMuted : AppColors.primary,
+                                      color: item.isBuiltIn
+                                          ? AppColors.textMuted
+                                          : AppColors.primary,
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -852,7 +949,8 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                   // Tên & tên khoa học
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           item.name,
@@ -879,11 +977,16 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
 
                                   // Badge loại hồ sơ
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: item.isBuiltIn
                                           ? Colors.white10
-                                          : AppColors.primary.withValues(alpha: 0.2),
+                                          : AppColors.primary.withValues(
+                                              alpha: 0.2,
+                                            ),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
@@ -891,7 +994,9 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
-                                        color: item.isBuiltIn ? AppColors.textMuted : AppColors.primary,
+                                        color: item.isBuiltIn
+                                            ? AppColors.textMuted
+                                            : AppColors.primary,
                                       ),
                                     ),
                                   ),
@@ -908,40 +1013,64 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.public, size: 12, color: AppColors.textMuted),
+                                      const Icon(
+                                        Icons.public,
+                                        size: 12,
+                                        color: AppColors.textMuted,
+                                      ),
                                       const SizedBox(width: 4),
                                       Text(
                                         ClimateZones.labelOf(item.climateZone),
-                                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
                                       ),
                                     ],
                                   ),
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.tune, size: 12, color: AppColors.textMuted),
+                                      const Icon(
+                                        Icons.tune,
+                                        size: 12,
+                                        color: AppColors.textMuted,
+                                      ),
                                       const SizedBox(width: 4),
                                       Text(
                                         '${item.bands.length} dải ngưỡng',
-                                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
                                       ),
                                     ],
                                   ),
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.wb_sunny_outlined, size: 12, color: AppColors.textMuted),
+                                      const Icon(
+                                        Icons.wb_sunny_outlined,
+                                        size: 12,
+                                        color: AppColors.textMuted,
+                                      ),
                                       const SizedBox(width: 4),
                                       Text(
                                         '${item.photoperiodHours.toStringAsFixed(0)}h sáng',
-                                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ],
                               ),
 
-                              const Divider(color: AppColors.border, height: 16),
+                              const Divider(
+                                color: AppColors.border,
+                                height: 16,
+                              ),
 
                               // Hàng nút thao tác theo từng thẻ (Nhân bản, Tùy chỉnh, Xóa)
                               Row(
@@ -951,12 +1080,19 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                   TextButton.icon(
                                     style: TextButton.styleFrom(
                                       foregroundColor: Colors.orangeAccent,
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
                                       minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                     ),
                                     icon: const Icon(Icons.copy, size: 14),
-                                    label: const Text('Nhân bản', style: TextStyle(fontSize: 12)),
+                                    label: const Text(
+                                      'Nhân bản',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
                                     onPressed: () => _openDuplicateDialog(item),
                                   ),
                                   const SizedBox(width: 8),
@@ -966,17 +1102,30 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                     TextButton.icon(
                                       style: TextButton.styleFrom(
                                         foregroundColor: AppColors.primary,
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
                                         minimumSize: Size.zero,
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
                                       ),
                                       icon: const Icon(Icons.edit, size: 14),
-                                      label: const Text('Tùy chỉnh', style: TextStyle(fontSize: 12)),
-                                      onPressed: () => _openSpeciesFormDialog(existing: item),
+                                      label: const Text(
+                                        'Tùy chỉnh',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                      onPressed: () => _openSpeciesFormDialog(
+                                        existing: item,
+                                      ),
                                     ),
                                     const SizedBox(width: 8),
                                     IconButton(
-                                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        color: Colors.redAccent,
+                                        size: 18,
+                                      ),
                                       padding: EdgeInsets.zero,
                                       constraints: const BoxConstraints(),
                                       tooltip: 'Xóa hồ sơ',
@@ -985,26 +1134,57 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                           context: context,
                                           builder: (ctx) => AlertDialog(
                                             backgroundColor: AppColors.bgCard,
-                                            title: const Text('Xác nhận xóa', style: TextStyle(color: AppColors.textMain, fontSize: 16)),
-                                            content: Text('Bạn có chắc muốn xóa hồ sơ loài "${item.name}" không?', style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                                            title: const Text(
+                                              'Xác nhận xóa',
+                                              style: TextStyle(
+                                                color: AppColors.textMain,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            content: Text(
+                                              'Bạn có chắc muốn xóa hồ sơ loài "${item.name}" không?',
+                                              style: const TextStyle(
+                                                color: AppColors.textMuted,
+                                                fontSize: 13,
+                                              ),
+                                            ),
                                             actions: [
                                               TextButton(
-                                                onPressed: () => Navigator.pop(ctx, false),
-                                                child: const Text('Hủy', style: TextStyle(color: AppColors.textMuted)),
+                                                onPressed: () =>
+                                                    Navigator.pop(ctx, false),
+                                                child: const Text(
+                                                  'Hủy',
+                                                  style: TextStyle(
+                                                    color: AppColors.textMuted,
+                                                  ),
+                                                ),
                                               ),
                                               TextButton(
-                                                onPressed: () => Navigator.pop(ctx, true),
-                                                child: const Text('Xóa', style: TextStyle(color: Colors.redAccent)),
+                                                onPressed: () =>
+                                                    Navigator.pop(ctx, true),
+                                                child: const Text(
+                                                  'Xóa',
+                                                  style: TextStyle(
+                                                    color: Colors.redAccent,
+                                                  ),
+                                                ),
                                               ),
                                             ],
                                           ),
                                         );
                                         if (confirm == true) {
-                                          final success = await provider.deleteProfile(item.id);
+                                          final success = await provider
+                                              .deleteProfile(item.id);
                                           if (success) {
-                                            _showNotification('Đã xóa loài "${item.name}"');
+                                            _showNotification(
+                                              'Đã xóa loài "${item.name}"',
+                                            );
                                           } else {
-                                            _showNotification(provider.errorMessage ?? 'Không thể xóa loài', isSuccess: false);
+                                            _showNotification(
+                                              provider.errorMessage ??
+                                                  'Không thể xóa loài',
+                                              isSuccess: false,
+                                            );
                                           }
                                         }
                                       },
@@ -1014,13 +1194,24 @@ class _SpeciesProfileSheetState extends State<SpeciesProfileSheet> {
                                     TextButton.icon(
                                       style: TextButton.styleFrom(
                                         foregroundColor: AppColors.textMuted,
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
                                         minimumSize: Size.zero,
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
                                       ),
-                                      icon: const Icon(Icons.info_outline, size: 14),
-                                      label: const Text('Chi tiết', style: TextStyle(fontSize: 12)),
-                                      onPressed: () => _showBuiltInInfoDialog(item),
+                                      icon: const Icon(
+                                        Icons.info_outline,
+                                        size: 14,
+                                      ),
+                                      label: const Text(
+                                        'Chi tiết',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                      onPressed: () =>
+                                          _showBuiltInInfoDialog(item),
                                     ),
                                   ],
                                 ],

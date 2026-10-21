@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SmartReptile.Application.Abstractions;
 using SmartReptile.Application.Identity;
 using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Identity;
@@ -270,6 +271,69 @@ public class UserAdminServiceTests
 
         outcome.Problem!.Code.Should().Be("last_administrator_refused");
         _store.Users.Single(user => user.Id == _admin).Role!.Code.Should().Be(SystemRoles.Admin);
+    }
+
+    // ---- delete -------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Delete_erases_the_account_with_what_it_owned_and_audits_it()
+    {
+        var owner = Add("alice", SystemRoles.Owner);
+        _store.Purge = new AccountPurge(2, 2, 1, 5);
+
+        var outcome = await _users.DeleteAsync(owner, _admin, _actor);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.User!.Username.Should().Be("alice", "the answer describes the account as it was");
+        _store.RemovedUsers.Should().ContainSingle().Which.Id.Should().Be(owner);
+        _store.SaveCount.Should().Be(1);
+
+        var entry = _store.AuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.AccountDeleted);
+        entry.UserId.Should().Be(_admin, "the trail names the administrator who acted");
+        entry.AfterJson.Should().Contain("\"mode\":\"hard\"");
+        entry.AfterJson.Should().Contain("\"terrariums\":2", "the row says what went with the account");
+    }
+
+    [Fact]
+    public async Task Delete_is_a_different_act_from_disable()
+    {
+        var owner = Add("alice", SystemRoles.Owner);
+
+        await _users.SetDisabledAsync(owner, disabled: true, _admin, _actor);
+        await _users.DeleteAsync(owner, _admin, _actor);
+
+        _store.AuditEntries.Select(entry => entry.Action)
+            .Should().Equal(AuditAction.AccountDisabled, AuditAction.AccountDeleted);
+    }
+
+    [Fact]
+    public async Task Delete_refuses_the_callers_own_account()
+    {
+        var outcome = await _users.DeleteAsync(_admin, _admin);
+
+        outcome.Problem!.Code.Should().Be("self_change_refused");
+        _store.RemovedUsers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Delete_refuses_the_last_usable_administrator()
+    {
+        var actor = Add("keeper", SystemRoles.Owner);
+
+        var outcome = await _users.DeleteAsync(_admin, actor);
+
+        outcome.Problem!.Code.Should().Be("last_administrator_refused");
+        _store.RemovedUsers.Should().BeEmpty();
+        _store.AuditEntries.Should().BeEmpty("a refused delete writes nothing");
+    }
+
+    [Fact]
+    public async Task Delete_reports_an_unknown_account_distinctly()
+    {
+        var outcome = await _users.DeleteAsync(Guid.NewGuid(), _admin);
+
+        outcome.Problem!.Code.Should().Be("user_not_found");
     }
 
     /// <summary>

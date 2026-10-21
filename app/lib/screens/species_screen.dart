@@ -44,7 +44,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
   Future<void> _openSpeciesFormDialog({SpeciesProfileView? existing}) async {
     final isEditing = existing != null;
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final sciNameCtrl = TextEditingController(text: existing?.scientificName ?? '');
+    final sciNameCtrl = TextEditingController(
+      text: existing?.scientificName ?? '',
+    );
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     final photoperiodCtrl = TextEditingController(
       text: (existing?.photoperiodHours ?? 12.0).toStringAsFixed(0),
@@ -121,7 +123,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          isEditing ? 'Tùy chỉnh hồ sơ loài' : 'Thêm hồ sơ loài mới',
+                          isEditing
+                              ? 'Tùy chỉnh hồ sơ loài'
+                              : 'Thêm hồ sơ loài mới',
                           style: const TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
@@ -130,7 +134,10 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         ),
                         const Spacer(),
                         IconButton(
-                          icon: const Icon(Icons.close, color: AppColors.textMuted),
+                          icon: const Icon(
+                            Icons.close,
+                            color: AppColors.textMuted,
+                          ),
                           onPressed: () => Navigator.pop(modalCtx),
                         ),
                       ],
@@ -203,12 +210,15 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: tempMinCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: const InputDecoration(
                               labelText: 'Nhiệt độ min (°C)',
                               prefixIcon: Icon(Icons.thermostat, size: 18),
                             ),
-                            validator: (val) => val == null || double.tryParse(val) == null
+                            validator: (val) =>
+                                val == null || double.tryParse(val) == null
                                 ? 'Nhập số hợp lệ'
                                 : null,
                           ),
@@ -217,7 +227,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: tempMaxCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: const InputDecoration(
                               labelText: 'Nhiệt độ max (°C)',
                               prefixIcon: Icon(Icons.thermostat, size: 18),
@@ -245,7 +257,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                               labelText: 'Độ ẩm min (%)',
                               prefixIcon: Icon(Icons.water_drop, size: 18),
                             ),
-                            validator: (val) => val == null || double.tryParse(val) == null
+                            validator: (val) =>
+                                val == null || double.tryParse(val) == null
                                 ? 'Nhập số hợp lệ'
                                 : null,
                           ),
@@ -295,7 +308,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                       maxLines: 2,
                       decoration: const InputDecoration(
                         labelText: 'Ghi chú tập tính & chăm sóc',
-                        hintText: 'VD: Cần đèn sưởi basking spot, bổ sung canxi...',
+                        hintText:
+                            'VD: Cần đèn sưởi basking spot, bổ sung canxi...',
                         prefixIcon: Icon(Icons.notes, size: 18),
                       ),
                     ),
@@ -350,10 +364,13 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                             ),
                           );
                           if (updated != null) {
-                            _showNotification('Đã cập nhật hồ sơ loài "${updated.name}"');
+                            _showNotification(
+                              'Đã cập nhật hồ sơ loài "${updated.name}"',
+                            );
                           } else {
                             _showNotification(
-                              provider.errorMessage ?? 'Không thể cập nhật hồ sơ',
+                              provider.errorMessage ??
+                                  'Không thể cập nhật hồ sơ',
                               isSuccess: false,
                             );
                           }
@@ -369,10 +386,13 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                             ),
                           );
                           if (created != null) {
-                            _showNotification('Đã tạo thành công loài "${created.name}"');
+                            _showNotification(
+                              'Đã tạo thành công loài "${created.name}"',
+                            );
                           } else {
                             _showNotification(
-                              provider.errorMessage ?? 'Không thể tạo hồ sơ mới',
+                              provider.errorMessage ??
+                                  'Không thể tạo hồ sơ mới',
                               isSuccess: false,
                             );
                           }
@@ -380,7 +400,10 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                       },
                       child: Text(
                         isEditing ? 'Lưu thay đổi' : 'Tạo hồ sơ loài',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
                   ],
@@ -411,7 +434,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             const Expanded(
               child: Text(
                 'Nhân bản hồ sơ loài',
-                style: TextStyle(color: AppColors.textMain, fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -424,7 +451,10 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             children: [
               Text(
                 'Tạo một bản sao từ "${target.name}" để tinh chỉnh thông số vi khí hậu.',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 14),
               TextFormField(
@@ -446,7 +476,10 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hủy', style: TextStyle(color: AppColors.textMuted)),
+            child: const Text(
+              'Hủy',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -499,7 +532,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             Expanded(
               child: Text(
                 item.name,
-                style: const TextStyle(color: AppColors.textMain, fontSize: 16, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -512,7 +549,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
               if (item.scientificName.isNotEmpty) ...[
                 Text(
                   item.scientificName,
-                  style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textMuted, fontSize: 13),
+                  style: const TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: AppColors.textMuted,
+                    fontSize: 13,
+                  ),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -526,29 +567,61 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                   item.isBuiltIn
                       ? 'Đây là hồ sơ loài mặc định hệ thống. Các bể nuôi có thể sử dụng thông số này làm chuẩn đối sánh.'
                       : 'Hồ sơ loài tùy chỉnh do người dùng tạo.',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
-              Text('• Vùng khí hậu: ${ClimateZones.labelOf(item.climateZone)}', style: const TextStyle(fontSize: 13, color: AppColors.textMain)),
+              Text(
+                '• Vùng khí hậu: ${ClimateZones.labelOf(item.climateZone)}',
+                style: const TextStyle(fontSize: 13, color: AppColors.textMain),
+              ),
               const SizedBox(height: 4),
-              Text('• Chu kỳ chiếu sáng: ${item.photoperiodHours.toStringAsFixed(0)} giờ/ngày (Bật đèn lúc ${item.lightsOnLocalTime})', style: const TextStyle(fontSize: 13, color: AppColors.textMain)),
+              Text(
+                '• Chu kỳ chiếu sáng: ${item.photoperiodHours.toStringAsFixed(0)} giờ/ngày (Bật đèn lúc ${item.lightsOnLocalTime})',
+                style: const TextStyle(fontSize: 13, color: AppColors.textMain),
+              ),
               const SizedBox(height: 4),
-              Text('• Cường độ sáng chuẩn: ${item.lightThresholdLux.toStringAsFixed(0)} Lux', style: const TextStyle(fontSize: 13, color: AppColors.textMain)),
+              Text(
+                '• Cường độ sáng chuẩn: ${item.lightThresholdLux.toStringAsFixed(0)} Lux',
+                style: const TextStyle(fontSize: 13, color: AppColors.textMain),
+              ),
               const SizedBox(height: 12),
-              const Text('Ngưỡng vi khí hậu chi tiết:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary)),
+              const Text(
+                'Ngưỡng vi khí hậu chi tiết:',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
+              ),
               const SizedBox(height: 6),
               for (final band in item.bands)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
-                    '  - ${band.metric == 'tempC' ? 'Nhiệt độ' : band.metric == 'humidityPct' ? 'Độ ẩm' : band.metric}: ${band.targetMin.toStringAsFixed(1)} ~ ${band.targetMax.toStringAsFixed(1)} ${band.unit} (${band.phase})',
-                    style: const TextStyle(fontSize: 12, color: AppColors.textMain),
+                    '  - ${band.metric == 'tempC'
+                        ? 'Nhiệt độ'
+                        : band.metric == 'humidityPct'
+                        ? 'Độ ẩm'
+                        : band.metric}: ${band.targetMin.toStringAsFixed(1)} ~ ${band.targetMax.toStringAsFixed(1)} ${band.unit} (${band.phase})',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textMain,
+                    ),
                   ),
                 ),
               if (item.notes != null && item.notes!.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                Text('Ghi chú: ${item.notes}', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                Text(
+                  'Ghi chú: ${item.notes}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
+                ),
               ],
             ],
           ),
@@ -556,7 +629,10 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Đóng', style: TextStyle(color: AppColors.textMuted)),
+            child: const Text(
+              'Đóng',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
           ),
           if (canManage)
             ElevatedButton.icon(
@@ -584,12 +660,14 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     // Logic kiểm tra vai trò Admin vs User:
     // Admin có quyền `species.write` hoặc role là Admin -> toàn quyền thêm/sửa/xóa/nhân bản.
     // User thường chỉ có `species.read` -> chỉ tra cứu, xem thông số.
-    final canManage = session.hasPermission(Permissions.speciesWrite) ||
+    final canManage =
+        session.hasPermission(Permissions.speciesWrite) ||
         (session.user?.role.toLowerCase() == 'admin');
 
     // Filter profiles theo query và climate zone
     final filtered = provider.profiles.where((p) {
-      if (_selectedClimateFilter != null && p.climateZone != _selectedClimateFilter) {
+      if (_selectedClimateFilter != null &&
+          p.climateZone != _selectedClimateFilter) {
         return false;
       }
       if (_searchQuery.isNotEmpty) {
@@ -616,7 +694,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                       color: AppColors.primary.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.pets, color: AppColors.primary, size: 22),
+                    child: const Icon(
+                      Icons.pets,
+                      color: AppColors.primary,
+                      size: 22,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   const Expanded(
@@ -634,14 +716,20 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         SizedBox(height: 2),
                         Text(
                           'Danh mục sinh học & thông số môi trường chuẩn',
-                          style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   // Badge Role Admin vs User
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: canManage
                           ? AppColors.primary.withValues(alpha: 0.2)
@@ -659,7 +747,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         Icon(
                           canManage ? Icons.shield : Icons.person_outline,
                           size: 13,
-                          color: canManage ? AppColors.primary : AppColors.textMuted,
+                          color: canManage
+                              ? AppColors.primary
+                              : AppColors.textMuted,
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -667,7 +757,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: canManage ? AppColors.primary : AppColors.textMuted,
+                            color: canManage
+                                ? AppColors.primary
+                                : AppColors.textMuted,
                           ),
                         ),
                       ],
@@ -697,7 +789,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
               child: Row(
                 children: [
                   Icon(
-                    canManage ? Icons.admin_panel_settings_outlined : Icons.info_outline,
+                    canManage
+                        ? Icons.admin_panel_settings_outlined
+                        : Icons.info_outline,
                     size: 16,
                     color: canManage ? AppColors.primary : AppColors.textMuted,
                   ),
@@ -709,7 +803,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                           : 'Chế độ Người dùng: Tra cứu thông số vi khí hậu chuẩn để áp dụng cho bể nuôi. Chỉ Quản trị viên mới có quyền cập nhật danh mục.',
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: canManage ? AppColors.textMain : AppColors.textMuted,
+                        color: canManage
+                            ? AppColors.textMain
+                            : AppColors.textMuted,
                       ),
                     ),
                   ),
@@ -729,21 +825,36 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                       child: TextField(
                         decoration: InputDecoration(
                           hintText: 'Tìm loài...',
-                          hintStyle: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-                          prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.textMuted),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                          hintStyle: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.search,
+                            size: 18,
+                            color: AppColors.textMuted,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 0,
+                            horizontal: 12,
+                          ),
                           filled: true,
                           fillColor: AppColors.bgInput,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide: const BorderSide(
+                              color: AppColors.border,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: AppColors.border),
+                            borderSide: const BorderSide(
+                              color: AppColors.border,
+                            ),
                           ),
                         ),
-                        onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                        onChanged: (val) =>
+                            setState(() => _searchQuery = val.trim()),
                       ),
                     ),
                   ),
@@ -758,13 +869,19 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         side: const BorderSide(color: AppColors.border),
                       ),
                     ),
-                    icon: const Icon(Icons.refresh, size: 18, color: AppColors.textMain),
+                    icon: const Icon(
+                      Icons.refresh,
+                      size: 18,
+                      color: AppColors.textMain,
+                    ),
                     tooltip: 'Làm mới',
                     onPressed: provider.isLoading || provider.isSaving
                         ? null
                         : () async {
                             await provider.fetchProfiles();
-                            _showNotification('Đã làm mới danh mục (${provider.profiles.length} loài).');
+                            _showNotification(
+                              'Đã làm mới danh mục (${provider.profiles.length} loài).',
+                            );
                           },
                   ),
 
@@ -775,11 +892,22 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                       icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Thêm loài', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      label: const Text(
+                        'Thêm loài',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       onPressed: provider.isLoading || provider.isSaving
                           ? null
                           : () => _openSpeciesFormDialog(),
@@ -798,14 +926,20 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                   ChoiceChip(
                     label: const Text('Tất cả', style: TextStyle(fontSize: 11)),
                     selected: _selectedClimateFilter == null,
-                    onSelected: (_) => setState(() => _selectedClimateFilter = null),
+                    onSelected: (_) =>
+                        setState(() => _selectedClimateFilter = null),
                   ),
                   const SizedBox(width: 6),
                   for (final zone in ClimateZones.all) ...[
                     ChoiceChip(
-                      label: Text(ClimateZones.labelOf(zone), style: const TextStyle(fontSize: 11)),
+                      label: Text(
+                        ClimateZones.labelOf(zone),
+                        style: const TextStyle(fontSize: 11),
+                      ),
                       selected: _selectedClimateFilter == zone,
-                      onSelected: (sel) => setState(() => _selectedClimateFilter = sel ? zone : null),
+                      onSelected: (sel) => setState(
+                        () => _selectedClimateFilter = sel ? zone : null,
+                      ),
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -817,7 +951,10 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             if (_statusMessage != null || provider.errorMessage != null)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: (_isSuccess && provider.errorMessage == null)
                       ? AppColors.primary.withValues(alpha: 0.12)
@@ -861,24 +998,36 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
               child: filtered.isEmpty
                   ? Center(
                       child: provider.isLoading
-                          ? const CircularProgressIndicator(color: AppColors.primary)
+                          ? const CircularProgressIndicator(
+                              color: AppColors.primary,
+                            )
                           : Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.pets, size: 40, color: Colors.white24),
+                                const Icon(
+                                  Icons.pets,
+                                  size: 40,
+                                  color: Colors.white24,
+                                ),
                                 const SizedBox(height: 8),
                                 Text(
                                   canManage
                                       ? 'Chưa có hồ sơ loài nào khớp bộ lọc.\nNhấn nút "Thêm loài" để tạo mới.'
                                       : 'Không tìm thấy hồ sơ loài nào phù hợp.',
                                   textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: AppColors.textMuted,
+                                  ),
                                 ),
                               ],
                             ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
                       itemCount: filtered.length,
                       itemBuilder: (context, index) {
                         final item = filtered[index];
@@ -903,7 +1052,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Container(
                                         width: 38,
@@ -911,20 +1061,27 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                         decoration: BoxDecoration(
                                           color: item.isBuiltIn
                                               ? Colors.white10
-                                              : AppColors.primary.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(10),
+                                              : AppColors.primary.withValues(
+                                                  alpha: 0.15,
+                                                ),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
                                         ),
                                         child: Icon(
                                           Icons.pets,
                                           size: 18,
-                                          color: item.isBuiltIn ? AppColors.textMuted : AppColors.primary,
+                                          color: item.isBuiltIn
+                                              ? AppColors.textMuted
+                                              : AppColors.primary,
                                         ),
                                       ),
                                       const SizedBox(width: 12),
 
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               item.name,
@@ -934,7 +1091,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                 color: AppColors.textMain,
                                               ),
                                             ),
-                                            if (item.scientificName.isNotEmpty) ...[
+                                            if (item
+                                                .scientificName
+                                                .isNotEmpty) ...[
                                               const SizedBox(height: 2),
                                               Text(
                                                 item.scientificName,
@@ -950,19 +1109,30 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                       ),
 
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 7,
+                                          vertical: 2,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: item.isBuiltIn
                                               ? Colors.white10
-                                              : AppColors.primary.withValues(alpha: 0.2),
-                                          borderRadius: BorderRadius.circular(6),
+                                              : AppColors.primary.withValues(
+                                                  alpha: 0.2,
+                                                ),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
                                         ),
                                         child: Text(
-                                          item.isBuiltIn ? 'Mặc định' : 'Tùy chỉnh',
+                                          item.isBuiltIn
+                                              ? 'Mặc định'
+                                              : 'Tùy chỉnh',
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w600,
-                                            color: item.isBuiltIn ? AppColors.textMuted : AppColors.primary,
+                                            color: item.isBuiltIn
+                                                ? AppColors.textMuted
+                                                : AppColors.primary,
                                           ),
                                         ),
                                       ),
@@ -978,40 +1148,66 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Icon(Icons.public, size: 12, color: AppColors.textMuted),
+                                          const Icon(
+                                            Icons.public,
+                                            size: 12,
+                                            color: AppColors.textMuted,
+                                          ),
                                           const SizedBox(width: 4),
                                           Text(
-                                            ClimateZones.labelOf(item.climateZone),
-                                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                            ClimateZones.labelOf(
+                                              item.climateZone,
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: AppColors.textMuted,
+                                            ),
                                           ),
                                         ],
                                       ),
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Icon(Icons.tune, size: 12, color: AppColors.textMuted),
+                                          const Icon(
+                                            Icons.tune,
+                                            size: 12,
+                                            color: AppColors.textMuted,
+                                          ),
                                           const SizedBox(width: 4),
                                           Text(
                                             '${item.bands.length} dải ngưỡng',
-                                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: AppColors.textMuted,
+                                            ),
                                           ),
                                         ],
                                       ),
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Icon(Icons.wb_sunny_outlined, size: 12, color: AppColors.textMuted),
+                                          const Icon(
+                                            Icons.wb_sunny_outlined,
+                                            size: 12,
+                                            color: AppColors.textMuted,
+                                          ),
                                           const SizedBox(width: 4),
                                           Text(
                                             '${item.photoperiodHours.toStringAsFixed(0)}h sáng',
-                                            style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: AppColors.textMuted,
+                                            ),
                                           ),
                                         ],
                                       ),
                                     ],
                                   ),
 
-                                  const Divider(color: AppColors.border, height: 16),
+                                  const Divider(
+                                    color: AppColors.border,
+                                    height: 16,
+                                  ),
 
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.end,
@@ -1020,13 +1216,24 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                       TextButton.icon(
                                         style: TextButton.styleFrom(
                                           foregroundColor: AppColors.textMuted,
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
                                           minimumSize: Size.zero,
-                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
                                         ),
-                                        icon: const Icon(Icons.visibility_outlined, size: 14),
-                                        label: const Text('Chi tiết', style: TextStyle(fontSize: 12)),
-                                        onPressed: () => _showDetailDialog(item, canManage),
+                                        icon: const Icon(
+                                          Icons.visibility_outlined,
+                                          size: 14,
+                                        ),
+                                        label: const Text(
+                                          'Chi tiết',
+                                          style: TextStyle(fontSize: 12),
+                                        ),
+                                        onPressed: () =>
+                                            _showDetailDialog(item, canManage),
                                       ),
 
                                       // CÁC THAO TÁC GHI: CHỈ DÀNH CHO ADMIN
@@ -1034,32 +1241,64 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                         const SizedBox(width: 6),
                                         TextButton.icon(
                                           style: TextButton.styleFrom(
-                                            foregroundColor: Colors.orangeAccent,
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            foregroundColor:
+                                                Colors.orangeAccent,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
                                             minimumSize: Size.zero,
-                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
                                           ),
-                                          icon: const Icon(Icons.copy, size: 14),
-                                          label: const Text('Nhân bản', style: TextStyle(fontSize: 12)),
-                                          onPressed: () => _openDuplicateDialog(item),
+                                          icon: const Icon(
+                                            Icons.copy,
+                                            size: 14,
+                                          ),
+                                          label: const Text(
+                                            'Nhân bản',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                          onPressed: () =>
+                                              _openDuplicateDialog(item),
                                         ),
 
                                         if (!item.isBuiltIn) ...[
                                           const SizedBox(width: 6),
                                           TextButton.icon(
                                             style: TextButton.styleFrom(
-                                              foregroundColor: AppColors.primary,
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              foregroundColor:
+                                                  AppColors.primary,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
                                               minimumSize: Size.zero,
-                                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
                                             ),
-                                            icon: const Icon(Icons.edit, size: 14),
-                                            label: const Text('Tùy chỉnh', style: TextStyle(fontSize: 12)),
-                                            onPressed: () => _openSpeciesFormDialog(existing: item),
+                                            icon: const Icon(
+                                              Icons.edit,
+                                              size: 14,
+                                            ),
+                                            label: const Text(
+                                              'Tùy chỉnh',
+                                              style: TextStyle(fontSize: 12),
+                                            ),
+                                            onPressed: () =>
+                                                _openSpeciesFormDialog(
+                                                  existing: item,
+                                                ),
                                           ),
                                           const SizedBox(width: 6),
                                           IconButton(
-                                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                              color: Colors.redAccent,
+                                              size: 18,
+                                            ),
                                             padding: EdgeInsets.zero,
                                             constraints: const BoxConstraints(),
                                             tooltip: 'Xóa hồ sơ',
@@ -1067,27 +1306,68 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                               final confirm = await showDialog<bool>(
                                                 context: context,
                                                 builder: (ctx) => AlertDialog(
-                                                  backgroundColor: AppColors.bgCard,
-                                                  title: const Text('Xác nhận xóa', style: TextStyle(color: AppColors.textMain, fontSize: 16)),
-                                                  content: Text('Bạn có chắc muốn xóa hồ sơ loài "${item.name}" không?', style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                                                  backgroundColor:
+                                                      AppColors.bgCard,
+                                                  title: const Text(
+                                                    'Xác nhận xóa',
+                                                    style: TextStyle(
+                                                      color: AppColors.textMain,
+                                                      fontSize: 16,
+                                                    ),
+                                                  ),
+                                                  content: Text(
+                                                    'Bạn có chắc muốn xóa hồ sơ loài "${item.name}" không?',
+                                                    style: const TextStyle(
+                                                      color:
+                                                          AppColors.textMuted,
+                                                      fontSize: 13,
+                                                    ),
+                                                  ),
                                                   actions: [
                                                     TextButton(
-                                                      onPressed: () => Navigator.pop(ctx, false),
-                                                      child: const Text('Hủy', style: TextStyle(color: AppColors.textMuted)),
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            ctx,
+                                                            false,
+                                                          ),
+                                                      child: const Text(
+                                                        'Hủy',
+                                                        style: TextStyle(
+                                                          color: AppColors
+                                                              .textMuted,
+                                                        ),
+                                                      ),
                                                     ),
                                                     TextButton(
-                                                      onPressed: () => Navigator.pop(ctx, true),
-                                                      child: const Text('Xóa', style: TextStyle(color: Colors.redAccent)),
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            ctx,
+                                                            true,
+                                                          ),
+                                                      child: const Text(
+                                                        'Xóa',
+                                                        style: TextStyle(
+                                                          color:
+                                                              Colors.redAccent,
+                                                        ),
+                                                      ),
                                                     ),
                                                   ],
                                                 ),
                                               );
                                               if (confirm == true) {
-                                                final success = await provider.deleteProfile(item.id);
+                                                final success = await provider
+                                                    .deleteProfile(item.id);
                                                 if (success) {
-                                                  _showNotification('Đã xóa loài "${item.name}"');
+                                                  _showNotification(
+                                                    'Đã xóa loài "${item.name}"',
+                                                  );
                                                 } else {
-                                                  _showNotification(provider.errorMessage ?? 'Không thể xóa loài', isSuccess: false);
+                                                  _showNotification(
+                                                    provider.errorMessage ??
+                                                        'Không thể xóa loài',
+                                                    isSuccess: false,
+                                                  );
                                                 }
                                               }
                                             },

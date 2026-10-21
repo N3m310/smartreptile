@@ -61,73 +61,85 @@ void main() {
   });
 
   group('SpeciesProfileProvider State & API', () {
-    test('fetchProfiles loads items, distinguishes builtIn vs custom, and filters', () async {
-      final mockData = {
-        'items': [
-          {
-            'id': '11111111-1111-1111-1111-111111111111',
-            'name': 'Rồng Úc',
-            'scientificName': 'Pogona vitticeps',
-            'climateZone': 'Arid',
-            'isBuiltIn': true,
-            'photoperiodHours': 12.0,
-            'lightsOnLocalTime': '07:00',
-            'lightThresholdLux': 1000.0,
-            'minLightHoursPerDay': 8.0,
-            'bands': [],
-          },
-          {
-            'id': '22222222-2222-2222-2222-222222222222',
-            'name': 'Trăn Cây Xanh Tùy Chỉnh',
-            'scientificName': 'Morelia viridis',
-            'climateZone': 'Tropical',
-            'isBuiltIn': false,
-            'photoperiodHours': 12.0,
-            'lightsOnLocalTime': '06:00',
-            'lightThresholdLux': 500.0,
-            'minLightHoursPerDay': 6.0,
-            'bands': [],
-          },
-        ],
-      };
+    test(
+      'fetchProfiles loads items, distinguishes builtIn vs custom, and filters',
+      () async {
+        final mockData = {
+          'items': [
+            {
+              'id': '11111111-1111-1111-1111-111111111111',
+              'name': 'Rồng Úc',
+              'scientificName': 'Pogona vitticeps',
+              'climateZone': 'Arid',
+              'isBuiltIn': true,
+              'photoperiodHours': 12.0,
+              'lightsOnLocalTime': '07:00',
+              'lightThresholdLux': 1000.0,
+              'minLightHoursPerDay': 8.0,
+              'bands': [],
+            },
+            {
+              'id': '22222222-2222-2222-2222-222222222222',
+              'name': 'Trăn Cây Xanh Tùy Chỉnh',
+              'scientificName': 'Morelia viridis',
+              'climateZone': 'Tropical',
+              'isBuiltIn': false,
+              'photoperiodHours': 12.0,
+              'lightsOnLocalTime': '06:00',
+              'lightThresholdLux': 500.0,
+              'minLightHoursPerDay': 6.0,
+              'bands': [],
+            },
+          ],
+        };
 
-      final client = MockClient((request) async {
-        if (request.url.path == '/api/v1/species-profiles' && request.method == 'GET') {
-          return http.Response(jsonEncode(mockData), 200, headers: {'content-type': 'application/json'});
-        }
-        return http.Response('Not found', 404);
-      });
+        final client = MockClient((request) async {
+          if (request.url.path == '/api/v1/species-profiles' &&
+              request.method == 'GET') {
+            return http.Response(
+              jsonEncode(mockData),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('Not found', 404);
+        });
 
-      final api = ApiClient(baseUrl: 'http://test', httpClient: client);
-      final service = SpeciesProfileService(api: api);
-      final provider = SpeciesProfileProvider(service: service);
+        final api = ApiClient(baseUrl: 'http://test', httpClient: client);
+        final service = SpeciesProfileService(api: api);
+        final provider = SpeciesProfileProvider(service: service);
 
-      expect(provider.isLoading, isFalse);
-      expect(provider.profiles, isEmpty);
+        expect(provider.isLoading, isFalse);
+        expect(provider.profiles, isEmpty);
 
-      await provider.fetchProfiles();
+        await provider.fetchProfiles();
 
-      expect(provider.profiles.length, 2);
-      expect(provider.builtInProfiles.length, 1);
-      expect(provider.builtInProfiles.first.name, 'Rồng Úc');
-      expect(provider.customProfiles.length, 1);
-      expect(provider.customProfiles.first.name, 'Trăn Cây Xanh Tùy Chỉnh');
+        expect(provider.profiles.length, 2);
+        expect(provider.builtInProfiles.length, 1);
+        expect(provider.builtInProfiles.first.name, 'Rồng Úc');
+        expect(provider.customProfiles.length, 1);
+        expect(provider.customProfiles.first.name, 'Trăn Cây Xanh Tùy Chỉnh');
 
-      // Test Search query
-      provider.setSearchQuery('Trăn');
-      expect(provider.filteredProfiles.length, 1);
-      expect(provider.filteredProfiles.first.scientificName, 'Morelia viridis');
+        // Test Search query
+        provider.setSearchQuery('Trăn');
+        expect(provider.filteredProfiles.length, 1);
+        expect(
+          provider.filteredProfiles.first.scientificName,
+          'Morelia viridis',
+        );
 
-      // Test ClimateZone filter
-      provider.clearFilters();
-      provider.setClimateZoneFilter('Arid');
-      expect(provider.filteredProfiles.length, 1);
-      expect(provider.filteredProfiles.first.name, 'Rồng Úc');
-    });
+        // Test ClimateZone filter
+        provider.clearFilters();
+        provider.setClimateZoneFilter('Arid');
+        expect(provider.filteredProfiles.length, 1);
+        expect(provider.filteredProfiles.first.name, 'Rồng Úc');
+      },
+    );
 
     test('createProfile and duplicateProfile add to state correctly', () async {
       final client = MockClient((request) async {
-        if (request.url.path == '/api/v1/species-profiles' && request.method == 'POST') {
+        if (request.url.path == '/api/v1/species-profiles' &&
+            request.method == 'POST') {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           return http.Response(
             jsonEncode({
@@ -167,46 +179,55 @@ void main() {
       expect(provider.profiles.first.id, 'new-uuid');
     });
 
-    test('handles backend business errors with friendly Vietnamese messages', () async {
-      final client = MockClient((request) async {
-        if (request.url.path.contains('/delete-immutable')) {
-          return http.Response(
-            jsonEncode({
-              'code': 'builtin_immutable',
-              'title': 'Built-in profile is immutable',
-            }),
-            403,
-            headers: {'content-type': 'application/problem+json'},
-          );
-        }
-        if (request.url.path.contains('/delete-in-use')) {
-          return http.Response(
-            jsonEncode({
-              'code': 'profile_in_use',
-              'title': 'Profile is assigned to terrarium',
-            }),
-            409,
-            headers: {'content-type': 'application/problem+json'},
-          );
-        }
-        return http.Response('Ok', 200);
-      });
+    test(
+      'handles backend business errors with friendly Vietnamese messages',
+      () async {
+        final client = MockClient((request) async {
+          if (request.url.path.contains('/delete-immutable')) {
+            return http.Response(
+              jsonEncode({
+                'code': 'builtin_immutable',
+                'title': 'Built-in profile is immutable',
+              }),
+              403,
+              headers: {'content-type': 'application/problem+json'},
+            );
+          }
+          if (request.url.path.contains('/delete-in-use')) {
+            return http.Response(
+              jsonEncode({
+                'code': 'profile_in_use',
+                'title': 'Profile is assigned to terrarium',
+              }),
+              409,
+              headers: {'content-type': 'application/problem+json'},
+            );
+          }
+          return http.Response('Ok', 200);
+        });
 
-      final api = ApiClient(baseUrl: 'http://test', httpClient: client);
-      final service = SpeciesProfileService(api: api);
-      final provider = SpeciesProfileProvider(service: service);
+        final api = ApiClient(baseUrl: 'http://test', httpClient: client);
+        final service = SpeciesProfileService(api: api);
+        final provider = SpeciesProfileProvider(service: service);
 
-      // Delete immutable
-      final success1 = await provider.deleteProfile('delete-immutable');
-      expect(success1, isFalse);
-      expect(provider.failure?.code, 'builtin_immutable');
-      expect(provider.errorMessage, contains('Hồ sơ loài mặc định của hệ thống không thể chỉnh sửa'));
+        // Delete immutable
+        final success1 = await provider.deleteProfile('delete-immutable');
+        expect(success1, isFalse);
+        expect(provider.failure?.code, 'builtin_immutable');
+        expect(
+          provider.errorMessage,
+          contains('Hồ sơ loài mặc định của hệ thống không thể chỉnh sửa'),
+        );
 
-      // Delete in-use
-      final success2 = await provider.deleteProfile('delete-in-use');
-      expect(success2, isFalse);
-      expect(provider.failure?.code, 'profile_in_use');
-      expect(provider.errorMessage, contains('Không thể xóa hồ sơ loài vì hiện đang có bể nuôi'));
-    });
+        // Delete in-use
+        final success2 = await provider.deleteProfile('delete-in-use');
+        expect(success2, isFalse);
+        expect(provider.failure?.code, 'profile_in_use');
+        expect(
+          provider.errorMessage,
+          contains('Không thể xóa hồ sơ loài vì hiện đang có bể nuôi'),
+        );
+      },
+    );
   });
 }

@@ -717,7 +717,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: Text(
                               l10n.createAccount,
                               style: const TextStyle(
-                                color: Color(0xFFE59866),
+                                color: AppColors.accent,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -728,7 +728,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: Text(
                               l10n.forgotPassword,
                               style: const TextStyle(
-                                color: Color(0xFFE59866),
+                                color: AppColors.accent,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -751,7 +751,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 style: TextStyle(
                                   color: _identifierController.text.trim().isEmpty
                                       ? AppColors.textMuted.withValues(alpha: 0.5)
-                                      : const Color(0xFFE59866),
+                                      : AppColors.accent,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -864,7 +864,7 @@ class _FormField extends StatelessWidget {
             prefixIcon: Icon(icon, color: AppColors.textMuted, size: 20),
             suffixIcon: suffixIcon,
             filled: true,
-            fillColor: const Color(0xFF16281E),
+            fillColor: AppColors.bgInput,
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),

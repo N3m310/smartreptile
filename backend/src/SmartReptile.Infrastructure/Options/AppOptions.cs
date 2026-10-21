@@ -85,6 +85,25 @@ public sealed class StartupOptions
 }
 
 /// <summary>
+/// Demo data: three accounts, three enclosures and a week of readings, for a development database
+/// (TASKS 2026-10-19, BE-07).
+/// </summary>
+/// <remarks>
+/// The flag is off by default and only ever consulted in <c>Development</c> — the environment check is in the
+/// seeder's own code rather than here, because a flag is the one setting that gets left on in a release.
+/// </remarks>
+public sealed class DemoDataOptions
+{
+    /// <summary>Configuration section name.</summary>
+    public const string SectionName = "Seed";
+
+    /// <summary>
+    /// Seed the demo deployment. Set through <c>Seed:DemoData=true</c> (or <c>Seed__DemoData=true</c>).
+    /// </summary>
+    public bool DemoData { get; set; }
+}
+
+/// <summary>
 /// The system administrator the species-profile writes require (FR-10, <see cref="SystemRoles.AdminId"/>).
 /// </summary>
 /// <remarks>

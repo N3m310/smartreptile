@@ -61,5 +61,14 @@ public static class PrincipalExtensions
     /// <param name="principal">Authenticated principal.</param>
     public static bool CanWriteAnyAccount(this ClaimsPrincipal principal) =>
         principal.HasPermission(Permissions.DataWriteAny);
+
+    /// <summary>
+    /// True when the caller may edit a species profile that is not theirs — a built-in included. The catalogues are
+    /// shared data, so <c>species.write</c> is what lets an account author its own profiles while this is what lets
+    /// it rewrite the ones every terrarium is judged against (TASKS 2026-10-19).
+    /// </summary>
+    /// <param name="principal">Authenticated principal.</param>
+    public static bool CanEditAnySpeciesProfile(this ClaimsPrincipal principal) =>
+        principal.HasPermission(Permissions.DataWriteAny);
 }
 

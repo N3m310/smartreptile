@@ -260,6 +260,35 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
+  /// Changes the signed-in account's password.
+  ///
+  /// The refresh token travels with the request: it names the session that survives, every other one ends.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    _isBusy = true;
+    _lastFailure = null;
+    notifyListeners();
+
+    try {
+      await _api.postJson(
+        '/api/v1/auth/change-password',
+        body: {
+          'currentPassword': currentPassword,
+          'newPassword': newPassword,
+          'refreshToken': _refreshToken ?? '',
+        },
+      );
+    } on AppFailure catch (failure) {
+      _lastFailure = failure;
+      rethrow;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
   /// Ends the session, locally and on the server.
   ///
   /// The server call is best-effort: a sign-out that failed because the phone is offline still has to sign this

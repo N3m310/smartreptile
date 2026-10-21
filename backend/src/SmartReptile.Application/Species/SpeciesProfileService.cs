@@ -104,11 +104,41 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     /// <summary>Built-ins plus the caller's own, each with its bands (BR-10.1, FR-10 A2).</summary>
     /// <param name="userId">Signed-in account.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task<SpeciesProfileOutcome> ListAsync(Guid userId, CancellationToken cancellationToken)
+    /// <param name="mayEditAny">
+    /// True for an administrator, who may edit the built-ins and other accounts' profiles (TASKS 2026-10-19). It only
+    /// widens what <c>canEdit</c> reports; which profiles are listed is unchanged.
+    /// </param>
+    public async Task<SpeciesProfileOutcome> ListAsync(
+        Guid userId,
+        CancellationToken cancellationToken,
+        bool mayEditAny = false)
     {
         var profiles = await store.ListVisibleAsync(userId, cancellationToken).ConfigureAwait(false);
 
-        return SpeciesProfileOutcome.Listed([.. profiles.Select(Describe)]);
+        return SpeciesProfileOutcome.Listed([.. profiles.Select(profile => Describe(profile, userId, mayEditAny))]);
+    }
+
+    /// <summary>One profile the caller may see: a built-in, or one of their own (BR-10.1, BR-02.2).</summary>
+    /// <param name="profileId">Profile identity.</param>
+    /// <param name="userId">Signed-in account, which decides what it may see.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayEditAny">True for an administrator, who may also edit it; it only widens <c>canEdit</c>.</param>
+    public async Task<SpeciesProfileOutcome> GetAsync(
+        Guid profileId,
+        Guid userId,
+        CancellationToken cancellationToken,
+        bool mayEditAny = false)
+    {
+        var profile = await store.FindAsync(profileId, cancellationToken).ConfigureAwait(false);
+
+        // A foreign custom profile answers exactly like a missing one (BR-02.2) — the rule the list applies by never
+        // returning it, and the picture route applies by refusing to open it.
+        if (profile is null || (!profile.IsBuiltIn && profile.CreatedByUserId != userId))
+        {
+            return SpeciesProfileOutcome.NotFound();
+        }
+
+        return SpeciesProfileOutcome.Found(Describe(profile, userId, mayEditAny));
     }
 
     /// <summary>Creates a custom profile with its bands.</summary>
@@ -153,7 +183,7 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             return SpeciesProfileOutcome.Invalid(violations);
         }
 
-        if (await store.NameTakenAsync(userId, candidate.Name, cancellationToken).ConfigureAwait(false))
+        if (await store.NameTakenAsync(userId, candidate.Name, null, cancellationToken).ConfigureAwait(false))
         {
             return NameTaken(candidate.Name);
         }
@@ -187,11 +217,11 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             userId,
             actor,
             now,
-            afterJson: JsonSerializer.Serialize(Describe(profile), AuditJson)));
+            afterJson: JsonSerializer.Serialize(Describe(profile, userId), AuditJson)));
 
         await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-        return SpeciesProfileOutcome.Found(Describe(profile));
+        return SpeciesProfileOutcome.Found(Describe(profile, userId));
     }
 
     /// <summary>
@@ -234,7 +264,7 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             return SpeciesProfileOutcome.Invalid(violations);
         }
 
-        if (await store.NameTakenAsync(userId, name, cancellationToken).ConfigureAwait(false))
+        if (await store.NameTakenAsync(userId, name, null, cancellationToken).ConfigureAwait(false))
         {
             return NameTaken(name);
         }
@@ -285,29 +315,36 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             actor,
             now,
             beforeJson: JsonSerializer.Serialize(new { sourceProfileId = source.Id, sourceBuiltIn = source.IsBuiltIn }, AuditJson),
-            afterJson: JsonSerializer.Serialize(Describe(copy), AuditJson)));
+            afterJson: JsonSerializer.Serialize(Describe(copy, userId), AuditJson)));
 
         await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-        return SpeciesProfileOutcome.Found(Describe(copy));
+        return SpeciesProfileOutcome.Found(Describe(copy, userId));
     }
 
-    /// <summary>Edits one of the caller's own profiles: fields, the band set, or both.</summary>
+    /// <summary>Edits a profile: its fields, the band set, or both.</summary>
     /// <param name="profileId">Profile to change.</param>
     /// <param name="request">Fields to change; omitted members are left alone.</param>
-    /// <param name="userId">Signed-in account, which must own the profile.</param>
+    /// <param name="userId">Signed-in account, which must own the profile unless it is an administrator.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayEditAny">
+    /// True for an administrator: a built-in and another account's profile are then editable instead of answering
+    /// <c>403 builtin_immutable</c> / <c>404 not_found</c>, and the change is audited with before and after like any
+    /// other (TASKS 2026-10-19). Narrowing the permission, not the validation: every band rule still applies.
+    /// </param>
     public async Task<SpeciesProfileOutcome> UpdateAsync(
         Guid profileId,
         UpdateSpeciesProfileRequest request,
         Guid userId,
         AuditActor actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayEditAny = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, cancellationToken).ConfigureAwait(false);
+        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, mayEditAny, cancellationToken)
+            .ConfigureAwait(false);
 
         if (profile is null)
         {
@@ -345,14 +382,16 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
         }
 
         // Only a name that actually moves can collide: the row holds its own name, so checking the unchanged one
-        // would refuse every edit of every other field.
+        // would refuse every edit of every other field. The namespace is the profile's owner — an administrator
+        // renaming another account's profile must not collide with their own catalogue's names.
         if (!string.Equals(candidate.Name, profile.Name, StringComparison.Ordinal)
-            && await store.NameTakenAsync(userId, candidate.Name, cancellationToken).ConfigureAwait(false))
+            && await store.NameTakenAsync(profile.CreatedByUserId, candidate.Name, profile.Id, cancellationToken)
+                .ConfigureAwait(false))
         {
             return NameTaken(candidate.Name);
         }
 
-        var before = Describe(profile);
+        var before = Describe(profile, userId);
         var now = clock.UtcNow;
 
         profile.Name = candidate.Name;
@@ -377,25 +416,35 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             actor,
             now,
             beforeJson: JsonSerializer.Serialize(before, AuditJson),
-            afterJson: JsonSerializer.Serialize(Describe(profile), AuditJson)));
+            afterJson: JsonSerializer.Serialize(Describe(profile, userId), AuditJson)));
 
-        await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        if (!await store.TrySaveChangesAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return SpeciesProfileOutcome.ProfileConflict();
+        }
 
-        return SpeciesProfileOutcome.Found(Describe(profile));
+        return SpeciesProfileOutcome.Found(Describe(profile, userId, mayEditAny));
     }
 
-    /// <summary>Deletes one of the caller's own profiles, unless a terrarium is assigned to it.</summary>
+    /// <summary>Deletes a profile, unless a terrarium is assigned to it.</summary>
     /// <param name="profileId">Profile to delete.</param>
-    /// <param name="userId">Signed-in account, which must own the profile.</param>
+    /// <param name="userId">Signed-in account, which must own the profile unless it is an administrator.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayEditAny">
+    /// True for an administrator: a built-in and another account's profile become deletable. The <c>409</c> for a
+    /// profile still in use stands for everyone, because a terrarium pointing at a deleted profile is a broken
+    /// terrarium whoever asked.
+    /// </param>
     public async Task<SpeciesProfileOutcome> DeleteAsync(
         Guid profileId,
         Guid userId,
         AuditActor actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayEditAny = false)
     {
-        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, cancellationToken).ConfigureAwait(false);
+        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, mayEditAny, cancellationToken)
+            .ConfigureAwait(false);
 
         if (profile is null)
         {
@@ -408,7 +457,7 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
         }
 
         var now = clock.UtcNow;
-        var before = Describe(profile);
+        var before = Describe(profile, userId);
 
         store.AddAuditEntry(AuditLog.ForSpeciesProfile(
             AuditAction.ProfileDeleted,
@@ -440,20 +489,23 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     /// </para>
     /// </remarks>
     /// <param name="profileId">Profile to set the picture on.</param>
-    /// <param name="userId">Signed-in account, which must own the profile.</param>
+    /// <param name="userId">Signed-in account, which must own the profile unless it is an administrator.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="upload">The bytes and the caller's claim about their type.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayEditAny">True for an administrator, who may set a picture on any profile, built-in included.</param>
     public async Task<SpeciesProfileOutcome> SetImageAsync(
         Guid profileId,
         Guid userId,
         AuditActor actor,
         ProfileImageUpload upload,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayEditAny = false)
     {
         ArgumentNullException.ThrowIfNull(upload);
 
-        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, cancellationToken).ConfigureAwait(false);
+        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, mayEditAny, cancellationToken)
+            .ConfigureAwait(false);
 
         if (profile is null)
         {
@@ -492,7 +544,7 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
         var key = await files.SaveAsync(buffered, image.Extension, cancellationToken).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var before = Describe(profile);
+        var before = Describe(profile, userId);
         var replaced = profile.ImageStorageKey;
 
         profile.ImageStorageKey = key;
@@ -507,13 +559,13 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             actor,
             now,
             beforeJson: JsonSerializer.Serialize(before, AuditJson),
-            afterJson: JsonSerializer.Serialize(Describe(profile), AuditJson)));
+            afterJson: JsonSerializer.Serialize(Describe(profile, userId), AuditJson)));
 
         await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         await DiscardAsync(replaced, key, cancellationToken).ConfigureAwait(false);
 
-        return SpeciesProfileOutcome.Found(Describe(profile));
+        return SpeciesProfileOutcome.Found(Describe(profile, userId, mayEditAny));
     }
 
     /// <summary>
@@ -522,16 +574,19 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     /// row a trail must not carry.
     /// </summary>
     /// <param name="profileId">Profile to clear.</param>
-    /// <param name="userId">Signed-in account, which must own the profile.</param>
+    /// <param name="userId">Signed-in account, which must own the profile unless it is an administrator.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayEditAny">True for an administrator, who may clear the picture of any profile.</param>
     public async Task<SpeciesProfileOutcome> RemoveImageAsync(
         Guid profileId,
         Guid userId,
         AuditActor actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayEditAny = false)
     {
-        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, cancellationToken).ConfigureAwait(false);
+        var (profile, refusal) = await OwnedForWriteAsync(profileId, userId, mayEditAny, cancellationToken)
+            .ConfigureAwait(false);
 
         if (profile is null)
         {
@@ -540,11 +595,11 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
 
         if (profile.ImageStorageKey is not { } removed)
         {
-            return SpeciesProfileOutcome.Found(Describe(profile));
+            return SpeciesProfileOutcome.Found(Describe(profile, userId, mayEditAny));
         }
 
         var now = clock.UtcNow;
-        var before = Describe(profile);
+        var before = Describe(profile, userId);
 
         profile.ImageStorageKey = null;
         profile.ImageContentType = null;
@@ -558,13 +613,13 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
             actor,
             now,
             beforeJson: JsonSerializer.Serialize(before, AuditJson),
-            afterJson: JsonSerializer.Serialize(Describe(profile), AuditJson)));
+            afterJson: JsonSerializer.Serialize(Describe(profile, userId), AuditJson)));
 
         await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         await files.DeleteAsync(removed, cancellationToken).ConfigureAwait(false);
 
-        return SpeciesProfileOutcome.Found(Describe(profile));
+        return SpeciesProfileOutcome.Found(Describe(profile, userId, mayEditAny));
     }
 
     /// <summary>
@@ -621,9 +676,15 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     /// first would report it as someone else's and cost the client the one answer that tells it to duplicate
     /// instead (FR-10 A2).
     /// </summary>
+    /// <remarks>
+    /// An administrator skips the last two checks (TASKS 2026-10-19): the built-ins and other accounts' profiles are
+    /// theirs to edit, and the decision is "admin toàn quyền, không bắt nhân bản". What is not skipped is the
+    /// existence check or anything downstream — band validation, the in-use rule and the audit trail are unchanged.
+    /// </remarks>
     private async Task<(SpeciesProfile? Profile, SpeciesProfileOutcome? Refusal)> OwnedForWriteAsync(
         Guid profileId,
         Guid userId,
+        bool mayEditAny,
         CancellationToken cancellationToken)
     {
         if (!await store.UserExistsAsync(userId, cancellationToken).ConfigureAwait(false))
@@ -636,6 +697,11 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
         if (profile is null)
         {
             return (null, SpeciesProfileOutcome.NotFound());
+        }
+
+        if (mayEditAny)
+        {
+            return (profile, null);
         }
 
         if (profile.IsBuiltIn)
@@ -1000,14 +1066,20 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
 
     private static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    /// <summary>The wire shape of one profile, bands included, ordered so two reads of one row agree.</summary>
-    private static SpeciesProfileView Describe(SpeciesProfile profile) =>
+    /// <summary>The wire shape of one profile for one caller, bands included, ordered so two reads of one row agree.</summary>
+    /// <remarks>
+    /// <c>canEdit</c> is resolved here rather than left to the client: the rule is "not a built-in, and mine", or
+    /// "any of them" for an administrator — and a client re-deriving it from <c>isBuiltIn</c> would have to guess
+    /// both halves.
+    /// </remarks>
+    private static SpeciesProfileView Describe(SpeciesProfile profile, Guid viewerId, bool mayEditAny = false) =>
         new(
             profile.Id,
             profile.Name,
             profile.ScientificName,
             profile.ClimateZone.ToString(),
             profile.IsBuiltIn,
+            mayEditAny || (!profile.IsBuiltIn && profile.CreatedByUserId == viewerId),
             profile.PhotoperiodHours,
             profile.LightsOnLocalTime.ToString("HH:mm", CultureInfo.InvariantCulture),
             profile.LightThresholdLux,

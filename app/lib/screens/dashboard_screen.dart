@@ -4,7 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 
 import '../state/app_data_provider.dart';
 import '../theme/app_theme.dart';
-import 'terrarium_detail_screen.dart';
+import 'terrariums_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -88,9 +88,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
+                        Row(
                           children: [
                             Text(
                               current.name,
@@ -230,30 +228,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Expanded(
-                  child: Text(
-                    'Thông số vi khí hậu trực tiếp',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textMain,
-                    ),
+                const Text(
+                  'Thông số vi khí hậu trực tiếp',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textMain,
                   ),
                 ),
                 TextButton(
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(48, 36),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            TerrariumDetailScreen(terrarium: current),
+                        builder: (_) => const TerrariumsScreen(),
                       ),
                     );
                   },
@@ -387,6 +375,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       FilterChip(
                         label: const Text('Độ ẩm'),
                         selected: _showHum,
@@ -407,6 +396,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       FilterChip(
                         label: const Text('Ánh sáng'),
                         selected: _showLight,
@@ -705,37 +695,25 @@ class _SensorCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(icon, color: color, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+              Row(
+                children: [
+                  Icon(icon, color: color, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  safeRange,
-                  maxLines: 2,
-                  textAlign: TextAlign.right,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 10,
                   ),
+                ],
+              ),
+              Text(
+                safeRange,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
                 ),
               ),
             ],
