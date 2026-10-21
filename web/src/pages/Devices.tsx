@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Cpu, RefreshCw, Search, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, Cpu, Pencil, Plus, RefreshCw, Search, Trash2, Wifi, WifiOff } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { DeviceItem, DeviceList, TerrariumList } from '../api/types';
@@ -23,6 +23,8 @@ export const Devices: React.FC = () => {
   const [samplingIntervalSec, setSamplingIntervalSec] = useState(60);
   const [publishIntervalSec, setPublishIntervalSec] = useState(60);
   const [claimCode, setClaimCode] = useState('');
+  const [claimMode, setClaimMode] = useState<'code' | 'mac'>('code');
+  const [macAddress, setMacAddress] = useState('');
   const [terrariumId, setTerrariumId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -85,13 +87,25 @@ export const Devices: React.FC = () => {
 
   const claim = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!claimCode.trim() || !terrariumId) return;
+    const byMac = claimMode === 'mac';
+    if (!(byMac ? macAddress.trim() : claimCode.trim()) || !terrariumId) return;
     await runAction(async () => {
-      const result = await api.claimDevice({ claimCode: claimCode.trim(), terrariumId });
+      const result = byMac
+        ? await api.claimDeviceByMac({ macAddress: macAddress.trim(), terrariumId })
+        : await api.claimDevice({ claimCode: claimCode.trim(), terrariumId });
       setSecret(result.secret);
       setClaimCode('');
+      setMacAddress('');
       devices.reload();
     }, false);
+  };
+
+  const removeDevice = (device: DeviceItem) => {
+    if (!window.confirm(`Gỡ thiết bị ${device.deviceName} khỏi tài khoản?`)) return;
+    void runAction(async () => {
+      await api.deleteDevice(device.deviceId);
+      if (selected?.deviceId === device.deviceId) setSelected(null);
+    });
   };
 
   const showDevice = async (device: DeviceItem) => {
@@ -123,6 +137,11 @@ export const Devices: React.FC = () => {
           <p className="mt-1 text-sm text-muted">Trạng thái và cấu hình thiết bị thuộc các bể nuôi của bạn.</p>
         </div>
         <div className="flex items-center gap-2">
+          {canProvision && (
+            <button type="button" onClick={() => document.getElementById('device-claim-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white">
+              <Plus className="h-4 w-4" aria-hidden="true" />Thêm thiết bị
+            </button>
+          )}
           <span className="rounded-lg border border-hairline bg-surface px-3 py-2 text-xs text-muted">
             Tổng thiết bị: <strong className="text-ink">{items.length}</strong>
           </span>
@@ -143,11 +162,25 @@ export const Devices: React.FC = () => {
       )}
 
       {canProvision && (
-        <form onSubmit={(event) => void claim(event)} className="grid gap-3 rounded-xl border border-hairline bg-surface p-4 sm:grid-cols-[1fr_1fr_auto]">
-          <label className="text-xs font-medium text-muted">
-            Mã nhận thiết bị
-            <input required value={claimCode} onChange={(event) => setClaimCode(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" placeholder="Nhập mã trên thiết bị" />
-          </label>
+        <form id="device-claim-form" onSubmit={(event) => void claim(event)} className="grid gap-3 rounded-xl border border-hairline bg-surface p-4 sm:grid-cols-[1fr_1fr_auto]">
+          <div className="flex gap-2 sm:col-span-3" role="tablist" aria-label="Cách nhận thiết bị">
+            {(['code', 'mac'] as const).map((mode) => (
+              <button key={mode} type="button" role="tab" aria-selected={claimMode === mode} onClick={() => setClaimMode(mode)} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${claimMode === mode ? 'border-brand bg-brand/10 text-brand' : 'border-hairline text-muted hover:text-ink'}`}>
+                {mode === 'code' ? 'Bằng mã nhận' : 'Bằng địa chỉ MAC'}
+              </button>
+            ))}
+          </div>
+          {claimMode === 'code' ? (
+            <label className="text-xs font-medium text-muted">
+              Mã nhận thiết bị
+              <input required value={claimCode} onChange={(event) => setClaimCode(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" placeholder="Nhập mã trên thiết bị" />
+            </label>
+          ) : (
+            <label className="text-xs font-medium text-muted">
+              Địa chỉ MAC
+              <input required value={macAddress} onChange={(event) => setMacAddress(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 font-mono text-sm text-ink" placeholder="AA:BB:CC:DD:EE:FF" />
+            </label>
+          )}
           <label className="text-xs font-medium text-muted">
             Bể nuôi
             <select required value={terrariumId} onChange={(event) => setTerrariumId(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink">
@@ -212,8 +245,11 @@ export const Devices: React.FC = () => {
                 <td className="px-4 py-3 text-muted">{device.samplingIntervalSec}s</td>
                 <td className="px-4 py-3 text-muted">{formatDate(device.lastSeenAt)}</td>
                 <td className="px-4 py-3">
-                  {canWrite && <button type="button" onClick={() => startEdit(device)} className="mr-3 text-xs text-accent hover:underline">Cấu hình</button>}
-                  {canProvision && <button type="button" onClick={() => void runAction(async () => { const result = await api.rotateDeviceSecret(device.deviceId); setSecret(result.secret); })} className="text-xs text-accent hover:underline">Đổi khóa</button>}
+                  <div className="flex flex-wrap gap-2">
+                    {canWrite && <button type="button" onClick={() => startEdit(device)} className="inline-flex items-center gap-1 rounded-lg border border-hairline px-2.5 py-1.5 text-xs text-ink hover:bg-raised"><Pencil className="h-3.5 w-3.5" aria-hidden="true" />Sửa</button>}
+                    {canWrite && <button type="button" disabled={busy} onClick={() => removeDevice(device)} className="inline-flex items-center gap-1 rounded-lg border border-critical/40 px-2.5 py-1.5 text-xs text-critical hover:bg-critical/5 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" />Xóa</button>}
+                    {canProvision && <button type="button" disabled={busy} onClick={() => void runAction(async () => { const result = await api.rotateDeviceSecret(device.deviceId); setSecret(result.secret); })} className="rounded-lg border border-hairline px-2.5 py-1.5 text-xs text-accent hover:bg-raised disabled:opacity-50">Đổi khóa</button>}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -240,7 +276,7 @@ export const Devices: React.FC = () => {
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <Detail label="Địa chỉ MAC" value={selected.macAddress} /><Detail label="Chip ID" value={selected.chipId} /><Detail label="Giao thức" value={selected.protocol} /><Detail label="Trạng thái thiết bị" value={selected.status} /><Detail label="Firmware" value={selected.firmwareVersion ?? '—'} /><Detail label="Chu kỳ gửi" value={`${selected.publishIntervalSec}s`} /><Detail label="Tín hiệu Wi-Fi" value={selected.signalStrengthDbm === null ? '—' : `${selected.signalStrengthDbm} dBm`} /><Detail label="Pin" value={selected.batteryPct === null ? '—' : `${selected.batteryPct}%`} />
                 <div className="col-span-2 flex flex-wrap justify-end gap-2 border-t border-hairline pt-4">
-                  {canProvision && <button type="button" disabled={busy} onClick={() => void runAction(() => api.revokeDevice(selected.deviceId))} className="rounded-lg border border-warning/40 px-3 py-2 text-xs text-warning">Thu hồi khóa</button>}
+                  {canProvision && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Thu hồi khóa của thiết bị ${selected.deviceName}? Thiết bị sẽ ngừng gửi dữ liệu.`)) void runAction(async () => { await api.revokeDevice(selected.deviceId); setSelected(await api.getDevice(selected.deviceId)); }); }} className="rounded-lg border border-warning/40 px-3 py-2 text-xs text-warning">Thu hồi khóa</button>}
                   {canWrite && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Gỡ thiết bị ${selected.deviceName} khỏi tài khoản?`)) void runAction(async () => { await api.deleteDevice(selected.deviceId); setSelected(null); }); }} className="rounded-lg border border-critical/40 px-3 py-2 text-xs text-critical">Gỡ thiết bị</button>}
                 </div>
               </dl>
