@@ -52,10 +52,14 @@ public interface IProvisioningStore
     void AddAuditEntry(AuditLog entry);
 
     /// <summary>
-    /// The terrarium, but only when it belongs to <paramref name="ownerUserId"/> and is not soft-deleted.
+    /// The terrarium, but only when it belongs to <paramref name="ownerUserId"/> (or <paramref name="mayReachAnyAccount"/> is true) and is not soft-deleted.
     /// A foreign or missing id therefore looks identical, which is what keeps ids from being probed (BR-02.2).
     /// </summary>
-    Task<Terrarium?> FindOwnedTerrariumAsync(Guid terrariumId, Guid ownerUserId, CancellationToken cancellationToken);
+    Task<Terrarium?> FindOwnedTerrariumAsync(
+        Guid terrariumId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false);
 
     /// <summary>True when an active device is already bound to the terrarium (DI-04, enforced by a filtered index).</summary>
     Task<bool> TerrariumHasDeviceAsync(Guid terrariumId, CancellationToken cancellationToken);

@@ -59,10 +59,11 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
     public Task<Terrarium?> FindOwnedTerrariumAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false) =>
         db.Terrariums.FirstOrDefaultAsync(
             terrarium => terrarium.Id == terrariumId
-                         && terrarium.UserId == ownerUserId
+                         && (mayReachAnyAccount || terrarium.UserId == ownerUserId)
                          && terrarium.Status != TerrariumStatus.Deleted,
             cancellationToken);
 

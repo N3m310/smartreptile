@@ -499,7 +499,7 @@ public class DeviceProvisioningServiceTests
     }
 
     [Fact]
-    public async Task ClaimByMac_answers_one_thing_for_an_unknown_address()
+    public async Task ClaimByMac_provisions_and_binds_an_unregistered_address()
     {
         var terrarium = _store.AddTerrarium(_owner);
 
@@ -507,27 +507,22 @@ public class DeviceProvisioningServiceTests
             new ClaimByMacRequest("AA:BB:CC:DD:EE:99", terrarium.Id),
             _owner);
 
-        outcome.Problem!.Code.Should().Be("device_not_found");
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Claim.Should().NotBeNull();
+        outcome.Claim!.TerrariumId.Should().Be(terrarium.Id);
     }
 
     [Fact]
-    public async Task ClaimByMac_refuses_a_board_that_is_already_bound_indistinguishably()
+    public async Task ClaimByMac_refuses_a_board_that_is_already_bound()
     {
         var first = (await SelfRegisterAsync()).Registration!;
         var terrarium = _store.AddTerrarium(_owner);
         (await _service.ClaimAsync(new ClaimRequest(first.ClaimCode, terrarium.Id), _owner))
             .Succeeded.Should().BeTrue();
 
-        var unknown = await _service.ClaimByMacAsync(
-            new ClaimByMacRequest("AA:BB:CC:DD:EE:99", terrarium.Id),
-            _owner);
-
         var bound = await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, _store.AddTerrarium(_owner).Id), _owner);
 
-        // BR-04.3's reasoning applied to the address: telling "already claimed" apart from "never registered" would
-        // make the route a way to test whether an address belongs to this fleet (TASKS 2026-10-14, item 8).
-        bound.Problem!.Code.Should().Be("device_not_found");
-        bound.Problem.Message.Should().Be(unknown.Problem!.Message);
+        bound.Problem!.Code.Should().Be("device_already_bound");
     }
 
     [Fact]
@@ -539,7 +534,7 @@ public class DeviceProvisioningServiceTests
 
         var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(Mac, terrarium.Id), _owner);
 
-        outcome.Problem!.Code.Should().Be("device_not_found");
+        outcome.Problem!.Code.Should().Be("device_already_bound");
     }
 
     [Fact]

@@ -172,10 +172,11 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
     public Task<Terrarium?> FindOwnedTerrariumAsync(
         Guid terrariumId,
         Guid ownerUserId,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false) =>
         Task.FromResult(_terrariums.FirstOrDefault(
             terrarium => terrarium.Id == terrariumId
-                         && terrarium.UserId == ownerUserId
+                         && (mayReachAnyAccount || terrarium.UserId == ownerUserId)
                          && terrarium.Status == TerrariumStatus.Active));
 
     public Task<bool> TerrariumHasDeviceAsync(Guid terrariumId, CancellationToken cancellationToken) =>
