@@ -165,16 +165,17 @@ class _RootShellState extends State<_RootShell> {
           ),
           screen: const AdminHubScreen(),
           isMock: false,
+        )
+      else
+        _ShellTab(
+          destination: NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: l10n.navProfile,
+          ),
+          screen: const ProfileScreen(),
+          isMock: false,
         ),
-      _ShellTab(
-        destination: NavigationDestination(
-          icon: const Icon(Icons.person_outline),
-          selectedIcon: const Icon(Icons.person),
-          label: l10n.navProfile,
-        ),
-        screen: const ProfileScreen(),
-        isMock: false,
-      ),
     ];
 
     // A sign-out while the administration tab is open removes it, so the index has to be clamped rather than
