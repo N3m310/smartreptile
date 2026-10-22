@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/permissions.dart';
 import '../core/problem.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/api_terrarium_models.dart';
+import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
 import '../l10n/labels.dart';
@@ -17,12 +19,21 @@ class TerrariumsScreen extends StatefulWidget {
 }
 
 class _TerrariumsScreenState extends State<TerrariumsScreen> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<TerrariumProvider>().loadTerrariums();
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _createTerrarium() async {
@@ -53,17 +64,34 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
   @override
   Widget build(BuildContext context) {
     final data = context.watch<TerrariumProvider>();
+    final session = context.watch<SessionProvider>();
     final l10n = AppLocalizations.of(context);
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
+
+    final filtered = isAdmin && _searchQuery.isNotEmpty
+        ? data.terrariums.where((t) {
+            final q = _searchQuery.toLowerCase();
+            return t.name.toLowerCase().contains(q) ||
+                t.speciesName.toLowerCase().contains(q) ||
+                (t.description?.toLowerCase().contains(q) ?? false) ||
+                (t.location?.toLowerCase().contains(q) ?? false);
+          }).toList()
+        : data.terrariums;
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        onPressed: _createTerrarium,
-        icon: const Icon(Icons.add),
-        label: Text(l10n.terrariumNew),
-      ),
+      floatingActionButton: isAdmin
+          ? null
+          : FloatingActionButton.extended(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              onPressed: _createTerrarium,
+              icon: const Icon(Icons.add),
+              label: Text(l10n.terrariumNew),
+            ),
       body: RefreshIndicator(
         onRefresh: data.loadTerrariums,
         child: data.isLoading && data.terrariums.isEmpty
@@ -83,6 +111,150 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                   ),
                 ],
               )
+            : isAdmin
+            ? ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // Summary row (format matches Devices screen Image 2)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.bgCard,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Tổng bể nuôi:',
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              Text(
+                                '${data.terrariums.length}',
+                                style: const TextStyle(
+                                  color: AppColors.textMain,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: _createTerrarium,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: Text(
+                          l10n.terrariumNew,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Search bar
+                  TextField(
+                    controller: _searchController,
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 13,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Tìm theo tên bể nuôi, loài, vị trí...',
+                      hintStyle: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 13,
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: AppColors.textMuted,
+                        size: 20,
+                      ),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(
+                                Icons.clear,
+                                size: 18,
+                                color: AppColors.textMuted,
+                              ),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: AppColors.bgInput,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: AppColors.primary),
+                      ),
+                    ),
+                    onChanged: (val) => setState(
+                      () => _searchQuery = val.trim().toLowerCase(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  if (filtered.isEmpty) ...[
+                    const SizedBox(height: 32),
+                    const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.search_off,
+                            size: 40,
+                            color: AppColors.textMuted,
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            'Không tìm thấy bể nuôi phù hợp',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else
+                    for (final item in filtered)
+                      _TerrariumCard(item: item),
+                ],
+              )
             : data.terrariums.isEmpty
             ? ListView(
                 padding: const EdgeInsets.all(24),
@@ -99,79 +271,89 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                 itemCount: data.terrariums.length,
                 itemBuilder: (context, index) {
                   final item = data.terrariums[index];
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              TerrariumDetailScreen(terrariumId: item.id),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 58,
-                              height: 58,
-                              decoration: BoxDecoration(
-                                color: AppColors.bgCardHover,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: const Icon(
-                                Icons.pets,
-                                color: AppColors.primary,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.name,
-                                    style: const TextStyle(
-                                      color: AppColors.textMain,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    item.speciesName,
-                                    style: const TextStyle(
-                                      color: AppColors.accent,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  if (item.location?.isNotEmpty == true) ...[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      item.location!,
-                                      style: const TextStyle(
-                                        color: AppColors.textMuted,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            const Icon(
-                              Icons.chevron_right,
-                              color: AppColors.textMuted,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
+                  return _TerrariumCard(item: item);
                 },
               ),
+      ),
+    );
+  }
+}
+
+class _TerrariumCard extends StatelessWidget {
+  const _TerrariumCard({required this.item});
+
+  final ApiTerrarium item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TerrariumDetailScreen(terrariumId: item.id),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: AppColors.bgCardHover,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.pets,
+                  color: AppColors.primary,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        color: AppColors.textMain,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      item.speciesName,
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (item.location?.isNotEmpty == true) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        item.location!,
+                        style: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right,
+                color: AppColors.textMuted,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

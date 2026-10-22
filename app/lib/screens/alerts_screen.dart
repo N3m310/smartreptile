@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/permissions.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../state/app_data_provider.dart';
+import '../state/session_provider.dart';
 import '../theme/app_theme.dart';
 
 class AlertsScreen extends StatefulWidget {
@@ -32,6 +34,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
   @override
   Widget build(BuildContext context) {
     final data = context.watch<AppDataProvider>();
+    final session = context.watch<SessionProvider>();
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
 
     final filtered = data.alerts.where((a) {
       if (_filter == 'pending') return !a.isResolved;
@@ -68,25 +74,26 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
           ),
 
-          // Logic banner
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: AppColors.bgMain,
-            child: const Row(
-              children: [
-                Icon(Icons.shield_outlined,
-                    size: 14, color: AppColors.primary),
-                SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Logic ngưỡng: Kích hoạt khi giá trị vượt ngoài Min/Max (Không AI)',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+          // Logic banner (hidden for admin role, displayed for all other roles)
+          if (!isAdmin)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: AppColors.bgMain,
+              child: const Row(
+                children: [
+                  Icon(Icons.shield_outlined,
+                      size: 14, color: AppColors.primary),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Logic ngưỡng: Kích hoạt khi giá trị vượt ngoài Min/Max (Không AI)',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
 
           // Alerts List
           Expanded(
