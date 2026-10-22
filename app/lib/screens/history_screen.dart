@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../core/permissions.dart';
 import '../core/problem.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../l10n/labels.dart';
 import '../models/api_terrarium_models.dart';
+import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -72,6 +74,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final session = context.watch<SessionProvider>();
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
     final terrariums = context.watch<TerrariumProvider>().terrariums;
     final provider = context.watch<TerrariumProvider>();
     ApiTerrarium? selected;
@@ -84,7 +91,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
-      appBar: AppBar(title: Text(l10n.historyTitle)),
+      appBar: isAdmin ? null : AppBar(title: Text(l10n.historyTitle)),
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: ListView(
@@ -105,6 +112,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             else if (terrariums.isNotEmpty) ...[
               DropdownButtonFormField<String>(
                 initialValue: selected?.id,
+                isExpanded: true,
                 decoration: InputDecoration(labelText: l10n.terrariumDetail),
                 items: [
                   for (final terrarium in terrariums)

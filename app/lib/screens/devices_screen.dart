@@ -45,26 +45,32 @@ class _DevicesScreenState extends State<DevicesScreen> {
     final deviceProv = context.watch<DeviceProvider>();
     final canWrite = session.hasPermission(Permissions.deviceWrite);
     final canProvision = session.hasPermission(Permissions.deviceProvision);
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
-      appBar: AppBar(
-        centerTitle: true,
-        title: Text(l10n.navDevices),
-        actions: [
-          if (canProvision)
-            IconButton(
-              tooltip: 'Nhận thiết bị',
-              icon: const Icon(Icons.add_link),
-              onPressed: () => _showClaimDialog(context),
+      appBar: isAdmin
+          ? null
+          : AppBar(
+              centerTitle: true,
+              title: Text(l10n.navDevices),
+              actions: [
+                if (canProvision)
+                  IconButton(
+                    tooltip: 'Nhận thiết bị',
+                    icon: const Icon(Icons.add_link),
+                    onPressed: () => _showClaimDialog(context),
+                  ),
+                IconButton(
+                  tooltip: 'Làm mới',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () => deviceProv.loadDevices(),
+                ),
+              ],
             ),
-          IconButton(
-            tooltip: 'Làm mới',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => deviceProv.loadDevices(),
-          ),
-        ],
-      ),
       body: RefreshIndicator(
         color: AppColors.primary,
         onRefresh: () async {

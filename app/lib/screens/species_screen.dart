@@ -658,11 +658,15 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     final provider = context.watch<SpeciesProfileProvider>();
 
     // Logic kiểm tra vai trò Admin vs User:
-    // Admin có quyền `species.write` hoặc role là Admin -> toàn quyền thêm/sửa/xóa/nhân bản.
+    // Admin có quyền `species.write` hoặc role là Admin/Administrator -> toàn quyền thêm/sửa/xóa/nhân bản.
     // User thường chỉ có `species.read` -> chỉ tra cứu, xem thông số.
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
+
     final canManage =
-        session.hasPermission(Permissions.speciesWrite) ||
-        (session.user?.role.toLowerCase() == 'admin');
+        session.hasPermission(Permissions.speciesWrite) || isAdmin;
 
     // Filter profiles theo query và climate zone
     final filtered = provider.profiles.where((p) {
@@ -683,239 +687,368 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Top Bar: Tiêu đề và badge vai trò
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.pets,
-                      color: AppColors.primary,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Hồ sơ loài & Vi khí hậu',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textMain,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Danh mục sinh học & thông số môi trường chuẩn',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Badge Role Admin vs User
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: canManage
-                          ? AppColors.primary.withValues(alpha: 0.2)
-                          : Colors.white10,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: canManage
-                            ? AppColors.primary.withValues(alpha: 0.5)
-                            : Colors.white24,
+            // Top Bar & Role guide banner (hidden for role admin, displayed for other roles)
+            if (!isAdmin) ...[
+              // Top Bar: Tiêu đề và badge vai trò
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.pets,
+                        color: AppColors.primary,
+                        size: 22,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          canManage ? Icons.shield : Icons.person_outline,
-                          size: 13,
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Hồ sơ loài & Vi khí hậu',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textMain,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Danh mục sinh học & thông số môi trường chuẩn',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Badge Role Admin vs User
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: canManage
+                            ? AppColors.primary.withValues(alpha: 0.2)
+                            : Colors.white10,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
                           color: canManage
-                              ? AppColors.primary
-                              : AppColors.textMuted,
+                              ? AppColors.primary.withValues(alpha: 0.5)
+                              : Colors.white24,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          canManage ? 'Admin' : 'User',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            canManage ? Icons.shield : Icons.person_outline,
+                            size: 13,
                             color: canManage
                                 ? AppColors.primary
                                 : AppColors.textMuted,
                           ),
+                          const SizedBox(width: 4),
+                          Text(
+                            canManage ? 'Admin' : 'User',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: canManage
+                                  ? AppColors.primary
+                                  : AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Divider(color: AppColors.border, height: 1),
+
+              // Role guide banner
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: canManage
+                      ? AppColors.primary.withValues(alpha: 0.08)
+                      : Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: canManage
+                        ? AppColors.primary.withValues(alpha: 0.25)
+                        : Colors.white12,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      canManage
+                          ? Icons.admin_panel_settings_outlined
+                          : Icons.info_outline,
+                      size: 16,
+                      color: canManage ? AppColors.primary : AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        canManage
+                            ? 'Chế độ Quản trị: Bạn có toàn quyền thêm loài mới, nhân bản và tùy chỉnh danh mục.'
+                            : 'Chế độ Người dùng: Tra cứu thông số vi khí hậu chuẩn để áp dụng cho bể nuôi. Chỉ Quản trị viên mới có quyền cập nhật danh mục.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: canManage
+                              ? AppColors.textMain
+                              : AppColors.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            if (isAdmin)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                child: Column(
+                  children: [
+                    // Row 1: Tổng hồ sơ loài + Thêm loài (theo format của ảnh thứ 3)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.bgCard,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Tổng hồ sơ loài:',
+                                  style: TextStyle(
+                                    color: AppColors.textMuted,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  '${provider.profiles.length}',
+                                  style: const TextStyle(
+                                    color: AppColors.textMain,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text(
+                            'Thêm loài',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          onPressed: provider.isLoading || provider.isSaving
+                              ? null
+                              : () => _openSpeciesFormDialog(),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            ),
+                    const SizedBox(height: 12),
 
-            const Divider(color: AppColors.border, height: 1),
-
-            // Role guide banner
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: canManage
-                    ? AppColors.primary.withValues(alpha: 0.08)
-                    : Colors.white.withValues(alpha: 0.04),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: canManage
-                      ? AppColors.primary.withValues(alpha: 0.25)
-                      : Colors.white12,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    canManage
-                        ? Icons.admin_panel_settings_outlined
-                        : Icons.info_outline,
-                    size: 16,
-                    color: canManage ? AppColors.primary : AppColors.textMuted,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      canManage
-                          ? 'Chế độ Quản trị: Bạn có toàn quyền thêm loài mới, nhân bản và tùy chỉnh danh mục.'
-                          : 'Chế độ Người dùng: Tra cứu thông số vi khí hậu chuẩn để áp dụng cho bể nuôi. Chỉ Quản trị viên mới có quyền cập nhật danh mục.',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: canManage
-                            ? AppColors.textMain
-                            : AppColors.textMuted,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Action toolbar (Search + Add if Admin + Refresh)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Row(
-                children: [
-                  // Ô tìm kiếm nhanh
-                  Expanded(
-                    child: SizedBox(
-                      height: 40,
-                      child: TextField(
-                        decoration: InputDecoration(
-                          hintText: 'Tìm loài...',
-                          hintStyle: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                          ),
-                          prefixIcon: const Icon(
-                            Icons.search,
-                            size: 18,
-                            color: AppColors.textMuted,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 0,
-                            horizontal: 12,
-                          ),
-                          filled: true,
-                          fillColor: AppColors.bgInput,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: AppColors.border,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: AppColors.border,
-                            ),
-                          ),
+                    // Row 2: Search bar full width (theo format của ảnh thứ 3, không có nút làm mới)
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Tìm theo tên loài, tên khoa học...',
+                        hintStyle: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textMuted,
                         ),
-                        onChanged: (val) =>
-                            setState(() => _searchQuery = val.trim()),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-
-                  // Nút làm mới
-                  IconButton(
-                    style: IconButton.styleFrom(
-                      backgroundColor: AppColors.bgInput,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: const BorderSide(color: AppColors.border),
-                      ),
-                    ),
-                    icon: const Icon(
-                      Icons.refresh,
-                      size: 18,
-                      color: AppColors.textMain,
-                    ),
-                    tooltip: 'Làm mới',
-                    onPressed: provider.isLoading || provider.isSaving
-                        ? null
-                        : () async {
-                            await provider.fetchProfiles();
-                            _showNotification(
-                              'Đã làm mới danh mục (${provider.profiles.length} loài).',
-                            );
-                          },
-                  ),
-
-                  // Nút "Thêm hồ sơ loài" (CHỈ HIỆN VỚI ADMIN)
-                  if (canManage) ...[
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
+                        prefixIcon: const Icon(
+                          Icons.search,
+                          size: 20,
+                          color: AppColors.textMuted,
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(
+                                  Icons.clear,
+                                  size: 18,
+                                  color: AppColors.textMuted,
+                                ),
+                                onPressed: () =>
+                                    setState(() => _searchQuery = ''),
+                              )
+                            : null,
+                        contentPadding: const EdgeInsets.symmetric(
                           vertical: 10,
+                          horizontal: 12,
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                        filled: true,
+                        fillColor: AppColors.bgInput,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: AppColors.border,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: AppColors.border,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                            color: AppColors.primary,
+                          ),
                         ),
                       ),
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text(
-                        'Thêm loài',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      onPressed: provider.isLoading || provider.isSaving
-                          ? null
-                          : () => _openSpeciesFormDialog(),
+                      onChanged: (val) =>
+                          setState(() => _searchQuery = val.trim()),
                     ),
                   ],
-                ],
+                ),
+              )
+            else
+              // Action toolbar (Search + Add if Admin + Refresh) for other roles
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
+                  children: [
+                    // Ô tìm kiếm nhanh
+                    Expanded(
+                      child: SizedBox(
+                        height: 40,
+                        child: TextField(
+                          decoration: InputDecoration(
+                            hintText: 'Tìm loài...',
+                            hintStyle: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textMuted,
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.search,
+                              size: 18,
+                              color: AppColors.textMuted,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 0,
+                              horizontal: 12,
+                            ),
+                            filled: true,
+                            fillColor: AppColors.bgInput,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: AppColors.border,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: AppColors.border,
+                              ),
+                            ),
+                          ),
+                          onChanged: (val) =>
+                              setState(() => _searchQuery = val.trim()),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Nút làm mới
+                    IconButton(
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.bgInput,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: const BorderSide(color: AppColors.border),
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.refresh,
+                        size: 18,
+                        color: AppColors.textMain,
+                      ),
+                      tooltip: 'Làm mới',
+                      onPressed: provider.isLoading || provider.isSaving
+                          ? null
+                          : () async {
+                              await provider.fetchProfiles();
+                              _showNotification(
+                                'Đã làm mới danh mục (${provider.profiles.length} loài).',
+                              );
+                            },
+                    ),
+
+                    // Nút "Thêm hồ sơ loài" (CHỈ HIỆN VỚI ADMIN)
+                    if (canManage) ...[
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text(
+                          'Thêm loài',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        onPressed: provider.isLoading || provider.isSaving
+                            ? null
+                            : () => _openSpeciesFormDialog(),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ),
 
             // Climate zone filter chips
             SingleChildScrollView(
