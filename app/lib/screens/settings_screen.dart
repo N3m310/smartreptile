@@ -7,6 +7,7 @@ import '../state/app_data_provider.dart';
 import '../state/session_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/session_card.dart';
+import 'species/species_profile_sheet.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -94,6 +95,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           // 1. Account card: the real session, and the one place the app can be signed in from.
           const SessionCard(),
+
+          const SizedBox(height: 16),
+
+          // Test Button for Day 1 Species Profile
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.primary.withValues(alpha: 0.15),
+                  Colors.teal.withValues(alpha: 0.1),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+            ),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.pets, color: Colors.black, size: 22),
+              ),
+              title: const Text(
+                'Hồ sơ loài & Vi khí hậu',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textMain,
+                ),
+              ),
+              subtitle: const Text(
+                'Tra cứu & quản lý tiêu chuẩn môi trường sống cho bò sát',
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+              ),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.primary),
+              onTap: () => SpeciesProfileSheet.show(context),
+            ),
+          ),
 
           const SizedBox(height: 20),
 
