@@ -11,6 +11,7 @@ import 'screens/alerts_screen.dart';
 import 'screens/devices_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/species_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
@@ -165,6 +166,15 @@ class _RootShellState extends State<_RootShell> {
           screen: const AdminHubScreen(),
           isMock: false,
         ),
+      _ShellTab(
+        destination: NavigationDestination(
+          icon: const Icon(Icons.person_outline),
+          selectedIcon: const Icon(Icons.person),
+          label: l10n.navProfile,
+        ),
+        screen: const ProfileScreen(),
+        isMock: false,
+      ),
     ];
 
     // A sign-out while the administration tab is open removes it, so the index has to be clamped rather than

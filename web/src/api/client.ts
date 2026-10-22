@@ -126,6 +126,7 @@ export function consumeSessionLoss(): 'expired' | null {
 
 interface RequestOptions {
   method?: string;
+  headers?: Record<string, string>;
   body?: unknown;
   /**
    * A `multipart/form-data` body, for the one write that carries a file. Mutually exclusive with `body`, and the
@@ -232,6 +233,7 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
         ...(session && path !== '/api/v1/auth/refresh'
           ? { Authorization: `Bearer ${session.accessToken}` }
           : {}),
+        ...(options.headers ?? {}),
       },
       body: options.form ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
       signal: options.signal ?? controller.signal,
