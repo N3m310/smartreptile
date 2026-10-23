@@ -223,4 +223,34 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
 
     /// <summary>Makes the next <see cref="TrySaveClaimAsync"/> report that another claim won the terrarium.</summary>
     public bool ClaimRaceLost { get; set; }
+
+    /// <inheritdoc />
+    public Task<Device?> FindDeviceBoundToTerrariumAsync(Guid terrariumId, CancellationToken cancellationToken) =>
+        Task.FromResult(_devices.FirstOrDefault(
+            device => device.TerrariumId == terrariumId && device.Status != DeviceStatus.Revoked));
+
+    /// <summary>
+    /// Mirrors the adapter's rebind: the enclosure is released from whichever board holds it, then the staged
+    /// change is committed. <see cref="RebindRaceLost"/> stands in for a second writer winning the slot.
+    /// </summary>
+    public async Task<bool> TrySaveRebindAsync(Guid terrariumId, Guid deviceId, CancellationToken cancellationToken)
+    {
+        if (RebindRaceLost)
+        {
+            return false;
+        }
+
+        foreach (var displaced in _devices.Where(device => device.TerrariumId == terrariumId && device.Id != deviceId))
+        {
+            displaced.TerrariumId = null;
+            displaced.Status = DeviceStatus.Provisioning;
+            displaced.ProvisionedAt = null;
+        }
+
+        await SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>Makes the next <see cref="TrySaveRebindAsync"/> report that another move took the enclosure.</summary>
+    public bool RebindRaceLost { get; set; }
 }

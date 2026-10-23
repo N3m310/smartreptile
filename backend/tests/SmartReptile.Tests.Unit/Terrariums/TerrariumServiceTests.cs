@@ -99,6 +99,7 @@ public class TerrariumServiceTests
         outcome.Succeeded.Should().BeTrue();
         outcome.Terrariums.Should().ContainSingle().Which.Name.Should().Be("Alpha");
         outcome.Terrariums!.Single().OwnerUserId.Should().BeNull();
+        outcome.Terrariums!.Single().OwnerEmail.Should().BeNull("a keeper needs no label for their own rows");
     }
 
     [Fact]
@@ -106,13 +107,17 @@ public class TerrariumServiceTests
     {
         var profile = _store.AddProfile();
         var owner = Guid.NewGuid();
+        _store.AddUser(owner, "theirs@example.test");
         _store.AddTerrarium(_owner, "Mine", profile);
         _store.AddTerrarium(owner, "Theirs", profile);
 
         var outcome = await _service.ListAsync(_owner, CancellationToken.None, mayReachAnyAccount: true);
 
         outcome.Terrariums!.Select(item => item.Name).Should().BeEquivalentTo("Mine", "Theirs");
-        outcome.Terrariums.Single(item => item.Name == "Theirs").OwnerUserId.Should().Be(owner);
+
+        var theirs = outcome.Terrariums.Single(item => item.Name == "Theirs");
+        theirs.OwnerUserId.Should().Be(owner);
+        theirs.OwnerEmail.Should().Be("theirs@example.test", "an id alone does not say whose enclosure it is");
     }
 
     [Fact]
@@ -244,6 +249,7 @@ public class TerrariumServiceTests
     {
         var profile = _store.AddProfile();
         var owner = Guid.NewGuid();
+        _store.AddUser(owner, "owner@example.test");
         var theirs = _store.AddTerrarium(owner, "Theirs", profile);
 
         var outcome = await _service.GetAsync(theirs.Id, _owner, CancellationToken.None, mayReachAnyAccount: true);
@@ -254,6 +260,7 @@ public class TerrariumServiceTests
         // Named, because an administrator's answer can describe an enclosure they did not ask for and cannot
         // otherwise attribute (TASKS 2026-10-14, item 5).
         outcome.Terrarium.OwnerUserId.Should().Be(owner);
+        outcome.Terrarium.OwnerEmail.Should().Be("owner@example.test");
     }
 
     [Fact]
@@ -265,6 +272,7 @@ public class TerrariumServiceTests
         var outcome = await _service.GetAsync(terrarium.Id, _owner, CancellationToken.None);
 
         outcome.Terrarium!.OwnerUserId.Should().BeNull("ownership is not a field an ordinary client acts on");
+        outcome.Terrarium.OwnerEmail.Should().BeNull();
     }
 
     // ---- create -------------------------------------------------------------------------------------

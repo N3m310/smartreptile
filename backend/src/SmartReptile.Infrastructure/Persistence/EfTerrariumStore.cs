@@ -77,6 +77,26 @@ public sealed class EfTerrariumStore(SmartReptileDbContext db) : ITerrariumStore
         db.Users.AnyAsync(user => user.Id == userId, cancellationToken);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, string>> AccountEmailsAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken)
+    {
+        if (userIds.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        // Projected rather than materialised: the answer is one column, and the account's password material has no
+        // business being loaded to render a list.
+        var rows = await db.Users
+            .Where(user => userIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.Email })
+            .ToListAsync(cancellationToken);
+
+        return rows.ToDictionary(row => row.Id, row => row.Email);
+    }
+
+    /// <inheritdoc />
     public void AddTerrarium(Terrarium terrarium) => db.Terrariums.Add(terrarium);
 
     /// <inheritdoc />

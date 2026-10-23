@@ -65,6 +65,13 @@ public interface IProvisioningStore
     Task<bool> TerrariumHasDeviceAsync(Guid terrariumId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// The board currently holding an enclosure, or null when the slot is free. The same predicate the filtered
+    /// DI-04 index uses — a revoked board has already released the slot — so a caller deciding whether a bind has to
+    /// displace something sees the same answer the database will enforce.
+    /// </summary>
+    Task<Device?> FindDeviceBoundToTerrariumAsync(Guid terrariumId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// The caller's boards, ordered by display name, with the bound terrarium loaded so the list can name it
     /// (TASKS 2026-10-14, item 9b).
     /// </summary>
@@ -88,4 +95,19 @@ public interface IProvisioningStore
     /// <c>terrarium_already_bound</c> the caller must answer rather than a 500 (TC-I-05).
     /// </summary>
     Task<bool> TrySaveClaimAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Commits a move: releases the enclosure from whichever board holds it now, then commits the staged binding.
+    /// </summary>
+    /// <remarks>
+    /// The release has to reach the database before the new binding does, because DI-04 is a filtered unique index
+    /// and two bindings of one enclosure cannot exist even for a moment — and EF Core does not promise an order
+    /// between two tracked updates. The release is therefore a set-based statement executed ahead of the save, and
+    /// both run in one transaction so a failure cannot leave the enclosure empty.
+    /// </remarks>
+    /// <param name="terrariumId">Enclosure being taken over.</param>
+    /// <param name="deviceId">Surrogate key of the board taking it — the one row the release must leave alone.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>False when DI-04 refused the write anyway, i.e. a concurrent move won the race.</returns>
+    Task<bool> TrySaveRebindAsync(Guid terrariumId, Guid deviceId, CancellationToken cancellationToken);
 }

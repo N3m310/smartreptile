@@ -18,6 +18,13 @@ public static class AuditAction
     /// <summary>Every credential a device holds was invalidated (BR-18.4).</summary>
     public const string DeviceRevoked = "device.revoked";
 
+    /// <summary>
+    /// A board was bound to an enclosure it did not hold before — including a move from another enclosure, and
+    /// including the displacement of the board that held the target. The row carries both ids, because "where did
+    /// this board come from, and what did it push out?" is the question a binding history has to answer.
+    /// </summary>
+    public const string DeviceMoved = "device.moved";
+
     /// <summary>A keeper took ownership of an alert without closing it (FR-12).</summary>
     public const string AlertAcknowledged = "alert.acknowledged";
 

@@ -1075,6 +1075,7 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _samplingController;
   late final TextEditingController _publishController;
+  String? _terrariumId;
   bool _busy = false;
   String? _error;
 
@@ -1086,6 +1087,13 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
         TextEditingController(text: '${widget.device.samplingIntervalSec}');
     _publishController =
         TextEditingController(text: '${widget.device.publishIntervalSec}');
+    _terrariumId = widget.device.terrariumId;
+    // Refreshed on open so an enclosure created since the screen loaded is still offered here.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<TerrariumProvider>().loadTerrariums();
+      }
+    });
   }
 
   @override
@@ -1098,6 +1106,9 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final terrariums = context.watch<TerrariumProvider>().terrariums;
+    final canBind = context.watch<SessionProvider?>()?.hasPermission(Permissions.deviceProvision) ?? false;
+
     return AlertDialog(
       backgroundColor: AppColors.bgCard,
       title: const Text('Cấu hình thiết bị', style: TextStyle(color: AppColors.textMain)),
@@ -1134,6 +1145,58 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
                 helperText: 'Từ 10 đến 300 giây',
               ),
             ),
+            if (canBind) ...[
+              const SizedBox(height: 16),
+              const Divider(color: AppColors.border),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.home_work_outlined, size: 16, color: AppColors.textMuted),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.device.terrariumName == null
+                          ? 'Thiết bị chưa thuộc bể nuôi nào'
+                          : 'Đang ở bể: ${widget.device.terrariumName}',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: terrariums.any((item) => item.id == _terrariumId) ? _terrariumId : null,
+                dropdownColor: AppColors.bgCard,
+                style: const TextStyle(color: AppColors.textMain, fontSize: 14),
+                decoration: const InputDecoration(labelText: 'Thêm vào bể nuôi'),
+                items: [
+                  for (final terrarium in terrariums)
+                    DropdownMenuItem(
+                      value: terrarium.id,
+                      child: Text(terrarium.name),
+                    ),
+                ],
+                onChanged: (value) => setState(() => _terrariumId = value),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    side: BorderSide(color: AppColors.accent.withValues(alpha: 0.4)),
+                  ),
+                  onPressed: _busy ? null : _bind,
+                  icon: const Icon(Icons.link, size: 16),
+                  label: const Text('Thêm vào bể nuôi'),
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Mỗi bể nuôi chỉ chứa một thiết bị: thiết bị đang ở bể đó (nếu có) sẽ được gỡ ra và có thể gắn lại sau.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(_error!, style: const TextStyle(color: AppColors.statusDanger, fontSize: 12)),
@@ -1158,6 +1221,37 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
         ),
       ],
     );
+  }
+
+  Future<void> _bind() async {
+    final terrariumId = _terrariumId;
+    if (terrariumId == null || terrariumId.isEmpty) {
+      setState(() => _error = 'Chọn bể nuôi trước khi gắn thiết bị.');
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await context.read<DeviceProvider>().moveDevice(
+            deviceId: widget.device.deviceId,
+            terrariumId: terrariumId,
+          );
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã gắn thiết bị vào bể nuôi.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Lỗi gắn thiết bị: $e';
+      });
+    }
   }
 
   Future<void> _save() async {

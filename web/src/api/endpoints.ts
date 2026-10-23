@@ -26,6 +26,7 @@ import type {
   CreateUserBody,
   DeviceItem,
   DeviceList,
+  DeviceMoveResult,
   HealthReport,
   LatestReadings,
   MetricsSnapshot,
@@ -170,6 +171,18 @@ export async function patchDevice(
  */
 export async function deleteDevice(deviceId: string): Promise<DeviceItem> {
   return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+}
+
+/**
+ * `POST /devices/{id}/move` — bind a board to an enclosure. One enclosure holds one board, so a target that already
+ * has one displaces it (the displaced board is unbound, not revoked); the board leaves whichever enclosure it held.
+ * An owner may only pair their own board with their own enclosure; `data.write.any` lifts that.
+ */
+export async function moveDevice(deviceId: string, terrariumId: string): Promise<DeviceMoveResult> {
+  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}/move`, {
+    method: 'POST',
+    body: { terrariumId },
+  });
 }
 
 /**

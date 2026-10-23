@@ -107,7 +107,17 @@ public sealed class TerrariumService(
 
         var activity = await store.SummariseActivityAsync([.. terrariums.Select(t => t.Id)], cancellationToken);
 
-        return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(terrarium, activity, mayReachAnyAccount))]);
+        // The administrator's list can hold rows belonging to accounts they did not name, so each one is labelled
+        // with whose enclosure it is. One query for the whole page, not one per row.
+        var owners = mayReachAnyAccount
+            ? await store.AccountEmailsAsync([.. terrariums.Select(terrarium => terrarium.UserId).Distinct()], cancellationToken)
+            : EmptyOwners;
+
+        return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(
+            terrarium,
+            activity,
+            mayReachAnyAccount,
+            owners.GetValueOrDefault(terrarium.UserId)))]);
     }
 
     /// <summary>
@@ -135,7 +145,13 @@ public sealed class TerrariumService(
         var terrarium = located.Terrarium!;
         var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
 
-        return TerrariumOutcome.Found(Summarise(terrarium, activity, mayReachAnyAccount), terrarium.RowVersion);
+        var owners = mayReachAnyAccount
+            ? await store.AccountEmailsAsync([terrarium.UserId], cancellationToken)
+            : EmptyOwners;
+
+        return TerrariumOutcome.Found(
+            Summarise(terrarium, activity, mayReachAnyAccount, owners.GetValueOrDefault(terrarium.UserId)),
+            terrarium.RowVersion);
     }
 
     /// <summary>
@@ -1345,10 +1361,18 @@ public sealed class TerrariumService(
     /// list can hold rows belonging to accounts the caller did not name — a list of those without the owner beside
     /// them is not usable (TASKS 2026-10-14, item 5).
     /// </summary>
+    /// <param name="terrarium">Row to shape.</param>
+    /// <param name="activity">Newest sample and open-alert count per terrarium.</param>
+    /// <param name="includeOwnerUserId">True for the administrator's answers.</param>
+    /// <param name="ownerEmail">
+    /// The owning account's email, resolved only on the cross-account path; null for an ordinary keeper, whose rows
+    /// are all their own.
+    /// </param>
     private TerrariumSummary Summarise(
         Terrarium terrarium,
         IReadOnlyDictionary<Guid, TerrariumActivity> activity,
-        bool includeOwnerUserId = false)
+        bool includeOwnerUserId = false,
+        string? ownerEmail = null)
     {
         var stats = activity.TryGetValue(terrarium.Id, out var found) ? found : TerrariumActivity.None;
 
@@ -1367,8 +1391,12 @@ public sealed class TerrariumService(
             stats.OpenAlertCount)
         {
             OwnerUserId = includeOwnerUserId ? terrarium.UserId : null,
+            OwnerEmail = includeOwnerUserId ? ownerEmail : null,
         };
     }
+
+    /// <summary>No owner lookup at all — the ordinary keeper's answers, where every row is theirs.</summary>
+    private static readonly IReadOnlyDictionary<Guid, string> EmptyOwners = new Dictionary<Guid, string>();
 
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

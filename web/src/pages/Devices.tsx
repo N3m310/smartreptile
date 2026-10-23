@@ -26,6 +26,7 @@ export const Devices: React.FC = () => {
   const [claimMode, setClaimMode] = useState<'code' | 'mac'>('code');
   const [macAddress, setMacAddress] = useState('');
   const [terrariumId, setTerrariumId] = useState('');
+  const [moveTerrariumId, setMoveTerrariumId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
@@ -67,8 +68,22 @@ export const Devices: React.FC = () => {
     setDeviceName(device.deviceName);
     setSamplingIntervalSec(device.samplingIntervalSec);
     setPublishIntervalSec(device.publishIntervalSec);
+    setMoveTerrariumId(device.terrariumId ?? '');
     setEditing(true);
     setError(null);
+    // The picker is fed from the same read the claim form uses; refreshed on open so an enclosure created in
+    // another tab is bindable without a page reload.
+    terrariums.reload();
+  };
+
+  const bindToTerrarium = async (device: DeviceItem) => {
+    if (!moveTerrariumId) return;
+    await runAction(async () => {
+      const result = await api.moveDevice(device.deviceId, moveTerrariumId);
+      setSelected(result.device);
+      setMoveTerrariumId(result.device.terrariumId ?? '');
+      terrariums.reload();
+    });
   };
 
   const submitEdit = async (event: React.FormEvent) => {
@@ -270,6 +285,31 @@ export const Devices: React.FC = () => {
                 <label className="block text-xs text-muted">Tên thiết bị<input maxLength={60} value={deviceName} onChange={(event) => setDeviceName(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
                 <label className="block text-xs text-muted">Chu kỳ lấy mẫu (10–300 giây)<input required type="number" min={10} max={300} value={samplingIntervalSec} onChange={(event) => setSamplingIntervalSec(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
                 <label className="block text-xs text-muted">Chu kỳ gửi dữ liệu (10–300 giây)<input required type="number" min={10} max={300} value={publishIntervalSec} onChange={(event) => setPublishIntervalSec(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
+                {canProvision && (
+                  <div className="rounded-lg border border-hairline bg-raised/40 p-3">
+                    <p className="text-xs text-muted">
+                      Bể nuôi hiện tại: <strong className="text-ink">{selected.terrariumName ?? 'Chưa gán'}</strong>
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-end gap-2">
+                      <label className="flex-1 text-xs text-muted">
+                        Thêm vào bể nuôi
+                        <select value={moveTerrariumId} onChange={(event) => setMoveTerrariumId(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink">
+                          <option value="">Chọn bể nuôi</option>
+                          {(terrariums.data?.items ?? []).map((terrarium) => (
+                            <option key={terrarium.id} value={terrarium.id}>{terrarium.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="button" disabled={busy || !moveTerrariumId} onClick={() => void bindToTerrarium(selected)} className="rounded-lg border border-brand/40 px-3 py-2 text-xs font-semibold text-brand disabled:opacity-50">
+                        Thêm vào bể nuôi
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted">
+                      Mỗi bể nuôi chỉ chứa một thiết bị: thiết bị đang ở bể đó (nếu có) sẽ được gỡ ra và có thể gắn lại sau.
+                    </p>
+                    {terrariums.error && <p className="mt-2 text-xs text-critical">{describeError(t, terrariums.error)}</p>}
+                  </div>
+                )}
                 <div className="flex justify-end gap-2"><button type="button" onClick={() => setEditing(false)} className="rounded-lg border border-hairline px-3 py-2 text-sm text-muted">Huỷ</button><button disabled={busy} className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Lưu</button></div>
               </form>
             ) : (

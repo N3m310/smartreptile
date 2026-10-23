@@ -335,6 +335,13 @@ public sealed record TerrariumSummary(
     public Guid? OwnerUserId { get; init; }
 
     /// <summary>
+    /// The email of the account that owns the terrarium, set exactly when <see cref="OwnerUserId"/> is — the
+    /// administrator's answers, where an id alone does not say whose enclosure it is (2026-10-23).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OwnerEmail { get; init; }
+
+    /// <summary>
     /// The secret of a board bound by the same <c>POST /terrariums</c> that created this enclosure, present only on
     /// that one response (TASKS 2026-10-14, item 2).
     /// </summary>

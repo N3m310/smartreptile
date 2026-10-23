@@ -63,6 +63,25 @@ public sealed record UpdateDeviceRequest(
     int? PublishIntervalSec);
 
 /// <summary>
+/// Bind input: the enclosure a board should be moved into. A board can be bound to one enclosure at a time, so this
+/// is also how a board is taken from one enclosure and given to another.
+/// </summary>
+/// <param name="TerrariumId">Enclosure to bind the board to. Nullable so a missing value is a field violation rather
+/// than a deserialisation failure.</param>
+public sealed record MoveDeviceRequest(Guid? TerrariumId);
+
+/// <summary>
+/// The answer to a move: the board as it now stands, plus what the move displaced.
+/// </summary>
+/// <param name="Device">The moved board, described the way the fleet screen reads it.</param>
+/// <param name="PreviousTerrariumId">Enclosure the board came from, null when it was unbound.</param>
+/// <param name="DisplacedDeviceId">
+/// Public id of the board the move unbound, when the target enclosure already had one — one enclosure holds one
+/// board (DI-04), so binding a second displaces the first.
+/// </param>
+public sealed record DeviceMoveResult(DeviceDetail Device, Guid? PreviousTerrariumId, string? DisplacedDeviceId);
+
+/// <summary>
 /// One board as the fleet screen reads it (FR-16; TASKS 2026-10-14, item 9b). Richer than the terrarium's
 /// <c>DeviceSummary</c> because this is the screen a keeper manages boards from rather than a header on an
 /// enclosure: it carries the identity, the settings, and both the stored lifecycle state and the derived badge.
@@ -148,6 +167,9 @@ public sealed record DeviceOutcome
     /// <summary>Set by the device detail, edit and delete answers.</summary>
     public DeviceDetail? Device { get; init; }
 
+    /// <summary>Set by the bind/move answer.</summary>
+    public DeviceMoveResult? Move { get; init; }
+
     /// <summary>Set when the use case failed.</summary>
     public DeviceProblem? Problem { get; init; }
 
@@ -168,6 +190,9 @@ public sealed record DeviceOutcome
 
     /// <summary>One board, as the detail, edit and delete answers describe it.</summary>
     public static DeviceOutcome Described(DeviceDetail device) => new() { Device = device };
+
+    /// <summary>A successful bind/move.</summary>
+    public static DeviceOutcome Moved(DeviceMoveResult result) => new() { Move = result };
 
     /// <summary>A command that succeeded and has nothing to return.</summary>
     public static DeviceOutcome Done() => new();

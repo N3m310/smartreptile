@@ -436,6 +436,130 @@ public sealed class DeviceProvisioningService(
     }
 
     /// <summary>
+    /// Binds a board to an enclosure, moving it out of whichever enclosure it held before.
+    /// </summary>
+    /// <remarks>
+    /// The three rules this route keeps in one place:
+    /// <list type="bullet">
+    /// <item><b>An owner reaches only their own rows.</b> A foreign device or a foreign enclosure answers the same
+    /// <c>not_found</c> as a missing one (BR-02.2); a caller holding the cross-account permission may pair any board
+    /// with any enclosure.</item>
+    /// <item><b>One enclosure holds one board.</b> Binding a board to an occupied enclosure displaces the board that
+    /// was there, the way physically swapping the node would. Refusing instead would leave a keeper with no way to
+    /// replace a failed board at all.</item>
+    /// <item><b>One board sits in one enclosure.</b> It is the same single <c>TerrariumId</c>, so a move is an
+    /// assignment rather than a second binding.</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="deviceId">Public id of the board to bind.</param>
+    /// <param name="terrariumId">Enclosure to bind it to.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit rows.</param>
+    /// <param name="mayReachAnyAccount">Whether the caller may act across accounts (data.write.any).</param>
+    public async Task<DeviceOutcome> MoveAsync(
+        string deviceId,
+        Guid? terrariumId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
+    {
+        if (terrariumId is not { } targetId || targetId == Guid.Empty)
+        {
+            return DeviceOutcome.Invalid(
+                "move_invalid",
+                "The move was refused.",
+                [new IdentityViolation("terrariumId", "terrarium_required", "Name the enclosure to bind the board to.")]);
+        }
+
+        var now = clock.UtcNow;
+        var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
+
+        if (device is null || (!mayReachAnyAccount && !IsCallers(device, ownerUserId)))
+        {
+            return DeviceOutcome.Failure("not_found", "Device not found.");
+        }
+
+        if (device.Status == DeviceStatus.Revoked)
+        {
+            return DeviceOutcome.Failure("device_revoked", "A revoked board cannot be bound to an enclosure.");
+        }
+
+        // A board joins an account by being claimed. Binding an unclaimed one would reserve a slot for a node that
+        // holds no credential and therefore can never report into it.
+        if (device.UserId is null)
+        {
+            return DeviceOutcome.Failure(
+                "device_not_claimed",
+                "That board has not been claimed by an account yet. Claim it before binding it to an enclosure.");
+        }
+
+        var terrarium = await store.FindOwnedTerrariumAsync(targetId, ownerUserId, cancellationToken, mayReachAnyAccount);
+
+        if (terrarium is null)
+        {
+            return DeviceOutcome.Failure("not_found", "Terrarium not found.");
+        }
+
+        var previousTerrariumId = device.TerrariumId;
+
+        if (previousTerrariumId == terrarium.Id)
+        {
+            // Already where the caller wants it: describe the board instead of writing an audit row for a change
+            // that did not happen.
+            device.Terrarium = terrarium;
+            return DeviceOutcome.Moved(new DeviceMoveResult(Describe(device), previousTerrariumId, null));
+        }
+
+        var occupant = await store.FindDeviceBoundToTerrariumAsync(terrarium.Id, cancellationToken);
+
+        if (occupant is not null && occupant.Id != device.Id)
+        {
+            // Unbound, not revoked: the displaced board is fine, it just has no enclosure — the same state an
+            // enclosure delete leaves it in, so the other account can bind it again.
+            occupant.TerrariumId = null;
+            occupant.Status = DeviceStatus.Provisioning;
+            occupant.ProvisionedAt = null;
+
+            store.AddAuditEntry(AuditLog.ForDevice(
+                AuditAction.DeviceUnbound,
+                occupant.Id,
+                occupant.PublicId,
+                ownerUserId,
+                actor ?? AuditActor.Unknown,
+                now,
+                afterJson: Serialize(new { terrariumId = (Guid?)null, displacedBy = device.PublicId })));
+        }
+
+        device.TerrariumId = terrarium.Id;
+        device.Terrarium = terrarium;
+
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceMoved,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            beforeJson: Serialize(new { terrariumId = previousTerrariumId }),
+            afterJson: Serialize(new
+            {
+                terrariumId = terrarium.Id,
+                displacedDeviceId = occupant?.PublicId,
+            })));
+
+        if (!await store.TrySaveRebindAsync(terrarium.Id, device.Id, cancellationToken))
+        {
+            return DeviceOutcome.Failure(
+                "terrarium_already_bound",
+                "That terrarium was bound to another device a moment ago. Reload and try again.");
+        }
+
+        return DeviceOutcome.Moved(new DeviceMoveResult(Describe(device), previousTerrariumId, occupant?.PublicId));
+    }
+
+    /// <summary>
     /// Issues a replacement secret and puts the previous one on a grace window, so the device can reconnect and
     /// persist the new one before the old stops working (BR-05.5).
     /// </summary>

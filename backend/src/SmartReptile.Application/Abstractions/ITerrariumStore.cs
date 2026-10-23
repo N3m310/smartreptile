@@ -76,6 +76,18 @@ public interface ITerrariumStore
     /// </summary>
     Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The email addresses of the named accounts, keyed by id — what names an enclosure's owner to an administrator
+    /// (TASKS 2026-10-14, item 5). A bare id is not an answer to "whose enclosure is this?".
+    /// </summary>
+    /// <remarks>
+    /// Read only on the cross-account path. An ordinary keeper's list is their own rows, so their own address beside
+    /// every one of them would say nothing they did not already know.
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, string>> AccountEmailsAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken);
+
     /// <summary>Stages a new terrarium.</summary>
     void AddTerrarium(Terrarium terrarium);
 
