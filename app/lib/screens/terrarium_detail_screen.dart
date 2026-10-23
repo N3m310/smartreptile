@@ -61,98 +61,14 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
 
   Future<void> _edit(ApiTerrarium current) async {
     final l10n = AppLocalizations.of(context);
-    final name = TextEditingController(text: current.name);
-    final location = TextEditingController(text: current.location ?? '');
-    final description = TextEditingController(text: current.description ?? '');
-    final formKey = GlobalKey<FormState>();
-    AppFailure? failure;
-    final result = await showDialog<bool>(
+    final updated = await showDialog<ApiTerrarium>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(l10n.terrariumEdit),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: name,
-                    maxLength: 60,
-                    decoration: InputDecoration(labelText: l10n.terrariumName),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? l10n.terrariumNameRequired
-                        : value.trim().length > 60
-                        ? l10n.terrariumNameTooLong
-                        : null,
-                  ),
-                  TextFormField(
-                    controller: location,
-                    maxLength: 120,
-                    decoration: InputDecoration(
-                      labelText: l10n.terrariumLocation,
-                    ),
-                    validator: (value) => (value?.length ?? 0) > 120
-                        ? l10n.terrariumLocationTooLong
-                        : null,
-                  ),
-                  TextFormField(
-                    controller: description,
-                    maxLength: 1000,
-                    maxLines: 3,
-                    decoration: InputDecoration(
-                      labelText: l10n.terrariumDescription,
-                    ),
-                    validator: (value) => (value?.length ?? 0) > 1000
-                        ? l10n.terrariumDescriptionTooLong
-                        : null,
-                  ),
-                  if (failure != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: Text(
-                        failureMessage(l10n, failure!),
-                        style: const TextStyle(color: AppColors.statusDanger),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                try {
-                  await context.read<TerrariumProvider>().updateTerrarium(
-                    current,
-                    name: name.text,
-                    location: location.text,
-                    description: description.text,
-                  );
-                  if (dialogContext.mounted) {
-                    Navigator.pop(dialogContext, true);
-                  }
-                } on AppFailure catch (error) {
-                  setDialogState(() => failure = error);
-                }
-              },
-              child: Text(l10n.save),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => _EditTerrariumDialog(current: current),
     );
-    name.dispose();
-    location.dispose();
-    description.dispose();
-    if (result == true && mounted) {
-      setState(_load);
+    if (updated != null && mounted) {
+      setState(() {
+        _terrariumFuture = Future.value(updated);
+      });
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(l10n.terrariumUpdated)));
     }
@@ -566,4 +482,144 @@ class _ErrorState extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _EditTerrariumDialog extends StatefulWidget {
+  const _EditTerrariumDialog({required this.current});
+
+  final ApiTerrarium current;
+
+  @override
+  State<_EditTerrariumDialog> createState() => _EditTerrariumDialogState();
+}
+
+class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _location;
+  late final TextEditingController _description;
+  final _formKey = GlobalKey<FormState>();
+  AppFailure? _failure;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.current.name);
+    _location = TextEditingController(text: widget.current.location ?? '');
+    _description = TextEditingController(text: widget.current.description ?? '');
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _location.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _failure = null;
+    });
+
+    try {
+      final updated = await context.read<TerrariumProvider>().updateTerrarium(
+        widget.current,
+        name: _name.text,
+        location: _location.text,
+        description: _description.text,
+      );
+      if (mounted) {
+        Navigator.pop(context, updated);
+      }
+    } on AppFailure catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _failure = error;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l10n.terrariumEdit),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _name,
+                maxLength: 60,
+                decoration: InputDecoration(labelText: l10n.terrariumName),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? l10n.terrariumNameRequired
+                    : value.trim().length > 60
+                    ? l10n.terrariumNameTooLong
+                    : null,
+              ),
+              TextFormField(
+                controller: _location,
+                maxLength: 120,
+                decoration: InputDecoration(
+                  labelText: l10n.terrariumLocation,
+                ),
+                validator: (value) => (value?.length ?? 0) > 120
+                    ? l10n.terrariumLocationTooLong
+                    : null,
+              ),
+              TextFormField(
+                controller: _description,
+                maxLength: 1000,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: l10n.terrariumDescription,
+                ),
+                validator: (value) => (value?.length ?? 0) > 1000
+                    ? l10n.terrariumDescriptionTooLong
+                    : null,
+              ),
+              if (_failure != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    failureMessage(l10n, _failure!),
+                    style: const TextStyle(color: AppColors.statusDanger),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(l10n.save),
+        ),
+      ],
+    );
+  }
 }
