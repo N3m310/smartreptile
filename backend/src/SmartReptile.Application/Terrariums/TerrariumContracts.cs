@@ -216,12 +216,18 @@ public sealed record CreateTerrariumRequest(
 /// <param name="Location">New location label; empty string clears it.</param>
 /// <param name="Description">New keeper notes; empty string clears them.</param>
 /// <param name="TimeZoneId">New zone for local-day bucketing; omitted leaves the current one.</param>
+/// <param name="OwnerUserId">
+/// The account the enclosure should belong to (2026-10-23). **Administrators only**: an ordinary keeper cannot give
+/// their enclosure away, and sending it answers <c>owner_change_forbidden</c>. The bound board follows the
+/// enclosure — it stays in it, and its owner becomes the new account so the new keeper's fleet lists it.
+/// </param>
 public sealed record UpdateTerrariumRequest(
     string? Name,
     Guid? SpeciesProfileId,
     string? Location,
     string? Description,
-    string? TimeZoneId);
+    string? TimeZoneId,
+    Guid? OwnerUserId = null);
 
 /// <summary>The sensor node behind a terrarium, as the dashboards header shows it.</summary>
 /// <param name="DeviceId">Public id (<c>sr-3f9a2c</c>), never the surrogate key.</param>

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
+import '../core/mac_address.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/device_model.dart';
 import '../state/device_provider.dart';
@@ -1012,7 +1013,7 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
     }
 
     final code = _claimCodeController.text.trim();
-    final mac = _macController.text.trim();
+    var mac = _macController.text.trim();
 
     if (!_useMac && code.isEmpty) {
       setState(() => _error = 'Vui lòng nhập mã nhận thiết bị.');
@@ -1021,6 +1022,16 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
     if (_useMac && mac.isEmpty) {
       setState(() => _error = 'Vui lòng nhập địa chỉ MAC.');
       return;
+    }
+    if (_useMac) {
+      // The same rule the API applies, stated before the round trip: an ESP32 reports a unicast station address, so
+      // a broadcast, group or all-zero value names no board (2026-10-23).
+      final inspection = inspectMac(mac);
+      if (!inspection.isUsable) {
+        setState(() => _error = macProblemMessage(inspection.problem));
+        return;
+      }
+      mac = inspection.normalised!;
     }
 
     setState(() {

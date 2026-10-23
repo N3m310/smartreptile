@@ -9,6 +9,7 @@ import '../l10n/generated/app_localizations.dart';
 import '../l10n/labels.dart';
 import '../models/api_terrarium_models.dart';
 import '../core/status.dart';
+import '../state/accounts_provider.dart';
 import '../state/device_provider.dart';
 import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
@@ -633,6 +634,7 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
   final _formKey = GlobalKey<FormState>();
   AppFailure? _failure;
   bool _saving = false;
+  String? _ownerUserId;
 
   @override
   void initState() {
@@ -640,6 +642,15 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
     _name = TextEditingController(text: widget.current.name);
     _location = TextEditingController(text: widget.current.location ?? '');
     _description = TextEditingController(text: widget.current.description ?? '');
+    _ownerUserId = widget.current.ownerUserId;
+
+    // An administrator assigns the enclosure here; the picker needs the deployment's accounts, which the admin
+    // screens load for their own lists and which may not have been read yet on this route.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<AccountsProvider?>()?.loadAccounts();
+      }
+    });
   }
 
   @override
@@ -657,12 +668,16 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
       _failure = null;
     });
 
+    // Only when it changed: an omitted member means "leave it", and an assignment is administrator-only.
+    final ownerChange = _ownerUserId != widget.current.ownerUserId ? _ownerUserId : null;
+
     try {
       final updated = await context.read<TerrariumProvider>().updateTerrarium(
         widget.current,
         name: _name.text,
         location: _location.text,
         description: _description.text,
+        ownerUserId: ownerChange,
       );
       if (mounted) {
         Navigator.pop(context, updated);
@@ -686,6 +701,10 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final session = context.watch<SessionProvider?>();
+    final canAssignOwner = (session?.hasPermission(Permissions.dataWriteAny) ?? false) &&
+        (session?.hasPermission(Permissions.userRead) ?? false);
+    final accounts = context.watch<AccountsProvider?>()?.accounts?.items ?? const [];
     return AlertDialog(
       title: Text(l10n.terrariumEdit),
       content: Form(
@@ -725,6 +744,47 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
                     ? l10n.terrariumDescriptionTooLong
                     : null,
               ),
+              if (canAssignOwner) ...[
+                const Divider(height: 24),
+                Row(
+                  children: [
+                    const Icon(Icons.person_outline, size: 16, color: AppColors.textMuted),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.current.ownerEmail == null
+                            ? 'Bể nuôi chưa thuộc tài khoản nào'
+                            : 'Chủ sở hữu: ${widget.current.ownerEmail}',
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: accounts.any((account) => account.id == _ownerUserId) ? _ownerUserId : null,
+                  dropdownColor: AppColors.bgCard,
+                  isExpanded: true,
+                  style: const TextStyle(color: AppColors.textMain, fontSize: 14),
+                  decoration: const InputDecoration(labelText: 'Gán chủ sở hữu'),
+                  items: [
+                    for (final account in accounts)
+                      DropdownMenuItem(
+                        value: account.id,
+                        child: Text(
+                          '${account.username} · ${account.email}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _ownerUserId = value),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Thiết bị đang gắn trong bể vẫn ở nguyên đó và chuyển theo chủ mới.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
               if (_failure != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 10),

@@ -73,7 +73,8 @@ public static class TerrariumEndpoints
                 request,
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
-                RequestActor.From(context));
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount());
 
             if (!outcome.Succeeded)
             {
@@ -92,7 +93,8 @@ public static class TerrariumEndpoints
                        + "behaviour that existed before: create the enclosure, claim a board later. A board that is "
                        + "unknown, already bound or revoked is refused before anything is written. The created item "
                        + "comes with the version to update it from: the `ETag` header and the `rowVersion` field "
-                       + "carry the same value.");
+                       + "carry the same value. **An account holding `data.write.any` creates an unowned enclosure**: it "
+                       + "appears in no keeper's list until the owner is assigned on `PATCH /terrariums/{id}`.");
 
         group.MapGet("/{terrariumId:guid}", async (
             Guid terrariumId,

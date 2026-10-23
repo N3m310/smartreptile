@@ -398,6 +398,26 @@ export async function getTerrarium(id: string): Promise<TerrariumItem> {
   return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}`);
 }
 
+/**
+ * `PATCH /terrariums/{id}` with `ownerUserId` — gives the enclosure to another account (2026-10-23).
+ *
+ * **Administrators only** (`data.write.any`): an ordinary keeper's request is refused with
+ * `errors[0].code = owner_change_forbidden`. The bound board follows the enclosure — it stays in it, and its owner
+ * becomes the new account so the new keeper's fleet lists it. `If-Match` carries the version the caller read, so a
+ * concurrent edit answers `412` rather than silently overwriting it. Recorded as `terrarium.owner_changed`.
+ */
+export async function assignTerrariumOwner(
+  id: string,
+  ownerUserId: string,
+  rowVersion: string
+): Promise<TerrariumItem> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': rowVersion },
+    body: { ownerUserId },
+  });
+}
+
 export async function latestReadings(id: string): Promise<LatestReadings> {
   return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}/readings/latest`);
 }

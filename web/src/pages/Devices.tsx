@@ -4,6 +4,7 @@ import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { DeviceItem, DeviceList, TerrariumList } from '../api/types';
 import { useI18n } from '../i18n';
+import { inspectMac, macProblemMessage } from '../lib/mac';
 import { describeError } from '../lib/messages';
 import { usePolled } from '../lib/usePolled';
 import { useSession } from '../state/session';
@@ -25,6 +26,7 @@ export const Devices: React.FC = () => {
   const [claimCode, setClaimCode] = useState('');
   const [claimMode, setClaimMode] = useState<'code' | 'mac'>('code');
   const [macAddress, setMacAddress] = useState('');
+  const [macError, setMacError] = useState<string | null>(null);
   const [terrariumId, setTerrariumId] = useState('');
   const [moveTerrariumId, setMoveTerrariumId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -103,6 +105,17 @@ export const Devices: React.FC = () => {
   const claim = async (event: React.FormEvent) => {
     event.preventDefault();
     const byMac = claimMode === 'mac';
+
+    if (byMac) {
+      // Checked here as well as on the server: the same rule, stated before the round trip instead of after it.
+      const inspection = inspectMac(macAddress);
+      if (inspection.problem) {
+        setMacError(macProblemMessage(inspection.problem));
+        return;
+      }
+      setMacError(null);
+    }
+
     if (!(byMac ? macAddress.trim() : claimCode.trim()) || !terrariumId) return;
     await runAction(async () => {
       const result = byMac
@@ -193,7 +206,18 @@ export const Devices: React.FC = () => {
           ) : (
             <label className="text-xs font-medium text-muted">
               Địa chỉ MAC
-              <input required value={macAddress} onChange={(event) => setMacAddress(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 font-mono text-sm text-ink" placeholder="AA:BB:CC:DD:EE:FF" />
+              <input
+                required
+                value={macAddress}
+                onChange={(event) => {
+                  setMacAddress(event.target.value);
+                  setMacError(null);
+                }}
+                aria-invalid={macError ? true : undefined}
+                className={`mt-1 block w-full rounded-lg border bg-canvas px-3 py-2 font-mono text-sm text-ink ${macError ? 'border-critical' : 'border-hairline'}`}
+                placeholder="AA:BB:CC:DD:EE:FF"
+              />
+              {macError ? <span className="mt-1 block text-[11px] text-critical">{macError}</span> : null}
             </label>
           )}
           <label className="text-xs font-medium text-muted">
