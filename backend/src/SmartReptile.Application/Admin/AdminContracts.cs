@@ -74,8 +74,8 @@ public sealed record AdminAccountRollup(
 public sealed record AdminTerrariumView(
     Guid Id,
     string Name,
-    Guid OwnerId,
-    string OwnerUsername,
+    Guid? OwnerId,
+    string? OwnerUsername,
     Guid SpeciesProfileId,
     string SpeciesProfileName,
     string Status,
@@ -174,7 +174,7 @@ public sealed record AdminPage<T>(IReadOnlyList<T> Items, int Total, int Skip, i
 /// <param name="UnboundDevicePublicIds">Boards that were detached, as the API names them.</param>
 public sealed record AdminTerrariumDeletion(
     Guid TerrariumId,
-    Guid OwnerUserId,
+    Guid? OwnerUserId,
     IReadOnlyList<string> UnboundDevicePublicIds);
 
 /// <summary>

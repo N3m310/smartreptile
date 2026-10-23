@@ -78,12 +78,27 @@ Authorization: ******
 ```
 
 The address is normalised before it is looked up — `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff`, `AABB.CCDD.EEFF` and
-bare hex all name the same board — and the comparison against the stored form is case-insensitive. The reply is
+bare hex all name the same board — and the comparison against the stored form is case-insensitive.
+
+**The address must also be one a board can own (2026-10-23).** An ESP32 reports its station address through
+`WiFi.macAddress()`: 48 bits, **unicast** (the I/G bit — the low bit of the first octet — is clear), never the
+broadcast address and never all zeros. The same rule is applied everywhere a MAC enters the system —
+`self-register` (which also stores the canonical spelling), `claim-by-mac` and the `macAddress` field of
+`POST /terrariums` — and a value that breaks it answers `400 registration_invalid` with
+`errors[0].code = mac_invalid`; the message names the reason:
+
+| Value | Why it is refused |
+|---|---|
+| not twelve hex digits | `Malformed` — a truncated address could match a different board instead of none |
+| `FF:FF:FF:FF:FF:FF` | `Broadcast` — every station on the segment, so no station |
+| `00:00:00:00:00:00` | `AllZero` — what a chip reports before Wi-Fi starts, not an identity |
+| `01:…`, `33:…` (odd first octet) | `Multicast` — a group address, delivered to many stations |
+
+The reply is
 `claim`'s body, because the act is the same: `{deviceId, secret, terrariumId, boundAtUtc}` with the secret returned
-once. Errors: `400 registration_invalid` with `errors[0].code = mac_invalid` (not twelve hex digits, optionally
-separated), `404 device_not_found` — **one** answer for an unknown address, a board already bound elsewhere and a
-revoked board, so the route cannot be used to test whether an address belongs to this fleet — `404 not_found` for an
-unknown or foreign terrarium, `409 terrarium_already_bound`. The audit row is `device.claimed` with
+once. Other errors: `404 device_not_found` — **one** answer for an unknown address, a board already bound elsewhere
+and a revoked board, so the route cannot be used to test whether an address belongs to this fleet — `404 not_found`
+for an unknown or foreign terrarium, `409 terrarium_already_bound`. The audit row is `device.claimed` with
 `"method":"mac_address"`; a code claim carries `"method":"claim_code"`, so the trail can tell the two apart.
 
 ---
@@ -330,9 +345,9 @@ takes effect within one 15-minute access-token lifetime.
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/terrariums` | `terrarium.read` | list with device status summary; `?speciesProfileId=` narrows it to one profile's enclosures |
-| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound |
+| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound. `data.write.any` creates an **unowned** enclosure (`ownerUserId`/`ownerEmail` null) — assign it on `PATCH` |
 | GET | `/terrariums/{id}` | `terrarium.read` (member) | includes `device`, `openAlertCount`, `latestSampleAt`, `rowVersion` |
-| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion` |
+| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed` |
 | DELETE | `/terrariums/{id}` | `terrarium.write` | soft delete; requires `?allowUnboundDevice=true` when a device is bound → else `409 conflict_device_bound` |
 | GET | `/terrariums/{id}/thresholds` | `terrarium.read` | returns `effectiveThresholds[]` with `source` |
 | PUT | `/terrariums/{id}/thresholds` | `terrarium.write` | upsert overrides; validates band ordering |
@@ -370,6 +385,15 @@ silence to be "visible on the dashboard" and the client has no other way to lear
 `DELETE /terrariums/{id}/thresholds/{metric}`, described below — which closes 3.1. The rest of this table —
 `GET /terrariums/{id}/summaries` and `POST /terrariums/{id}/exports` — is specified and not built; the summaries are
 3.6 and the export task is M4's.
+
+**Ownership is assignable (2026-10-23).** An account holding `data.write.any` creates an enclosure **without an
+owner**: it is the administrator's blank slate, appears in no keeper's list, and answers `404` on the owner-scoped
+routes until it is assigned. `PATCH /terrariums/{id}` with `{"ownerUserId": "<guid>"}` gives it to an account, and is
+refused for everyone else (`errors[0].code = owner_change_forbidden`; an unknown account is `account_not_found`).
+The bound board follows the enclosure: it stays in it — the readings and the DI-04 slot are untouched — and its
+`Device.UserId` becomes the new account, so the new keeper's fleet lists it. Recorded as `terrarium.owner_changed`
+with the previous owner in `beforeJson`, and that row replaces the `terrarium.updated` row an administrator's edit
+would otherwise write — one request, one entry.
 
 **`GET /terrariums/{id}/thresholds` as built.** `terrarium.read` only, scoped to the caller like
 every other route here:
@@ -481,10 +505,11 @@ this date, stated here because they are contract rather than implementation:
   and both threshold writes. Since 2026-10-17 that is expressed as permissions rather than a composite policy: the
   routes name `terrarium.read`/`terrarium.write` like every other caller's, and the *service* widens the answer for
   an account holding `data.read.any`/`data.write.any`
-  (`TerrariumService.IsMemberAsync(..., mayReachAnyAccount)`). An administrator's list and detail answers carry `ownerUserId`
-  so the client can say whose enclosure it is; an ordinary caller's never do. A cross-account `PATCH` or `DELETE`
-  writes an audit row (`terrarium.updated`, `terrarium.deleted`) with the administrator as the actor and the owner in
-  the payload — the ordinary owner edit stays unaudited, as it was.
+  (`TerrariumService.IsMemberAsync(..., mayReachAnyAccount)`). An administrator's list and detail answers carry
+  `ownerUserId` **and** `ownerEmail` — the id is what the client keys on, the address is what it can show, because an
+  id alone does not say whose enclosure it is (2026-10-23). An ordinary caller's answers never carry either. A
+  cross-account `PATCH` or `DELETE` writes an audit row (`terrarium.updated`, `terrarium.deleted`) with the
+  administrator as the actor and the owner in the payload — the ordinary owner edit stays unaudited, as it was.
 
 **Creating an enclosure with a board in one request (2026-10-14, TASKS item 2).** `POST /terrariums` accepts
 `deviceId` (the board's public id) or `macAddress` (item 8's spellings), and leaving both out is exactly the
@@ -662,7 +687,7 @@ not JSON, so it has routes of its own. Four readings are contract:
 | PATCH | `/devices/{id}` | `device.write` | rename, set sampling/publish interval — **as built**, stored rather than queued |
 | DELETE | `/devices/{id}` | `device.write` | revoke + detach; the row survives — **as built** |
 | POST | `/devices/claim-by-mac` | `device.provision` | bind a self-registered board by the MAC printed on it — **as built**, §2.4 |
-| POST | `/devices/{id}/rebind` | `device.provision` | `{terrariumId}` — unbind + rebind, audited |
+| POST | `/devices/{id}/move` | `device.provision` | `{terrariumId}` — bind the board, releasing the enclosure it held and displacing the board that held the target — **as built** (2026-10-23) |
 | POST | `/devices/{id}/rotate-secret` | `device.provision` | returns a new secret once; old one valid for the 10-min grace window |
 | POST | `/devices/{id}/revoke` | `device.provision` | immediate disconnect + credential invalidation |
 | POST | `/devices/{id}/calibration` | `device.write` | `{tempOffsetC?, rhOffsetPct?, luxGain?}` |
@@ -671,9 +696,9 @@ not JSON, so it has routes of its own. Four readings are contract:
 | POST | `/devices/{id}/snapshots` | Device | multipart JPEG ≤ 512 KB, ≤ 1 per 30 s (FR-17) |
 | GET | `/devices/{id}/snapshots/latest` | `device.read` | metadata + short-lived URL |
 
-**As built (2026-10-14, TASKS item 9b).** The five routes marked above are implemented; `rebind`, `calibration`,
-`commands` and the two `snapshots` routes are not, and stay listed so the gap is visible rather than implied. What
-the built ones settle:
+**As built (2026-10-14, TASKS item 9b).** The routes marked above are implemented — the five of that pass, plus
+`move` below; `calibration`, `commands` and the two `snapshots` routes are not, and stay listed so the gap is visible
+rather than implied. What the built ones settle:
 
 - **`GET /devices` and `GET /devices/{id}` are scoped by the caller's `UserId`**, which claiming sets. A board that
   self-registered but was never claimed has no owner and therefore appears in nobody's fleet — and answers
@@ -693,6 +718,26 @@ the built ones settle:
   for a replacement. The readings, health reports, events and audit rows that name the board survive, and the answer
   describes the revoked board rather than being empty. Recorded as `device.revoked` with `"detached":true`; unlike
   `revoke`, it also finishes the job for a board that was revoked while still bound.
+
+**`POST /devices/{id}/move` — added 2026-10-23.** This is the path the fleet and enclosure screens use to put a
+board somewhere, and it is what `rebind` was meant to be. Body: `{ "terrariumId": "<guid>" }`. Answer: the board as
+`GET /devices/{id}` describes it, plus `previousTerrariumId` (null when it was unbound) and `displacedDeviceId` (the
+public id of the board the move pushed out, null when the target was free).
+
+- **One enclosure holds one board (DI-04).** A target that already has a board does not answer a conflict: the
+  board that was there is unbound — back to `provisioning`, `provisionedAt` cleared, credentials and ownership
+  untouched — and the newcomer takes the slot. Refusing instead would leave a keeper no way to replace a failed node.
+- **A board sits in one enclosure.** A move is a reassignment of the single `TerrariumId`, not a second binding, so
+  the enclosure the board came from is free afterwards.
+- **Owners reach only their own rows.** A foreign board or a foreign enclosure answers `404 not_found`, identically
+  to one that does not exist (BR-02.2); `data.write.any` lifts that scoping, which is how an administrator pairs any
+  board with any enclosure. A move never transfers ownership.
+- **Refusals:** `409 device_revoked` (credentials dead), `409 device_not_claimed` (the board has no owner, so there is
+  nobody to bind it for), `409 terrarium_already_bound` (a concurrent move won the slot), `400 move_invalid` (no
+  `terrariumId` in the body).
+- **Audited** as `device.moved` with the before/after enclosure and the displaced board, plus a `device.unbound` row
+  for the displaced board so the account that lost its slot can see why. Moving a board to the enclosure it already
+  holds is a no-op and writes no row.
 
 ### 4.5 Alerts, notifications, ops
 
@@ -963,6 +1008,7 @@ contract:
 | 400 | `payload_too_large` | > 32 KB batch or > 120 samples |
 | 400 | `password_policy_violation` | New password failed the policy (see `errors`) |
 | 400 | `registration_invalid` | Username, email or password failed validation (see `errors`) |
+| 400 | `mac_invalid` | A MAC that is not twelve hex digits, or one no board can own: broadcast, all zeros, or a multicast/group address (inside `400 registration_invalid`'s `errors[]`, `field = "macAddress"` — 2026-10-23) |
 | 400 | `malformed_request` | The body could not be read as JSON for this endpoint — nothing was processed |
 | 401 | `invalid_credentials` | Wrong username/password |
 | 401 | `auth_failed` | Device credential missing, malformed, wrong, revoked, unbound, or naming a different device than the payload — **one** answer for all of them, on `/ingest/http` only |
@@ -980,7 +1026,11 @@ contract:
 | 403 | `forbidden_terrarium` | The terrarium exists and belongs to another account. **Terrarium routes only**: the deliberate narrowing of the rule below (2026-10-14, TASKS item 3) |
 | 410 | `terrarium_deleted` | The terrarium was soft-deleted: its history survives, so it is not "gone without trace" (2026-10-14, TASKS item 6) |
 | 400 | `device_already_bound` / `device_selector_ambiguous` / `device_not_found` | Create-with-a-device field errors, inside `400 validation_failed`'s `errors[]`, because the board is named in the body |
+| 400 | `owner_change_forbidden` / `account_not_found` | `PATCH /terrariums/{id}` with `ownerUserId`: a keeper may not give their enclosure away, and an unknown account cannot receive it (both inside `400 validation_failed`'s `errors[]`, `field = "ownerUserId"`) |
 | 409 | `terrarium_already_bound` / `conflict_device_bound` | Binding conflicts |
+| 409 | `device_revoked` | `POST /devices/{id}/move`: the board's credentials are dead, so it cannot take an enclosure |
+| 409 | `device_not_claimed` | `POST /devices/{id}/move`: the board has no owner yet — claim it first. Only an administrator can reach such a board at all |
+| 400 | `move_invalid` | `POST /devices/{id}/move` without a `terrariumId`; the violation names the field (`terrarium_required`) |
 | 409 | `registration_conflict` | Username and/or email already has an account (see `errors` for which) |
 | 409 | `alert_not_open` | Ack/resolve on a resolved alert |
 | 409 | `version_conflict` | Optimistic concurrency (`rowversion` mismatch) |

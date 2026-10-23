@@ -116,6 +116,35 @@ public class DeviceProvisioningServiceTests
         _store.Devices.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("FF:FF:FF:FF:FF:FF", "broadcast")]
+    [InlineData("00:00:00:00:00:00", "before Wi-Fi starts")]
+    [InlineData("33:33:00:00:00:01", "group address")]
+    public async Task SelfRegister_refuses_an_address_no_board_can_own(string mac, string because)
+    {
+        // What the board reports must be its own unicast station address; a group, broadcast or unset one would put
+        // a row in the fleet that no ESP32 can ever match (2026-10-23).
+        var outcome = await _service.SelfRegisterAsync(new SelfRegisterRequest(ChipId, mac, null), Ip);
+
+        outcome.Problem!.Code.Should().Be("registration_invalid");
+        outcome.Problem.Errors!.Single().Field.Should().Be("macAddress");
+        outcome.Problem.Errors!.Single().Code.Should().Be("mac_invalid");
+        outcome.Problem.Errors!.Single().Message.Should().Contain(because);
+        _store.Devices.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SelfRegister_stores_the_canonical_spelling_of_the_mac()
+    {
+        // A board that reports lower-case hex is the same board as one that reports upper case, so the row is stored
+        // in the one form the claim-by-MAC lookup searches for.
+        (await _service.SelfRegisterAsync(
+            new SelfRegisterRequest(ChipId, "a0-b1-c2-d3-e4-f5", null),
+            Ip)).Succeeded.Should().BeTrue();
+
+        _store.Devices.Single().MacAddress.Should().Be("A0:B1:C2:D3:E4:F5");
+    }
+
     // ---- claim --------------------------------------------------------------------------------------
 
     [Fact]
@@ -228,6 +257,180 @@ public class DeviceProvisioningServiceTests
 
         outcome.Succeeded.Should().BeFalse();
         outcome.Problem!.Code.Should().Be("terrarium_already_bound");
+    }
+
+    // ---- bind / move ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Move_binds_an_unbound_board_to_the_callers_terrarium()
+    {
+        var board = AddBoard("sr-free", DeviceStatus.Provisioning, terrariumId: null);
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.MoveAsync(board.PublicId, terrarium.Id, _owner, actor: _actor);
+
+        outcome.Succeeded.Should().BeTrue();
+
+        outcome.Move!.Device.TerrariumId.Should().Be(terrarium.Id);
+        outcome.Move.Device.TerrariumName.Should().Be(terrarium.Name);
+        outcome.Move.PreviousTerrariumId.Should().BeNull();
+        outcome.Move.DisplacedDeviceId.Should().BeNull();
+
+        var entry = _store.CommittedAuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.DeviceMoved);
+        entry.EntityId.Should().Be(board.PublicId);
+        entry.UserId.Should().Be(_owner);
+        entry.IpAddress.Should().Be(_actor.IpAddress);
+        entry.AfterJson.Should().Contain(terrarium.Id.ToString());
+    }
+
+    [Fact]
+    public async Task Move_takes_the_board_out_of_the_terrarium_it_held()
+    {
+        var (deviceId, _, first) = await ClaimedAsync();
+        var second = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.MoveAsync(deviceId, second.Id, _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Move!.PreviousTerrariumId.Should().Be(first);
+
+        var board = _store.Devices.Single(device => device.PublicId == deviceId);
+        board.TerrariumId.Should().Be(second.Id);
+        board.ProvisionedAt.Should().NotBeNull("a move does not unclaim the board");
+    }
+
+    [Fact]
+    public async Task Move_displaces_the_board_already_bound_to_the_target()
+    {
+        var (firstId, _, target) = await ClaimedAsync();
+        _store.CommittedAuditEntries.Clear();
+        var newcomer = AddBoard("sr-newcomer", DeviceStatus.Online, terrariumId: null);
+
+        var outcome = await _service.MoveAsync(newcomer.PublicId, target, _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Move!.DisplacedDeviceId.Should().Be(firstId);
+
+        var displaced = _store.Devices.Single(device => device.PublicId == firstId);
+        displaced.TerrariumId.Should().BeNull("one enclosure holds one board");
+        displaced.Status.Should().Be(DeviceStatus.Provisioning);
+        displaced.ProvisionedAt.Should().BeNull();
+
+        _store.Devices.Single(device => device.PublicId == newcomer.PublicId).TerrariumId.Should().Be(target);
+
+        _store.CommittedAuditEntries.Select(entry => entry.Action)
+            .Should().Equal(AuditAction.DeviceUnbound, AuditAction.DeviceMoved);
+    }
+
+    [Fact]
+    public async Task Move_hides_a_terrarium_the_caller_does_not_own()
+    {
+        var board = AddBoard("sr-mine", DeviceStatus.Online, terrariumId: null);
+        var someoneElses = _store.AddTerrarium(Guid.NewGuid());
+
+        var outcome = await _service.MoveAsync(board.PublicId, someoneElses.Id, _owner);
+
+        // A foreign enclosure and a missing one are the same answer (BR-02.2).
+        outcome.Problem!.Code.Should().Be("not_found");
+        board.TerrariumId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Move_hides_a_board_owned_by_someone_else()
+    {
+        var theirs = AddBoard("sr-theirs", DeviceStatus.Online, terrariumId: null, ownerUserId: Guid.NewGuid());
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.MoveAsync(theirs.PublicId, terrarium.Id, _owner);
+
+        outcome.Problem!.Code.Should().Be("not_found");
+        theirs.TerrariumId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Move_refuses_a_revoked_board()
+    {
+        var board = AddBoard("sr-dead", DeviceStatus.Revoked, terrariumId: null);
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.MoveAsync(board.PublicId, terrarium.Id, _owner);
+
+        outcome.Problem!.Code.Should().Be("device_revoked");
+        board.TerrariumId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Move_refuses_a_board_that_was_never_claimed()
+    {
+        var board = new Device
+        {
+            PublicId = "sr-unclaimed",
+            DeviceName = "Unclaimed",
+            ChipId = "ABCDEF123456",
+            MacAddress = "AA:BB:CC:DD:EE:02",
+            Status = DeviceStatus.Provisioning,
+        };
+        _store.AddDevice(board);
+        var terrarium = _store.AddTerrarium(_owner);
+
+        // Only an administrator reaches an unclaimed board at all, and even then there is no account to bind it for.
+        var outcome = await _service.MoveAsync(board.PublicId, terrarium.Id, _owner, mayReachAnyAccount: true);
+
+        outcome.Problem!.Code.Should().Be("device_not_claimed");
+        board.TerrariumId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Move_is_a_no_op_when_the_board_is_already_there()
+    {
+        var (deviceId, _, terrariumId) = await ClaimedAsync();
+        _store.CommittedAuditEntries.Clear();
+
+        var outcome = await _service.MoveAsync(deviceId, terrariumId, _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Move!.PreviousTerrariumId.Should().Be(terrariumId);
+        outcome.Move.DisplacedDeviceId.Should().BeNull();
+        _store.CommittedAuditEntries.Should().BeEmpty("nothing changed, so there is nothing to audit");
+    }
+
+    [Fact]
+    public async Task Move_requires_a_terrarium()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        var outcome = await _service.MoveAsync(deviceId, null, _owner);
+
+        outcome.Problem!.Code.Should().Be("move_invalid");
+        outcome.Problem.Errors!.Should().ContainSingle().Which.Field.Should().Be("terrariumId");
+    }
+
+    [Fact]
+    public async Task Move_reports_a_race_the_database_won_as_the_same_conflict()
+    {
+        var board = AddBoard("sr-race", DeviceStatus.Online, terrariumId: null);
+        var terrarium = _store.AddTerrarium(_owner);
+        _store.RebindRaceLost = true;
+
+        var outcome = await _service.MoveAsync(board.PublicId, terrarium.Id, _owner);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.Problem!.Code.Should().Be("terrarium_already_bound");
+    }
+
+    [Fact]
+    public async Task Move_lets_an_administrator_pair_another_accounts_board_with_another_accounts_terrarium()
+    {
+        var keeper = Guid.NewGuid();
+        var board = AddBoard("sr-their-board", DeviceStatus.Online, terrariumId: null, ownerUserId: keeper);
+        var terrarium = _store.AddTerrarium(Guid.NewGuid());
+
+        var outcome = await _service.MoveAsync(board.PublicId, terrarium.Id, _owner, mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        board.TerrariumId.Should().Be(terrarium.Id);
+        board.UserId.Should().Be(keeper, "a move does not transfer ownership");
     }
 
     // ---- rotate and revoke --------------------------------------------------------------------------
@@ -510,6 +713,24 @@ public class DeviceProvisioningServiceTests
         outcome.Succeeded.Should().BeTrue();
         outcome.Claim.Should().NotBeNull();
         outcome.Claim!.TerrariumId.Should().Be(terrarium.Id);
+    }
+
+    [Theory]
+    [InlineData("FF:FF:FF:FF:FF:FF", "broadcast")]
+    [InlineData("00:00:00:00:00:00", "before Wi-Fi starts")]
+    [InlineData("01:00:5E:00:00:01", "group address")]
+    public async Task ClaimByMac_refuses_an_address_no_board_can_own(string typed, string because)
+    {
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(typed, terrarium.Id), _owner);
+
+        // An ESP32 reports a unicast station address, so a group, broadcast or unset one names no board and
+        // accepting it could only bind the wrong thing (2026-10-23).
+        outcome.Problem!.Code.Should().Be("registration_invalid");
+        outcome.Problem.Errors!.Single().Code.Should().Be("mac_invalid");
+        outcome.Problem.Errors!.Single().Message.Should().Contain(because);
+        _store.SaveCount.Should().Be(0);
     }
 
     [Fact]
@@ -829,6 +1050,25 @@ public class DeviceProvisioningServiceTests
             Status = status,
             TerrariumId = terrariumId,
             UserId = _owner,
+        };
+
+        _store.AddDevice(device);
+        return device;
+    }
+
+    /// <summary>An already-owned board, unbound unless a terrarium is named.</summary>
+    private Device AddBoard(string publicId, DeviceStatus status, Guid? terrariumId, Guid? ownerUserId = null)
+    {
+        var device = new Device
+        {
+            PublicId = publicId,
+            DeviceName = publicId,
+            ChipId = Guid.NewGuid().ToString("N")[..12],
+            MacAddress = "AA:BB:CC:DD:EE:01",
+            Status = status,
+            TerrariumId = terrariumId,
+            UserId = ownerUserId ?? _owner,
+            ProvisionedAt = status == DeviceStatus.Provisioning ? null : _clock.UtcNow,
         };
 
         _store.AddDevice(device);

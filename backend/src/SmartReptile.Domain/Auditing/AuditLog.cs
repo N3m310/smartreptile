@@ -18,6 +18,13 @@ public static class AuditAction
     /// <summary>Every credential a device holds was invalidated (BR-18.4).</summary>
     public const string DeviceRevoked = "device.revoked";
 
+    /// <summary>
+    /// A board was bound to an enclosure it did not hold before — including a move from another enclosure, and
+    /// including the displacement of the board that held the target. The row carries both ids, because "where did
+    /// this board come from, and what did it push out?" is the question a binding history has to answer.
+    /// </summary>
+    public const string DeviceMoved = "device.moved";
+
     /// <summary>A keeper took ownership of an alert without closing it (FR-12).</summary>
     public const string AlertAcknowledged = "alert.acknowledged";
 
@@ -58,6 +65,13 @@ public static class AuditAction
 
     /// <summary>An administrator deleted an enclosure belonging to another account (FR-18).</summary>
     public const string TerrariumDeleted = "terrarium.deleted";
+
+    /// <summary>
+    /// An administrator gave an enclosure to an account (2026-10-23). Its own verb rather than
+    /// <see cref="TerrariumUpdated"/>: "whose enclosure is this" changing hands is the one edit a later reader will
+    /// ask about, and the bound board follows the enclosure, so the row records both.
+    /// </summary>
+    public const string TerrariumOwnerChanged = "terrarium.owner_changed";
 
     /// <summary>
     /// A board was detached from its enclosure without being revoked — it stays in the deployment, unbound and free to

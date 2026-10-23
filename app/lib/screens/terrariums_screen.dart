@@ -133,7 +133,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               const Text(
-                                'Tổng bể nuôi:',
+                                'Tá»•ng bá»ƒ nuĂ´i:',
                                 style: TextStyle(
                                   color: AppColors.textMuted,
                                   fontSize: 13,
@@ -183,7 +183,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                       fontSize: 13,
                     ),
                     decoration: InputDecoration(
-                      hintText: 'Tìm theo tên bể nuôi, loài, vị trí...',
+                      hintText: 'TĂ¬m theo tĂªn bá»ƒ nuĂ´i, loĂ i, vá»‹ trĂ­...',
                       hintStyle: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 13,
@@ -241,7 +241,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                           ),
                           SizedBox(height: 10),
                           Text(
-                            'Không tìm thấy bể nuôi phù hợp',
+                            'KhĂ´ng tĂ¬m tháº¥y bá»ƒ nuĂ´i phĂ¹ há»£p',
                             style: TextStyle(
                               color: AppColors.textMuted,
                               fontSize: 14,
@@ -342,6 +342,31 @@ class _TerrariumCard extends StatelessWidget {
                           color: AppColors.textMuted,
                           fontSize: 11,
                         ),
+                      ),
+                    ],
+                    // Set only on an administrator's answers, whose list can hold rows belonging to accounts they
+                    // did not name.
+                    if (item.ownerEmail != null) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.person_outline,
+                            size: 13,
+                            color: AppColors.textMuted,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              item.ownerEmail!,
+                              style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 11,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ],
@@ -627,9 +652,9 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
             for (final band in profile.bands)
               Card(
                 child: ListTile(
-                  title: Text('${band['metric']} · ${band['phase']}'),
+                  title: Text('${band['metric']} Â· ${band['phase']}'),
                   subtitle: Text(
-                    '${band['targetMin'] ?? '—'}–${band['targetMax'] ?? '—'} ${band['unit'] ?? ''} · ${l10n.thresholdColumnCritical}: ${band['criticalMin'] ?? '—'}–${band['criticalMax'] ?? '—'}',
+                    '${band['targetMin'] ?? 'â€”'}â€“${band['targetMax'] ?? 'â€”'} ${band['unit'] ?? ''} Â· ${l10n.thresholdColumnCritical}: ${band['criticalMin'] ?? 'â€”'}â€“${band['criticalMax'] ?? 'â€”'}',
                   ),
                 ),
               ),

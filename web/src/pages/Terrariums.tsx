@@ -18,7 +18,7 @@ import { useSession } from '../state/session';
  *
  * Create is wired now that the route it needed exists: `POST /terrariums` takes a `speciesProfileId`, and
  * `GET /api/v1/species-profiles` (roadmap 3.9) supplies one, so the picker is filled from the API rather than
- * from a hard-coded id. The panel is Owner-only, because the create route names the Owner policy — a form that
+ * from a hard-coded id. The panel is Owner-only, because the create route names the Owner policy â€” a form that
  * always refuses is worse than no form.
  */
 
@@ -82,13 +82,19 @@ export const Terrariums: React.FC = () => {
                       </h2>
                       <p className="mt-0.5 text-xs text-muted">
                         {item.speciesName}
-                        {item.location ? ` · ${item.location}` : ''}
+                        {item.location ? ` Â· ${item.location}` : ''}
                       </p>
                     </div>
                     <Box className="h-5 w-5 shrink-0 text-brand" aria-hidden="true" />
                   </div>
 
                   <dl className="mt-4 space-y-1.5 text-xs">
+                    {item.ownerEmail ? (
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted">Chủ sở hữu</dt>
+                        <dd className="truncate text-ink" title={item.ownerEmail}>{item.ownerEmail}</dd>
+                      </div>
+                    ) : null}
                     <div className="flex justify-between gap-3">
                       <dt className="text-muted">{t('device')}</dt>
                       <dd className="truncate text-ink">
@@ -136,7 +142,7 @@ export const Terrariums: React.FC = () => {
  *
  * The profile list is loaded once instead of polled: it changes when someone authors a profile on another screen,
  * and a picker that reshuffles under a half-filled form is worse than one a minute old. It is the reason this form
- * could not exist before roadmap 3.9 — `POST /terrariums` needs a `speciesProfileId` and nothing could list one.
+ * could not exist before roadmap 3.9 â€” `POST /terrariums` needs a `speciesProfileId` and nothing could list one.
  */
 const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
   const { t } = useI18n();
@@ -242,7 +248,7 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
           </option>
           {(profiles.data?.items ?? []).map((profile) => (
             <option key={profile.id} value={profile.id}>
-              {profile.scientificName ? `${profile.name} — ${profile.scientificName}` : profile.name}
+              {profile.scientificName ? `${profile.name} â€” ${profile.scientificName}` : profile.name}
             </option>
           ))}
         </select>
@@ -282,7 +288,7 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
           <option value="">{t('terrariumTimeZoneDefault')}</option>
           {(zones.data?.items ?? []).map((zone) => (
             <option key={zone.ianaId} value={zone.ianaId}>
-              {`${zone.utcOffset} — ${zone.displayName}`}
+              {`${zone.utcOffset} â€” ${zone.displayName}`}
             </option>
           ))}
         </select>
@@ -292,7 +298,7 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
 
       {/*
         Naming a board here is a claim: the enclosure and the binding commit together, and the answer carries the
-        secret once (item 2). Only a board with no enclosure is offered — the rest would be refused by the server.
+        secret once (item 2). Only a board with no enclosure is offered â€” the rest would be refused by the server.
       */}
       <div>
         <label htmlFor="terrarium-device" className="text-[11px] text-muted">

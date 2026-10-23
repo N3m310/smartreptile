@@ -64,6 +64,7 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
     private readonly List<ThresholdSnapshot> _snapshots = [];
     private readonly List<AuditLog> _auditEntries = [];
     private readonly HashSet<Guid> _users = [];
+    private readonly Dictionary<Guid, string> _emails = [];
 
     /// <summary>How many times the store was committed — asserted so "nothing was written" is a real assertion.</summary>
     public int SaveCount { get; private set; }
@@ -287,10 +288,25 @@ internal sealed class FakeTerrariumStore : ITerrariumStore
         Task.FromResult(_profiles.Any(profile => profile.Id == speciesProfileId));
 
     /// <summary>Registers an account, so the create path's caller check accepts it.</summary>
-    public void AddUser(Guid userId) => _users.Add(userId);
+    /// <param name="userId">Account id.</param>
+    /// <param name="email">Address the owner lookup answers with; a stable stand-in when the test does not care.</param>
+    public void AddUser(Guid userId, string? email = null)
+    {
+        _users.Add(userId);
+        _emails[userId] = email ?? $"{userId:N}@example.test";
+    }
 
     public Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult(_users.Contains(userId));
+
+    /// <summary>Mirrors the adapter: only the ids it holds an address for come back.</summary>
+    public Task<IReadOnlyDictionary<Guid, string>> AccountEmailsAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyDictionary<Guid, string>>(
+            userIds.Distinct()
+                .Where(_emails.ContainsKey)
+                .ToDictionary(id => id, id => _emails[id]));
 
     public void AddTerrarium(Terrarium terrarium) => _terrariums.Add(terrarium);
 

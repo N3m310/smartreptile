@@ -11,6 +11,8 @@ class ApiTerrarium {
     required this.device,
     required this.latestSampleAt,
     required this.openAlertCount,
+    this.ownerEmail,
+    this.ownerUserId,
   });
 
   final String id;
@@ -24,6 +26,14 @@ class ApiTerrarium {
   final Map<String, dynamic>? device;
   final DateTime? latestSampleAt;
   final int openAlertCount;
+
+  /// Email of the owning account. Present only on an administrator's answers (`data.read.any`), whose list can hold
+  /// enclosures belonging to accounts they did not name (2026-10-23).
+  final String? ownerEmail;
+
+  /// The owning account's id, present on the same answers as [ownerEmail]. Null for an enclosure an administrator
+  /// created and has not assigned yet.
+  final String? ownerUserId;
 
   factory ApiTerrarium.fromJson(Map<String, dynamic> json) => ApiTerrarium(
     id: json['id'] as String,
@@ -39,6 +49,8 @@ class ApiTerrarium {
         ? null
         : DateTime.parse(json['latestSampleAt'] as String).toLocal(),
     openAlertCount: (json['openAlertCount'] as num?)?.toInt() ?? 0,
+    ownerEmail: json['ownerEmail'] as String?,
+    ownerUserId: json['ownerUserId'] as String?,
   );
 }
 

@@ -86,6 +86,46 @@ public static class DeviceEndpoints
                        + "audited: `BR-18.4` names the credential operations, and this is the ordinary use of a "
                        + "settings screen.");
 
+        group.MapPost("/{deviceId}/move", async (
+            string deviceId,
+            MoveDeviceRequest request,
+            ClaimsPrincipal principal,
+            HttpContext context,
+            DeviceProvisioningService provisioning,
+            CancellationToken cancellationToken) =>
+        {
+            var outcome = await provisioning.MoveAsync(
+                deviceId,
+                request.TerrariumId,
+                principal.GetUserId() ?? Guid.Empty,
+                cancellationToken,
+                RequestActor.From(context),
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
+
+            if (outcome.Problem is { } problem)
+            {
+                return Problem(problem);
+            }
+
+            var move = outcome.Move!;
+
+            return Results.Ok(new
+            {
+                device = move.Device,
+                previousTerrariumId = move.PreviousTerrariumId,
+                displacedDeviceId = move.DisplacedDeviceId,
+            });
+        })
+        .RequireAuthorization(Permissions.DeviceProvision)
+        .WithSummary("Bind a board to an enclosure")
+        .WithDescription("Requires `device.provision`. Moves the board out of whichever enclosure held it and into the "
+                       + "one named by `terrariumId`; an enclosure holds one board, so a target that already has one "
+                       + "displaces it — that board is unbound, not revoked, and can be bound elsewhere. The caller "
+                       + "may only pair their own boards with their own enclosures; a foreign device or enclosure "
+                       + "answers `404 not_found`, identically to one that does not exist. `data.write.any` lifts that "
+                       + "scoping, which is what lets an administrator pair any board with any enclosure. Recorded as "
+                       + "`device.moved`, plus `device.unbound` for a displaced board.");
+
         group.MapDelete("/{deviceId}", async (
             string deviceId,
             HttpContext context,
@@ -283,8 +323,9 @@ public static class DeviceEndpoints
         var status = problem.Code switch
         {
             "rate_limited" => StatusCodes.Status429TooManyRequests,
-            "registration_invalid" => StatusCodes.Status400BadRequest,
-            "device_already_registered" or "terrarium_already_bound" => StatusCodes.Status409Conflict,
+            "registration_invalid" or "move_invalid" => StatusCodes.Status400BadRequest,
+            "device_already_registered" or "terrarium_already_bound" or "device_revoked" or "device_not_claimed"
+                => StatusCodes.Status409Conflict,
             _ => StatusCodes.Status404NotFound,
         };
 

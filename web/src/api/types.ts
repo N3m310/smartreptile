@@ -124,6 +124,11 @@ export interface TerrariumItem {
    */
   ownerUserId?: string;
   /**
+   * The owning account's email, set exactly when `ownerUserId` is — an id alone does not say whose enclosure it is
+   * (2026-10-23).
+   */
+  ownerEmail?: string;
+  /**
    * The one-time secret of a board bound by the same `POST /terrariums`, present only on that response
    * (TASKS 2026-10-14, item 2). Shown once and never retrievable: only its hash is stored.
    */
@@ -252,6 +257,16 @@ export interface DeviceItem {
 
 export interface DeviceList {
   items: DeviceItem[];
+}
+
+/**
+ * The answer to `POST /devices/{id}/move` — the board as it now stands, plus what the move displaced.
+ * `displacedDeviceId` is the board the target enclosure used to hold, because one enclosure holds one board.
+ */
+export interface DeviceMoveResult {
+  device: DeviceItem;
+  previousTerrariumId: string | null;
+  displacedDeviceId: string | null;
 }
 
 export interface AlertView {
@@ -679,12 +694,13 @@ export interface AdminOverview {
   families: AdminFamilyView[];
 }
 
-/** One enclosure of any account (`AdminTerrariumView`). */
+/** One enclosure of any account (`AdminTerrariumView`). An enclosure an administrator created and has not assigned
+ * yet has no owner, so both owner fields are null. */
 export interface AdminTerrariumView {
   id: string;
   name: string;
-  ownerId: string;
-  ownerUsername: string;
+  ownerId: string | null;
+  ownerUsername: string | null;
   speciesProfileId: string;
   speciesProfileName: string;
   status: string;

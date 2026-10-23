@@ -74,6 +74,12 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
             cancellationToken);
 
     /// <inheritdoc />
+    public Task<Device?> FindDeviceBoundToTerrariumAsync(Guid terrariumId, CancellationToken cancellationToken) =>
+        db.Devices.FirstOrDefaultAsync(
+            device => device.TerrariumId == terrariumId && device.Status != DeviceStatus.Revoked,
+            cancellationToken);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken) =>
         // The terrarium is included for its name, which the fleet screen shows beside the board. No credentials: a
         // list has no use for them, and the fewer queries that materialise a hash the better.
@@ -122,4 +128,60 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
         exception.InnerException is SqlException sql
         && sql.Number is 2601 or 2627
         && sql.Message.Contains(TerrariumBindingIndex, StringComparison.Ordinal);
+
+    /// <inheritdoc />
+    public async Task<bool> TrySaveRebindAsync(Guid terrariumId, Guid deviceId, CancellationToken cancellationToken)
+    {
+        // A user-initiated transaction has to run inside the provider's retrying strategy, which the context is
+        // configured with; the lambda is idempotent, so a retry is safe.
+        var strategy = db.Database.CreateExecutionStrategy();
+        var ownsTransaction = db.Database.CurrentTransaction is null;
+
+        try
+        {
+            return await strategy.ExecuteAsync(async () =>
+            {
+                // A caller that already opened a transaction owns atomicity, so the two statements simply enlist in
+                // it; only the standalone case has to bracket them itself.
+                var transaction = ownsTransaction
+                    ? await db.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false)
+                    : null;
+
+                try
+                {
+                    // The tracked entity is deliberately left out of the release: it is the board taking the
+                    // enclosure, and clearing its own TerrariumId here would undo the binding this save commits.
+                    await db.Devices
+                        .Where(device => device.TerrariumId == terrariumId && device.Id != deviceId)
+                        .ExecuteUpdateAsync(
+                            setters => setters
+                                .SetProperty(device => device.TerrariumId, (Guid?)null)
+                                .SetProperty(device => device.Status, DeviceStatus.Provisioning)
+                                .SetProperty(device => device.ProvisionedAt, (DateTimeOffset?)null),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+
+                    await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+                    if (transaction is not null)
+                    {
+                        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    if (transaction is not null)
+                    {
+                        await transaction.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (IsTerrariumBindingConflict(ex))
+        {
+            return false;
+        }
+    }
 }

@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Activity, BatteryMedium, Cpu, History, Loader2, Pencil, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
+import { ArrowLeft, Activity, BatteryMedium, Cpu, History, Loader2, Pencil, Plus, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
-import type { Coverage, EffectiveThreshold, LatestReadings, TerrariumItem, TerrariumThresholds, ThresholdOverrideInput } from '../api/types';
+import type { Coverage, DeviceList, EffectiveThreshold, LatestReadings, TerrariumItem, TerrariumThresholds, ThresholdOverrideInput, UserPage } from '../api/types';
 import { MetricCard } from '../components/MetricCard';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
 import { useI18n } from '../i18n';
@@ -33,10 +33,41 @@ export const TerrariumDetail: React.FC = () => {
   // The threshold write names `terrarium.write`: the override belongs to the enclosure, so whoever may edit the
   // enclosure may tune its bands (FR-18).
   const canEditThresholds = hasPermission(PERMISSION_CODES.terrariumWrite);
+  // Binding a board is `device.provision`: the same permission that claims one, because a bind is a claim of an
+  // enclosure slot (07-appendices/03 §4.4).
+  const canBindDevice = hasPermission(PERMISSION_CODES.deviceProvision);
+  // Handing an enclosure to another account is `data.write.any` and nothing else (2026-10-23): an ordinary keeper
+  // cannot give their enclosure away, and the picker needs `user.read` to list candidates.
+  const canAssignOwner =
+    hasPermission(PERMISSION_CODES.dataWriteAny) && hasPermission(PERMISSION_CODES.userRead);
 
   const terrarium = usePolled<TerrariumItem>(() => api.getTerrarium(id), POLL_MS, [id]);
   const latest = usePolled<LatestReadings>(() => api.latestReadings(id), POLL_MS, [id]);
   const hasDevice = Boolean(terrarium.data?.device);
+
+  // Fetched on mount only for an account that may provision: the picker is the account's own fleet, and an account
+  // without `device.provision` never spends a request on a list it has no permission to see.
+  const bindableDevices = usePolled<DeviceList>(
+    () => (canBindDevice ? api.listDevices() : Promise.resolve({ items: [] })),
+    null,
+    [canBindDevice]
+  );
+  const [bindOpen, setBindOpen] = useState(false);
+  const [bindDeviceId, setBindDeviceId] = useState('');
+  const [bindBusy, setBindBusy] = useState(false);
+  const [bindError, setBindError] = useState<ApiError | null>(null);
+
+  const accounts = usePolled<UserPage>(
+    () =>
+      canAssignOwner
+        ? api.listUsers({ take: 200 })
+        : Promise.resolve({ items: [], total: 0, skip: 0, take: 0 }),
+    null,
+    [canAssignOwner]
+  );
+  const [ownerId, setOwnerId] = useState('');
+  const [ownerBusy, setOwnerBusy] = useState(false);
+  const [ownerError, setOwnerError] = useState<ApiError | null>(null);
 
   const coverage = usePolled<Coverage | null>(
     () => {
@@ -79,6 +110,57 @@ export const TerrariumDetail: React.FC = () => {
 
   const device = latest.data?.device ?? item.device;
 
+  const submitBind = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!bindDeviceId) {
+      return;
+    }
+
+    setBindBusy(true);
+    setBindError(null);
+    try {
+      await api.moveDevice(bindDeviceId, id);
+      setBindDeviceId('');
+      setBindOpen(false);
+      // The enclosure's own row, its readings and its coverage all change with the board, so all three are re-read
+      // rather than patched locally.
+      terrarium.reload();
+      latest.reload();
+      coverage.reload();
+      bindableDevices.reload();
+    } catch (cause) {
+      setBindError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setBindBusy(false);
+    }
+  };
+
+  const submitOwner = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!ownerId) {
+      return;
+    }
+
+    if (!item.rowVersion) {
+      // The single-terrarium answer always carries the token; without it the server would refuse the patch anyway.
+      setOwnerError(new ApiError('precondition_required', 428, null));
+      return;
+    }
+
+    setOwnerBusy(true);
+    setOwnerError(null);
+    try {
+      await api.assignTerrariumOwner(item.id, ownerId, item.rowVersion);
+      setOwnerId('');
+      terrarium.reload();
+      accounts.reload();
+    } catch (cause) {
+      setOwnerError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setOwnerBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -115,6 +197,12 @@ export const TerrariumDetail: React.FC = () => {
         </div>
 
         <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-2 text-xs sm:grid-cols-2">
+          {item.ownerEmail ? (
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Chủ sở hữu</dt>
+              <dd className="break-all text-ink">{item.ownerEmail}</dd>
+            </div>
+          ) : null}
           <div className="flex justify-between gap-3">
             <dt className="text-muted">{t('terrariumTimeZone')}</dt>
             <dd className="text-ink">{item.timeZoneId}</dd>
@@ -138,11 +226,116 @@ export const TerrariumDetail: React.FC = () => {
         </dl>
       </header>
 
+      {canAssignOwner ? (
+        <section className="rounded-2xl border border-hairline bg-surface px-5 py-4">
+          <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-muted">
+            Chủ sở hữu
+          </h2>
+          <p className="mt-2 text-xs text-muted">
+            Hiện tại: <strong className="text-ink">{item.ownerEmail ?? 'Chưa gán — bể nuôi chưa thuộc tài khoản nào'}</strong>
+          </p>
+          <form onSubmit={(event) => void submitOwner(event)} className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="min-w-[240px] flex-1 text-xs text-muted">
+              Gán cho tài khoản
+              <select
+                value={ownerId}
+                onChange={(event) => setOwnerId(event.target.value)}
+                className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+              >
+                <option value="">Chọn tài khoản</option>
+                {(accounts.data?.items ?? [])
+                  .filter((account) => account.email !== item.ownerEmail)
+                  .map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.username} · {account.email}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <button
+              disabled={ownerBusy || !ownerId}
+              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Gán chủ sở hữu
+            </button>
+          </form>
+          <p className="mt-2 text-[11px] text-muted">
+            Thiết bị đang gắn trong bể vẫn ở nguyên đó và chuyển theo chủ mới. Thao tác được ghi audit
+            (<code>terrarium.owner_changed</code>).
+          </p>
+          {accounts.error ? (
+            <p role="alert" className="mt-2 text-xs text-critical">{describeError(t, accounts.error)}</p>
+          ) : null}
+          {ownerError ? (
+            <p role="alert" className="mt-2 text-xs text-critical">{describeError(t, ownerError)}</p>
+          ) : null}
+        </section>
+      ) : null}
+
       {/* Device block. `unbound` is a fact, not an error: nothing is claimed, so there is nothing to report. */}
       <section className="rounded-2xl border border-hairline bg-surface px-5 py-4">
-        <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-muted">
-          {t('device')}
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-muted">
+            {t('device')}
+          </h2>
+          {canBindDevice ? (
+            <button
+              type="button"
+              onClick={() => {
+                setBindOpen((open) => !open);
+                setBindError(null);
+                bindableDevices.reload();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs font-semibold text-accent hover:border-accent/40"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Gắn thiết bị vào bể
+            </button>
+          ) : null}
+        </div>
+
+        {bindOpen && canBindDevice ? (
+          <form onSubmit={(event) => void submitBind(event)} className="mt-3 rounded-xl border border-hairline bg-raised/40 p-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="min-w-[220px] flex-1 text-xs text-muted">
+                Thiết bị
+                <select
+                  value={bindDeviceId}
+                  onChange={(event) => setBindDeviceId(event.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+                >
+                  <option value="">Chọn thiết bị</option>
+                  {(bindableDevices.data?.items ?? [])
+                    .filter((candidate) => candidate.status !== 'revoked')
+                    .map((candidate) => (
+                      <option key={candidate.deviceId} value={candidate.deviceId}>
+                        {candidate.deviceName} ({candidate.deviceId})
+                        {candidate.terrariumId && candidate.terrariumId !== id
+                          ? ` · đang ở ${candidate.terrariumName ?? 'bể khác'}`
+                          : ''}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button
+                disabled={bindBusy || !bindDeviceId}
+                className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Gắn vào bể
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-muted">
+              Mỗi bể nuôi chỉ chứa một thiết bị: nếu bể đang có thiết bị khác, thiết bị đó sẽ được gỡ ra nhưng không bị thu hồi.
+            </p>
+            {bindableDevices.error ? (
+              <p role="alert" className="mt-2 text-xs text-critical">{describeError(t, bindableDevices.error)}</p>
+            ) : null}
+            {bindError ? (
+              <p role="alert" className="mt-2 text-xs text-critical">{describeError(t, bindError)}</p>
+            ) : null}
+          </form>
+        ) : null}
+
         {device ? (
           <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted">
             <span className="inline-flex items-center gap-1.5 text-ink">

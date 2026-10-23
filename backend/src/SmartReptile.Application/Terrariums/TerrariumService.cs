@@ -107,7 +107,20 @@ public sealed class TerrariumService(
 
         var activity = await store.SummariseActivityAsync([.. terrariums.Select(t => t.Id)], cancellationToken);
 
-        return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(terrarium, activity, mayReachAnyAccount))]);
+        // The administrator's list can hold rows belonging to accounts they did not name, so each one is labelled
+        // with whose enclosure it is. One query for the whole page, not one per row; an unowned enclosure has no
+        // account to name and is left blank.
+        var owners = mayReachAnyAccount
+            ? await store.AccountEmailsAsync(
+                [.. terrariums.Select(terrarium => terrarium.UserId).OfType<Guid>().Distinct()],
+                cancellationToken)
+            : EmptyOwners;
+
+        return TerrariumOutcome.Listed([.. terrariums.Select(terrarium => Summarise(
+            terrarium,
+            activity,
+            mayReachAnyAccount,
+            OwnerEmailOf(terrarium, owners)))]);
     }
 
     /// <summary>
@@ -135,7 +148,13 @@ public sealed class TerrariumService(
         var terrarium = located.Terrarium!;
         var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
 
-        return TerrariumOutcome.Found(Summarise(terrarium, activity, mayReachAnyAccount), terrarium.RowVersion);
+        var owners = mayReachAnyAccount && terrarium.UserId is { } ownerId
+            ? await store.AccountEmailsAsync([ownerId], cancellationToken)
+            : EmptyOwners;
+
+        return TerrariumOutcome.Found(
+            Summarise(terrarium, activity, mayReachAnyAccount, OwnerEmailOf(terrarium, owners)),
+            terrarium.RowVersion);
     }
 
     /// <summary>
@@ -332,14 +351,21 @@ public sealed class TerrariumService(
     /// TASKS 2026-10-14, item 2).
     /// </summary>
     /// <param name="request">The enclosure's fields, plus an optional board to bind.</param>
-    /// <param name="ownerUserId">Authenticated caller, who becomes the enclosure's owner.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="actor">Request provenance for the binding's audit row, when one is written.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account write permission. An enclosure created that way starts
+    /// <b>unowned</b> (2026-10-23): an administrator works from the whole deployment, and guessing an owner for them
+    /// would put a keeper's name on an enclosure that keeper never asked for. The owner is assigned afterwards, on
+    /// the update route, which is also the only route that can change it.
+    /// </param>
     public async Task<TerrariumOutcome> CreateAsync(
         CreateTerrariumRequest request,
         Guid ownerUserId,
         CancellationToken cancellationToken,
-        AuditActor? actor = null)
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
     {
         // The caller's own account is checked first, because it is the one thing the body cannot fix. A token this
         // server signed can still name an account it does not have — one minted against another database, or before
@@ -433,7 +459,9 @@ public sealed class TerrariumService(
         var now = clock.UtcNow;
         var terrarium = new Terrarium
         {
-            UserId = ownerUserId,
+            // An administrator creates from the deployment's side, so the enclosure starts unowned and is assigned
+            // on the update route; a keeper's own creation is theirs by definition.
+            UserId = mayReachAnyAccount ? null : ownerUserId,
             Name = name,
             SpeciesProfileId = request.SpeciesProfileId,
             Location = location,
@@ -454,7 +482,7 @@ public sealed class TerrariumService(
             : provisioning.StageBinding(
                 device,
                 terrarium.Id,
-                ownerUserId,
+                terrarium.UserId,
                 now,
                 method: request.DeviceId is { Length: > 0 } ? "device_id" : "mac_address",
                 actor);
@@ -462,11 +490,15 @@ public sealed class TerrariumService(
         await store.SaveChangesAsync(cancellationToken);
 
         // Re-read so the response carries the profile name; a client that just created a terrarium should not need
-        // a second call to render it.
-        var created = await store.FindOwnedAsync(terrarium.Id, ownerUserId, cancellationToken) ?? terrarium;
+        // a second call to render it. An administrator's creation is unowned, so the owner-scoped read cannot find
+        // it — that path reads unscoped, exactly as the administrator's next detail request will.
+        var created = (mayReachAnyAccount
+                ? await store.FindAnyAsync(terrarium.Id, cancellationToken)
+                : await store.FindOwnedAsync(terrarium.Id, ownerUserId, cancellationToken))
+            ?? terrarium;
 
         return TerrariumOutcome.Found(
-            Summarise(created, new Dictionary<Guid, TerrariumActivity>()),
+            Summarise(created, new Dictionary<Guid, TerrariumActivity>(), mayReachAnyAccount),
             created.RowVersion,
             deviceSecret);
     }
@@ -520,7 +552,12 @@ public sealed class TerrariumService(
         }
 
         var crossAccount = mayReachAnyAccount && terrarium.UserId != ownerUserId;
-        var beforeJson = crossAccount ? DescribeTerrarium(terrarium) : null;
+
+        // Assignment is the change that must always reach the trail: it moves an enclosure — and the board in it —
+        // from one account to another, which is exactly what a later reader will ask about.
+        var ownerChange = request.OwnerUserId is { } candidateOwner && candidateOwner != terrarium.UserId;
+
+        var beforeJson = crossAccount || ownerChange ? DescribeTerrarium(terrarium) : null;
 
         var violations = new List<IdentityViolation>();
 
@@ -584,6 +621,24 @@ public sealed class TerrariumService(
                 "No such species profile."));
         }
 
+        if (request.OwnerUserId is { } newOwnerUserId)
+        {
+            if (!mayReachAnyAccount)
+            {
+                violations.Add(new IdentityViolation(
+                    "ownerUserId",
+                    "owner_change_forbidden",
+                    "Only an administrator may give an enclosure to another account."));
+            }
+            else if (!await store.UserExistsAsync(newOwnerUserId, cancellationToken))
+            {
+                violations.Add(new IdentityViolation(
+                    "ownerUserId",
+                    "account_not_found",
+                    "No account with that id exists."));
+            }
+        }
+
         if (violations.Count > 0)
         {
             return TerrariumOutcome.Invalid(violations);
@@ -616,11 +671,36 @@ public sealed class TerrariumService(
             terrarium.TimeZoneId = timeZoneId;
         }
 
+        if (request.OwnerUserId is { } assignedOwner)
+        {
+            terrarium.UserId = assignedOwner;
+
+            // The board follows the enclosure. It stays where it is — the reading history and the DI-04 slot are
+            // untouched — but the new keeper's fleet has to list it, or the enclosure would show a board nobody can
+            // configure.
+            if (terrarium.Device is { } boundDevice)
+            {
+                boundDevice.UserId = assignedOwner;
+            }
+        }
+
         terrarium.UpdatedAt = clock.UtcNow;
 
-        // Stages the trail entry for a cross-account edit. It goes in before the commit for the same reason every
-        // audited change does: a change that commits without its entry reads as "nothing happened" (BR-18.4).
-        if (crossAccount)
+        // Stages the trail entry for a cross-account edit or an ownership change. It goes in before the commit for
+        // the same reason every audited change does: a change that commits without its entry reads as "nothing
+        // happened" (BR-18.4). One row per request — an assignment that also renames is still one act.
+        if (ownerChange)
+        {
+            store.AddAuditEntry(AuditLog.ForTerrarium(
+                AuditAction.TerrariumOwnerChanged,
+                terrarium.Id,
+                ownerUserId,
+                actor ?? AuditActor.Unknown,
+                clock.UtcNow,
+                beforeJson: beforeJson,
+                afterJson: DescribeTerrarium(terrarium)));
+        }
+        else if (crossAccount)
         {
             store.AddAuditEntry(AuditLog.ForTerrarium(
                 AuditAction.TerrariumUpdated,
@@ -1345,10 +1425,18 @@ public sealed class TerrariumService(
     /// list can hold rows belonging to accounts the caller did not name — a list of those without the owner beside
     /// them is not usable (TASKS 2026-10-14, item 5).
     /// </summary>
+    /// <param name="terrarium">Row to shape.</param>
+    /// <param name="activity">Newest sample and open-alert count per terrarium.</param>
+    /// <param name="includeOwnerUserId">True for the administrator's answers.</param>
+    /// <param name="ownerEmail">
+    /// The owning account's email, resolved only on the cross-account path; null for an ordinary keeper, whose rows
+    /// are all their own.
+    /// </param>
     private TerrariumSummary Summarise(
         Terrarium terrarium,
         IReadOnlyDictionary<Guid, TerrariumActivity> activity,
-        bool includeOwnerUserId = false)
+        bool includeOwnerUserId = false,
+        string? ownerEmail = null)
     {
         var stats = activity.TryGetValue(terrarium.Id, out var found) ? found : TerrariumActivity.None;
 
@@ -1367,8 +1455,18 @@ public sealed class TerrariumService(
             stats.OpenAlertCount)
         {
             OwnerUserId = includeOwnerUserId ? terrarium.UserId : null,
+            OwnerEmail = includeOwnerUserId ? ownerEmail : null,
         };
     }
+
+    /// <summary>No owner lookup at all — the ordinary keeper's answers, where every row is theirs.</summary>
+    private static readonly IReadOnlyDictionary<Guid, string> EmptyOwners = new Dictionary<Guid, string>();
+
+    /// <summary>The owning account's email, or null for an enclosure nobody owns yet.</summary>
+    private static string? OwnerEmailOf(
+        Terrarium terrarium,
+        IReadOnlyDictionary<Guid, string> owners) =>
+        terrarium.UserId is { } ownerId ? owners.GetValueOrDefault(ownerId) : null;
 
     private static string? Trimmed(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -1435,6 +1533,7 @@ public sealed class TerrariumService(
             description = terrarium.Description,
             timeZoneId = terrarium.TimeZoneId,
             status = terrarium.Status.ToString(),
+            deviceId = terrarium.Device?.PublicId,
         },
         SnapshotJsonOptions);
 }

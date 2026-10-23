@@ -83,6 +83,10 @@ public sealed class DeviceProvisioningService(
         throttle.RecordAttempt(ipAddress, now);
 
         var chipId = request.ChipId!.Trim();
+
+        // Validated above, so the normalisation cannot fail: storing the canonical form is what makes the
+        // claim-by-MAC lookup match a board that reported lower-case hex (2026-10-23).
+        MacAddress.TryNormalise(request.MacAddress, out var macAddress);
         var existing = await store.FindDeviceByChipIdAsync(chipId, cancellationToken);
 
         if (existing is not null)
@@ -109,7 +113,7 @@ public sealed class DeviceProvisioningService(
             PublicId = await AllocatePublicIdAsync(cancellationToken),
             DeviceName = "New node",
             ChipId = chipId,
-            MacAddress = request.MacAddress!.Trim(),
+            MacAddress = macAddress,
             FirmwareVersion = (request.FirmwareVersion ?? string.Empty).Trim(),
             Status = DeviceStatus.Provisioning,
             Protocol = DeviceProtocol.Mqtt,
@@ -188,18 +192,12 @@ public sealed class DeviceProvisioningService(
     {
         var now = clock.UtcNow;
 
-        if (!MacAddress.TryNormalise(request.MacAddress, out var mac))
+        if (MacAddress.Inspect(request.MacAddress, out var mac) is var problem && problem != MacAddressProblem.None)
         {
             return DeviceOutcome.Invalid(
                 "registration_invalid",
                 "The MAC address was refused.",
-                [
-                    new IdentityViolation(
-                        "macAddress",
-                        "mac_invalid",
-                        "A MAC address must be twelve hex digits, optionally separated by ':' or '-' "
-                        + "(for example AA:BB:CC:DD:EE:FF)."),
-                ]);
+                [new IdentityViolation("macAddress", "mac_invalid", MacAddress.Describe(problem))]);
         }
 
         var device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
@@ -331,20 +329,21 @@ public sealed class DeviceProvisioningService(
         {
             device = await store.FindDeviceByPublicIdAsync(publicId!.Trim(), cancellationToken);
         }
-        else if (MacAddress.TryNormalise(macAddress, out var mac))
-        {
-            device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
-        }
         else
         {
-            return (null,
-            [
-                new IdentityViolation(
-                    "macAddress",
-                    "mac_invalid",
-                    "A MAC address must be twelve hex digits, optionally separated by ':' or '-' "
-                    + "(for example AA:BB:CC:DD:EE:FF)."),
-            ]);
+            // The same rule the self-register and claim-by-MAC routes apply: a group, broadcast or unset address
+            // names no board, so it is refused here rather than looked up (2026-10-23).
+            var problem = MacAddress.Inspect(macAddress, out var mac);
+
+            if (problem != MacAddressProblem.None)
+            {
+                return (null,
+                [
+                    new IdentityViolation("macAddress", "mac_invalid", MacAddress.Describe(problem)),
+                ]);
+            }
+
+            device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
         }
 
         if (device is null)
@@ -386,7 +385,10 @@ public sealed class DeviceProvisioningService(
     /// </remarks>
     /// <param name="device">Board to bind, already checked as claimable.</param>
     /// <param name="terrariumId">Terrarium to bind it to.</param>
-    /// <param name="ownerUserId">Acting account, recorded as the device's owner and on the audit row.</param>
+    /// <param name="ownerUserId">
+    /// Account recorded as the device's owner and on the audit row. Null when the enclosure has no owner yet — an
+    /// administrator created it and has not assigned it — and the board then belongs to nobody until it is.
+    /// </param>
     /// <param name="now">Instant of the binding.</param>
     /// <param name="method">Which identification path was used, recorded on the audit row.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
@@ -394,7 +396,7 @@ public sealed class DeviceProvisioningService(
     public string StageBinding(
         Device device,
         Guid terrariumId,
-        Guid ownerUserId,
+        Guid? ownerUserId,
         DateTimeOffset now,
         string method,
         AuditActor? actor = null)
@@ -433,6 +435,130 @@ public sealed class DeviceProvisioningService(
             afterJson: Serialize(new { terrariumId, userId = ownerUserId, method })));
 
         return secret;
+    }
+
+    /// <summary>
+    /// Binds a board to an enclosure, moving it out of whichever enclosure it held before.
+    /// </summary>
+    /// <remarks>
+    /// The three rules this route keeps in one place:
+    /// <list type="bullet">
+    /// <item><b>An owner reaches only their own rows.</b> A foreign device or a foreign enclosure answers the same
+    /// <c>not_found</c> as a missing one (BR-02.2); a caller holding the cross-account permission may pair any board
+    /// with any enclosure.</item>
+    /// <item><b>One enclosure holds one board.</b> Binding a board to an occupied enclosure displaces the board that
+    /// was there, the way physically swapping the node would. Refusing instead would leave a keeper with no way to
+    /// replace a failed board at all.</item>
+    /// <item><b>One board sits in one enclosure.</b> It is the same single <c>TerrariumId</c>, so a move is an
+    /// assignment rather than a second binding.</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="deviceId">Public id of the board to bind.</param>
+    /// <param name="terrariumId">Enclosure to bind it to.</param>
+    /// <param name="ownerUserId">Authenticated caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit rows.</param>
+    /// <param name="mayReachAnyAccount">Whether the caller may act across accounts (data.write.any).</param>
+    public async Task<DeviceOutcome> MoveAsync(
+        string deviceId,
+        Guid? terrariumId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default,
+        AuditActor? actor = null,
+        bool mayReachAnyAccount = false)
+    {
+        if (terrariumId is not { } targetId || targetId == Guid.Empty)
+        {
+            return DeviceOutcome.Invalid(
+                "move_invalid",
+                "The move was refused.",
+                [new IdentityViolation("terrariumId", "terrarium_required", "Name the enclosure to bind the board to.")]);
+        }
+
+        var now = clock.UtcNow;
+        var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
+
+        if (device is null || (!mayReachAnyAccount && !IsCallers(device, ownerUserId)))
+        {
+            return DeviceOutcome.Failure("not_found", "Device not found.");
+        }
+
+        if (device.Status == DeviceStatus.Revoked)
+        {
+            return DeviceOutcome.Failure("device_revoked", "A revoked board cannot be bound to an enclosure.");
+        }
+
+        // A board joins an account by being claimed. Binding an unclaimed one would reserve a slot for a node that
+        // holds no credential and therefore can never report into it.
+        if (device.UserId is null)
+        {
+            return DeviceOutcome.Failure(
+                "device_not_claimed",
+                "That board has not been claimed by an account yet. Claim it before binding it to an enclosure.");
+        }
+
+        var terrarium = await store.FindOwnedTerrariumAsync(targetId, ownerUserId, cancellationToken, mayReachAnyAccount);
+
+        if (terrarium is null)
+        {
+            return DeviceOutcome.Failure("not_found", "Terrarium not found.");
+        }
+
+        var previousTerrariumId = device.TerrariumId;
+
+        if (previousTerrariumId == terrarium.Id)
+        {
+            // Already where the caller wants it: describe the board instead of writing an audit row for a change
+            // that did not happen.
+            device.Terrarium = terrarium;
+            return DeviceOutcome.Moved(new DeviceMoveResult(Describe(device), previousTerrariumId, null));
+        }
+
+        var occupant = await store.FindDeviceBoundToTerrariumAsync(terrarium.Id, cancellationToken);
+
+        if (occupant is not null && occupant.Id != device.Id)
+        {
+            // Unbound, not revoked: the displaced board is fine, it just has no enclosure — the same state an
+            // enclosure delete leaves it in, so the other account can bind it again.
+            occupant.TerrariumId = null;
+            occupant.Status = DeviceStatus.Provisioning;
+            occupant.ProvisionedAt = null;
+
+            store.AddAuditEntry(AuditLog.ForDevice(
+                AuditAction.DeviceUnbound,
+                occupant.Id,
+                occupant.PublicId,
+                ownerUserId,
+                actor ?? AuditActor.Unknown,
+                now,
+                afterJson: Serialize(new { terrariumId = (Guid?)null, displacedBy = device.PublicId })));
+        }
+
+        device.TerrariumId = terrarium.Id;
+        device.Terrarium = terrarium;
+
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceMoved,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            beforeJson: Serialize(new { terrariumId = previousTerrariumId }),
+            afterJson: Serialize(new
+            {
+                terrariumId = terrarium.Id,
+                displacedDeviceId = occupant?.PublicId,
+            })));
+
+        if (!await store.TrySaveRebindAsync(terrarium.Id, device.Id, cancellationToken))
+        {
+            return DeviceOutcome.Failure(
+                "terrarium_already_bound",
+                "That terrarium was bound to another device a moment ago. Reload and try again.");
+        }
+
+        return DeviceOutcome.Moved(new DeviceMoveResult(Describe(device), previousTerrariumId, occupant?.PublicId));
     }
 
     /// <summary>
@@ -933,10 +1059,16 @@ public sealed class DeviceProvisioningService(
         {
             violations.Add(new IdentityViolation("macAddress", "mac_required", "A MAC address is required."));
         }
-        else if (!IsMacAddress(mac))
+        else
         {
-            violations.Add(new IdentityViolation(
-                "macAddress", "mac_invalid", "A MAC address must look like AA:BB:CC:DD:EE:FF."));
+            var problem = MacAddress.Inspect(mac, out _);
+
+            if (problem != MacAddressProblem.None)
+            {
+                // One code for every reason, because the field is the same field — but the message says what is
+                // wrong with this value, which is what lets the person holding the board fix it (2026-10-23).
+                violations.Add(new IdentityViolation("macAddress", "mac_invalid", MacAddress.Describe(problem)));
+            }
         }
 
         var firmware = (request.FirmwareVersion ?? string.Empty).Trim();
@@ -950,30 +1082,4 @@ public sealed class DeviceProvisioningService(
         return violations;
     }
 
-    private static bool IsMacAddress(string value)
-    {
-        if (value.Length != 17)
-        {
-            return false;
-        }
-
-        for (var index = 0; index < 17; index++)
-        {
-            var c = value[index];
-
-            if (index % 3 == 2)
-            {
-                if (c != ':')
-                {
-                    return false;
-                }
-            }
-            else if (!char.IsAsciiHexDigit(c))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 }

@@ -4,10 +4,14 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../core/problem.dart';
+import '../core/permissions.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../l10n/labels.dart';
 import '../models/api_terrarium_models.dart';
 import '../core/status.dart';
+import '../state/accounts_provider.dart';
+import '../state/device_provider.dart';
+import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -61,98 +65,14 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
 
   Future<void> _edit(ApiTerrarium current) async {
     final l10n = AppLocalizations.of(context);
-    final name = TextEditingController(text: current.name);
-    final location = TextEditingController(text: current.location ?? '');
-    final description = TextEditingController(text: current.description ?? '');
-    final formKey = GlobalKey<FormState>();
-    AppFailure? failure;
-    final result = await showDialog<bool>(
+    final updated = await showDialog<ApiTerrarium>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(l10n.terrariumEdit),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: name,
-                    maxLength: 60,
-                    decoration: InputDecoration(labelText: l10n.terrariumName),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? l10n.terrariumNameRequired
-                        : value.trim().length > 60
-                        ? l10n.terrariumNameTooLong
-                        : null,
-                  ),
-                  TextFormField(
-                    controller: location,
-                    maxLength: 120,
-                    decoration: InputDecoration(
-                      labelText: l10n.terrariumLocation,
-                    ),
-                    validator: (value) => (value?.length ?? 0) > 120
-                        ? l10n.terrariumLocationTooLong
-                        : null,
-                  ),
-                  TextFormField(
-                    controller: description,
-                    maxLength: 1000,
-                    maxLines: 3,
-                    decoration: InputDecoration(
-                      labelText: l10n.terrariumDescription,
-                    ),
-                    validator: (value) => (value?.length ?? 0) > 1000
-                        ? l10n.terrariumDescriptionTooLong
-                        : null,
-                  ),
-                  if (failure != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: Text(
-                        failureMessage(l10n, failure!),
-                        style: const TextStyle(color: AppColors.statusDanger),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                try {
-                  await context.read<TerrariumProvider>().updateTerrarium(
-                    current,
-                    name: name.text,
-                    location: location.text,
-                    description: description.text,
-                  );
-                  if (dialogContext.mounted) {
-                    Navigator.pop(dialogContext, true);
-                  }
-                } on AppFailure catch (error) {
-                  setDialogState(() => failure = error);
-                }
-              },
-              child: Text(l10n.save),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => _EditTerrariumDialog(current: current),
     );
-    name.dispose();
-    location.dispose();
-    description.dispose();
-    if (result == true && mounted) {
-      setState(_load);
+    if (updated != null && mounted) {
+      setState(() {
+        _terrariumFuture = Future.value(updated);
+      });
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(l10n.terrariumUpdated)));
     }
@@ -188,9 +108,108 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
     }
   }
 
+  /// Offers the caller's unrevoked boards and binds the chosen one to this enclosure
+  /// (`POST /devices/{id}/move`). A board that currently lives elsewhere is moved; a board already here is not
+  /// offered, because the answer to that is the same enclosure it is in.
+  Future<void> _pickDeviceToBind(AppLocalizations l10n) async {
+    final deviceProvider = context.read<DeviceProvider>();
+    await deviceProvider.loadDevices();
+    if (!mounted) return;
+
+    final candidates = deviceProvider.devices
+        .where((device) => device.status != 'revoked' && device.terrariumId != widget.terrariumId)
+        .toList();
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không có thiết bị nào để gắn. Hãy nhận thiết bị trước.')),
+      );
+      return;
+    }
+
+    String? selected = candidates.first.deviceId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.bgCard,
+          title: const Text('Gắn thiết bị vào bể', style: TextStyle(color: AppColors.textMain)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // The group owns the selection: per-tile `groupValue`/`onChanged` are deprecated in this Flutter.
+                RadioGroup<String>(
+                  groupValue: selected,
+                  onChanged: (value) => setDialogState(() => selected = value),
+                  child: Column(
+                    children: [
+                      for (final device in candidates)
+                        RadioListTile<String>(
+                          value: device.deviceId,
+                          title: Text(
+                            device.deviceName,
+                            style: const TextStyle(color: AppColors.textMain),
+                          ),
+                          subtitle: Text(
+                            device.terrariumName == null
+                                ? device.deviceId
+                                : '${device.deviceId} · đang ở ${device.terrariumName}',
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Mỗi bể nuôi chỉ chứa một thiết bị: thiết bị đang ở bể này (nếu có) sẽ được gỡ ra nhưng không bị thu hồi.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.cancel, style: const TextStyle(color: AppColors.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Gắn vào bể'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || selected == null || !mounted) return;
+
+    try {
+      await deviceProvider.moveDevice(
+        deviceId: selected!,
+        terrariumId: widget.terrariumId,
+      );
+      if (!mounted) return;
+      setState(_load);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã gắn thiết bị vào bể nuôi.')),
+      );
+    } on AppFailure catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failureMessage(l10n, failure))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    // Binding a board is `device.provision` — the same permission that claims one (07-appendices/03 §4.4). The
+    // lookup is nullable so the screen still renders where no session provider is installed (widget tests, previews);
+    // without one there is no permission to bind with.
+    final canBindDevice =
+        context.watch<SessionProvider?>()?.hasPermission(Permissions.deviceProvision) ?? false;
     return Scaffold(
       backgroundColor: AppColors.bgMain,
       appBar: AppBar(
@@ -262,6 +281,23 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
                     terrarium.location!,
                     style: const TextStyle(color: AppColors.textMuted),
                   ),
+                // Only an administrator's answer carries the owner, whose list can hold enclosures belonging to
+                // accounts they did not name.
+                if (terrarium.ownerEmail != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 14, color: AppColors.textMuted),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          terrarium.ownerEmail!,
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 18),
                 _latestReadings(l10n),
                 const SizedBox(height: 18),
@@ -278,6 +314,13 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
                       subtitle: Text(
                         '${terrarium.device?['status'] ?? '—'} · ${terrarium.device?['deviceId'] ?? '—'}',
                       ),
+                      trailing: canBindDevice
+                          ? TextButton.icon(
+                              onPressed: () => _pickDeviceToBind(l10n),
+                              icon: const Icon(Icons.link, size: 16),
+                              label: const Text('Đổi thiết bị'),
+                            )
+                          : null,
                     ),
                   )
                 else
@@ -286,6 +329,13 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
                       leading: const Icon(Icons.memory),
                       title: Text(l10n.device),
                       subtitle: Text(l10n.terrariumBindDeviceNone),
+                      trailing: canBindDevice
+                          ? TextButton.icon(
+                              onPressed: () => _pickDeviceToBind(l10n),
+                              icon: const Icon(Icons.add_link, size: 16),
+                              label: const Text('Gắn thiết bị'),
+                            )
+                          : null,
                     ),
                   ),
               ],
@@ -566,4 +616,203 @@ class _ErrorState extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _EditTerrariumDialog extends StatefulWidget {
+  const _EditTerrariumDialog({required this.current});
+
+  final ApiTerrarium current;
+
+  @override
+  State<_EditTerrariumDialog> createState() => _EditTerrariumDialogState();
+}
+
+class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _location;
+  late final TextEditingController _description;
+  final _formKey = GlobalKey<FormState>();
+  AppFailure? _failure;
+  bool _saving = false;
+  String? _ownerUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.current.name);
+    _location = TextEditingController(text: widget.current.location ?? '');
+    _description = TextEditingController(text: widget.current.description ?? '');
+    _ownerUserId = widget.current.ownerUserId;
+
+    // An administrator assigns the enclosure here; the picker needs the deployment's accounts, which the admin
+    // screens load for their own lists and which may not have been read yet on this route.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<AccountsProvider?>()?.loadAccounts();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _location.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _failure = null;
+    });
+
+    // Only when it changed: an omitted member means "leave it", and an assignment is administrator-only.
+    final ownerChange = _ownerUserId != widget.current.ownerUserId ? _ownerUserId : null;
+
+    try {
+      final updated = await context.read<TerrariumProvider>().updateTerrarium(
+        widget.current,
+        name: _name.text,
+        location: _location.text,
+        description: _description.text,
+        ownerUserId: ownerChange,
+      );
+      if (mounted) {
+        Navigator.pop(context, updated);
+      }
+    } on AppFailure catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _failure = error;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final session = context.watch<SessionProvider?>();
+    final canAssignOwner = (session?.hasPermission(Permissions.dataWriteAny) ?? false) &&
+        (session?.hasPermission(Permissions.userRead) ?? false);
+    final accounts = context.watch<AccountsProvider?>()?.accounts?.items ?? const [];
+    return AlertDialog(
+      title: Text(l10n.terrariumEdit),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _name,
+                maxLength: 60,
+                decoration: InputDecoration(labelText: l10n.terrariumName),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? l10n.terrariumNameRequired
+                    : value.trim().length > 60
+                    ? l10n.terrariumNameTooLong
+                    : null,
+              ),
+              TextFormField(
+                controller: _location,
+                maxLength: 120,
+                decoration: InputDecoration(
+                  labelText: l10n.terrariumLocation,
+                ),
+                validator: (value) => (value?.length ?? 0) > 120
+                    ? l10n.terrariumLocationTooLong
+                    : null,
+              ),
+              TextFormField(
+                controller: _description,
+                maxLength: 1000,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: l10n.terrariumDescription,
+                ),
+                validator: (value) => (value?.length ?? 0) > 1000
+                    ? l10n.terrariumDescriptionTooLong
+                    : null,
+              ),
+              if (canAssignOwner) ...[
+                const Divider(height: 24),
+                Row(
+                  children: [
+                    const Icon(Icons.person_outline, size: 16, color: AppColors.textMuted),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.current.ownerEmail == null
+                            ? 'Bể nuôi chưa thuộc tài khoản nào'
+                            : 'Chủ sở hữu: ${widget.current.ownerEmail}',
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: accounts.any((account) => account.id == _ownerUserId) ? _ownerUserId : null,
+                  dropdownColor: AppColors.bgCard,
+                  isExpanded: true,
+                  style: const TextStyle(color: AppColors.textMain, fontSize: 14),
+                  decoration: const InputDecoration(labelText: 'Gán chủ sở hữu'),
+                  items: [
+                    for (final account in accounts)
+                      DropdownMenuItem(
+                        value: account.id,
+                        child: Text(
+                          '${account.username} · ${account.email}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() => _ownerUserId = value),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Thiết bị đang gắn trong bể vẫn ở nguyên đó và chuyển theo chủ mới.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
+              if (_failure != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    failureMessage(l10n, _failure!),
+                    style: const TextStyle(color: AppColors.statusDanger),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(l10n.save),
+        ),
+      ],
+    );
+  }
 }

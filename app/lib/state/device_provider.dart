@@ -176,4 +176,24 @@ class DeviceProvider extends ChangeNotifier {
     );
     await loadDevices();
   }
+
+  /// Binds the board to an enclosure (`POST /devices/{id}/move`).
+  ///
+  /// One enclosure holds one board, so this is also how a board moves: it leaves whichever enclosure it held, and a
+  /// target that already has a board displaces that board (unbound, not revoked — the other account can bind it
+  /// again). An owner may only pair their own board with their own enclosure; `data.write.any` lifts that.
+  Future<DeviceItem> moveDevice({
+    required String deviceId,
+    required String terrariumId,
+  }) async {
+    final payload = await api.postJson(
+      '/api/v1/devices/${Uri.encodeComponent(deviceId)}/move',
+      body: {'terrariumId': terrariumId},
+    );
+    await loadDevices();
+    final moved = payload['device'];
+    return moved is Map<String, dynamic>
+        ? DeviceItem.fromJson(moved)
+        : getDevice(deviceId);
+  }
 }
