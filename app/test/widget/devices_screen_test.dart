@@ -178,4 +178,66 @@ void main() {
 
     expect(find.text('Mã thiết bị (ID)'), findsNothing);
   });
+
+  testWidgets('offline warning banner is visible for non-admin and hidden for admin', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    // Non-admin (guest mode)
+    await tester.pumpWidget(buildScreen());
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 thiết bị đang ngoại tuyến'), findsOneWidget);
+
+    // Admin role
+    final adminApi = ApiClient(
+      baseUrl: 'http://localhost',
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/login') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-01',
+                'username': 'admin',
+                'email': 'admin@example.com',
+                'role': 'administrator',
+                'permissions': ['data.read.any'],
+                'preferredLanguage': 'vi',
+                'timeZoneId': 'Asia/Ho_Chi_Minh',
+              },
+              'accessToken': 'access',
+              'refreshToken': 'refresh',
+              'accessTokenExpiresAtUtc': '2030-01-01T00:00:00Z',
+              'refreshTokenExpiresAtUtc': '2030-02-01T00:00:00Z',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('{}', 200, headers: {'content-type': 'application/json'});
+      }),
+    );
+    final adminSessionProv = SessionProvider(api: adminApi, store: TokenStore.inMemory());
+    await adminSessionProv.signIn(usernameOrEmail: 'admin', password: 'password');
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<DeviceProvider>.value(value: deviceProvider),
+          ChangeNotifierProvider<TerrariumProvider>.value(value: terrariumProvider),
+          ChangeNotifierProvider<SessionProvider>.value(value: adminSessionProv),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.darkTheme,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const DevicesScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1 thiết bị đang ngoại tuyến'), findsNothing);
+  });
 }

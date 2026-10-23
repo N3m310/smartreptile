@@ -33,7 +33,7 @@ class _ShellTab {
     this.isMock = true,
   });
 
-  final NavigationDestination destination;
+  final Widget destination;
   final Widget screen;
 
   /// False for a screen that reads the API, which is what decides whether the simulated-data notice is shown over it.
@@ -81,6 +81,9 @@ class _RootShellState extends State<_RootShell> {
     final session = context.watch<SessionProvider>();
     final l10n = AppLocalizations.of(context);
     final pendingCount = appData.pendingAlertsCount;
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasAnyPermission(_administrativePermissions);
 
     // The administration tab exists only while the session holds a permission that can open something behind it:
     // `data.read.any` for the get-all views, `user.read` for accounts and roles. A tab that led to a locked screen
@@ -112,13 +115,22 @@ class _RootShellState extends State<_RootShell> {
         screen: SpeciesScreen(),
         isMock: false,
       ),
-      const _ShellTab(
-        destination: NavigationDestination(
-          icon: Icon(Icons.developer_board_outlined),
-          selectedIcon: Icon(Icons.developer_board),
-          label: 'Thiết bị IoT',
-        ),
-        screen: DevicesScreen(),
+      _ShellTab(
+        destination: isAdmin
+            ? DefaultTextStyle.merge(
+                textAlign: TextAlign.center,
+                child: const NavigationDestination(
+                  icon: Icon(Icons.developer_board_outlined),
+                  selectedIcon: Icon(Icons.developer_board),
+                  label: 'Thiết bị\nIoT',
+                ),
+              )
+            : const NavigationDestination(
+                icon: Icon(Icons.developer_board_outlined),
+                selectedIcon: Icon(Icons.developer_board),
+                label: 'Thiết bị IoT',
+              ),
+        screen: const DevicesScreen(),
         isMock: false,
       ),
       _ShellTab(
