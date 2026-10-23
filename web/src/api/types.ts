@@ -694,12 +694,13 @@ export interface AdminOverview {
   families: AdminFamilyView[];
 }
 
-/** One enclosure of any account (`AdminTerrariumView`). */
+/** One enclosure of any account (`AdminTerrariumView`). An enclosure an administrator created and has not assigned
+ * yet has no owner, so both owner fields are null. */
 export interface AdminTerrariumView {
   id: string;
   name: string;
-  ownerId: string;
-  ownerUsername: string;
+  ownerId: string | null;
+  ownerUsername: string | null;
   speciesProfileId: string;
   speciesProfileName: string;
   status: string;

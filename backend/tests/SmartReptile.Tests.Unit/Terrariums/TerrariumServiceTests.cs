@@ -1691,6 +1691,117 @@ public class TerrariumServiceTests
     }
 
     [Fact]
+    public async Task Create_by_an_administrator_leaves_the_enclosure_unowned()
+    {
+        var profile = _store.AddProfile();
+
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Unassigned", profile.Id, null, null, null),
+            _owner,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        // An administrator works from the whole deployment, so guessing an owner would put a keeper's name on an
+        // enclosure that keeper never asked for. The owner is assigned afterwards (2026-10-23).
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.OwnerUserId.Should().BeNull();
+        _store.Terrariums.Should().ContainSingle().Which.UserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Update_assigns_an_unowned_enclosure_to_an_account_and_audits_it()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        terrarium.UserId = null;
+        var keeper = Guid.NewGuid();
+        _store.AddUser(keeper, "keeper@example.test");
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, null, null, null, null, OwnerUserId: keeper),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.UserId.Should().Be(keeper);
+
+        // Its own verb: "whose enclosure is this" changing hands is exactly what a later reader asks about.
+        var entry = _store.AuditEntries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AuditAction.TerrariumOwnerChanged);
+        entry.UserId.Should().Be(_owner);
+        entry.BeforeJson.Should().Contain("\"userId\":null");
+        entry.AfterJson.Should().Contain(keeper.ToString());
+    }
+
+    [Fact]
+    public async Task Update_moves_the_bound_board_with_the_enclosure()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        var device = FakeTerrariumStore.AddDevice(terrarium, DeviceStatus.Online, Now);
+        device.UserId = _owner;
+        var keeper = Guid.NewGuid();
+        _store.AddUser(keeper);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, null, null, null, null, OwnerUserId: keeper),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Succeeded.Should().BeTrue();
+
+        // The board stays in the enclosure — the reading history and the DI-04 slot are untouched — but the new
+        // keeper's fleet has to list it, or the enclosure would show a board nobody can configure.
+        device.TerrariumId.Should().Be(terrarium.Id);
+        device.UserId.Should().Be(keeper);
+    }
+
+    [Fact]
+    public async Task Update_refuses_an_owner_change_from_a_keeper()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+        var someoneElse = Guid.NewGuid();
+        _store.AddUser(someoneElse);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, null, null, null, null, OwnerUserId: someoneElse),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Should().ContainSingle().Which.Code.Should().Be("owner_change_forbidden");
+        terrarium.UserId.Should().Be(_owner);
+        _store.SaveCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Update_refuses_an_owner_that_is_not_an_account()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, null, null, null, null, OwnerUserId: Guid.NewGuid()),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Should().ContainSingle().Which.Code.Should().Be("account_not_found");
+    }
+
+    [Fact]
     public async Task Delete_of_another_accounts_terrarium_is_allowed_for_an_administrator_and_audited()
     {
         var profile = _store.AddProfile();

@@ -67,6 +67,13 @@ public static class AuditAction
     public const string TerrariumDeleted = "terrarium.deleted";
 
     /// <summary>
+    /// An administrator gave an enclosure to an account (2026-10-23). Its own verb rather than
+    /// <see cref="TerrariumUpdated"/>: "whose enclosure is this" changing hands is the one edit a later reader will
+    /// ask about, and the bound board follows the enclosure, so the row records both.
+    /// </summary>
+    public const string TerrariumOwnerChanged = "terrarium.owner_changed";
+
+    /// <summary>
     /// A board was detached from its enclosure without being revoked — it stays in the deployment, unbound and free to
     /// be claimed again. Written when an administrator deletes an enclosure, because the board outliving it is the part
     /// that would otherwise be invisible in the trail (TASKS 2026-10-19, BE-02).

@@ -25,8 +25,12 @@ public class Terrarium
     /// <summary>Surrogate key.</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>Owner.</summary>
-    public Guid UserId { get; set; }
+    /// <summary>
+    /// Owner, or null for an enclosure an administrator created and has not assigned yet (2026-10-23). An ownerless
+    /// enclosure appears in no keeper's list and answers <c>404</c> on the owner-scoped routes; it is reachable only
+    /// by an account holding the cross-account permission, which is also the only account that can assign it.
+    /// </summary>
+    public Guid? UserId { get; set; }
 
     /// <summary>Display name, e.g. "Linh's gecko box".</summary>
     public string Name { get; set; } = string.Empty;

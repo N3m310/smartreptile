@@ -531,12 +531,16 @@ const TerrariumTable: React.FC<{
                       <span className="block font-mono text-[11px] text-muted">{row.id}</span>
                     </td>
                     <td className={TD}>
-                      <Link
-                        to="/admin/accounts"
-                        className="text-brand transition-colors hover:text-ink hover:underline"
-                      >
-                        {row.ownerUsername}
-                      </Link>
+                      {row.ownerUsername ? (
+                        <Link
+                          to="/admin/accounts"
+                          className="text-brand transition-colors hover:text-ink hover:underline"
+                        >
+                          {row.ownerUsername}
+                        </Link>
+                      ) : (
+                        <span className="text-muted">Chưa gán</span>
+                      )}
                     </td>
                     <td className={TD}>{row.speciesProfileName}</td>
                     <td className={`${TD} whitespace-nowrap`}>{terrariumStatusLabel(t, row.status)}</td>
@@ -763,7 +767,7 @@ const AlertTable: React.FC<{
                     <td className={`${TD} whitespace-nowrap`}>{alertSourceLabel(t, row.source)}</td>
                     <td className={TD}>{row.metric ? metricLabel(t, row.metric) : '—'}</td>
                     <td className={TD}>{row.terrariumName}</td>
-                    <td className={TD}>{row.ownerUsername}</td>
+                    <td className={TD}>{row.ownerUsername ?? '—'}</td>
                     <td className={`${TD} whitespace-nowrap text-muted`}>
                       <span className="block">{formatDateTime(row.triggeredAt, lang)}</span>
                       <span className="block text-[11px]">{formatRelative(t, row.triggeredAt)}</span>

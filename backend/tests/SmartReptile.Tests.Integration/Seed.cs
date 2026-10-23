@@ -26,8 +26,10 @@ public static class Seed
         db.SpeciesProfiles.OrderBy(p => p.Name).Select(p => p.Id).FirstAsync();
 
     /// <summary>
-    /// An owner. Required because <c>Terrarium.UserId</c> is a non-null foreign key and <c>User.RoleId</c> is a
-    /// non-null one since the matrix moved into tables.
+    /// An owner. Required because <c>Device.UserId</c> and <c>AuditLog.UserId</c> name it and <c>User.RoleId</c> is
+    /// a non-null one since the matrix moved into tables. <c>Terrarium.UserId</c> has been nullable since 2026-10-23,
+    /// but every seeded enclosure still names one: an unowned enclosure is the administrator's blank slate, not a
+    /// fixture.
     /// </summary>
     /// <param name="db">Context and transaction to write in.</param>
     /// <param name="roleId">

@@ -116,6 +116,35 @@ public class DeviceProvisioningServiceTests
         _store.Devices.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("FF:FF:FF:FF:FF:FF", "broadcast")]
+    [InlineData("00:00:00:00:00:00", "before Wi-Fi starts")]
+    [InlineData("33:33:00:00:00:01", "group address")]
+    public async Task SelfRegister_refuses_an_address_no_board_can_own(string mac, string because)
+    {
+        // What the board reports must be its own unicast station address; a group, broadcast or unset one would put
+        // a row in the fleet that no ESP32 can ever match (2026-10-23).
+        var outcome = await _service.SelfRegisterAsync(new SelfRegisterRequest(ChipId, mac, null), Ip);
+
+        outcome.Problem!.Code.Should().Be("registration_invalid");
+        outcome.Problem.Errors!.Single().Field.Should().Be("macAddress");
+        outcome.Problem.Errors!.Single().Code.Should().Be("mac_invalid");
+        outcome.Problem.Errors!.Single().Message.Should().Contain(because);
+        _store.Devices.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SelfRegister_stores_the_canonical_spelling_of_the_mac()
+    {
+        // A board that reports lower-case hex is the same board as one that reports upper case, so the row is stored
+        // in the one form the claim-by-MAC lookup searches for.
+        (await _service.SelfRegisterAsync(
+            new SelfRegisterRequest(ChipId, "a0-b1-c2-d3-e4-f5", null),
+            Ip)).Succeeded.Should().BeTrue();
+
+        _store.Devices.Single().MacAddress.Should().Be("A0:B1:C2:D3:E4:F5");
+    }
+
     // ---- claim --------------------------------------------------------------------------------------
 
     [Fact]
@@ -684,6 +713,24 @@ public class DeviceProvisioningServiceTests
         outcome.Succeeded.Should().BeTrue();
         outcome.Claim.Should().NotBeNull();
         outcome.Claim!.TerrariumId.Should().Be(terrarium.Id);
+    }
+
+    [Theory]
+    [InlineData("FF:FF:FF:FF:FF:FF", "broadcast")]
+    [InlineData("00:00:00:00:00:00", "before Wi-Fi starts")]
+    [InlineData("01:00:5E:00:00:01", "group address")]
+    public async Task ClaimByMac_refuses_an_address_no_board_can_own(string typed, string because)
+    {
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(new ClaimByMacRequest(typed, terrarium.Id), _owner);
+
+        // An ESP32 reports a unicast station address, so a group, broadcast or unset one names no board and
+        // accepting it could only bind the wrong thing (2026-10-23).
+        outcome.Problem!.Code.Should().Be("registration_invalid");
+        outcome.Problem.Errors!.Single().Code.Should().Be("mac_invalid");
+        outcome.Problem.Errors!.Single().Message.Should().Contain(because);
+        _store.SaveCount.Should().Be(0);
     }
 
     [Fact]

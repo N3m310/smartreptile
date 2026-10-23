@@ -189,8 +189,8 @@ public sealed class EfAdminStore(SmartReptileDbContext db) : IAdminStore
                 row.Name,
                 row.OwnerId,
 
-                // Non-null by the account foreign key: an enclosure whose owner row had gone could not exist.
-                row.OwnerUsername!,
+                // Null for an enclosure an administrator created and has not assigned yet.
+                row.OwnerUsername,
                 row.SpeciesProfileId,
                 row.SpeciesProfileName!,
                 row.Status.ToString(),

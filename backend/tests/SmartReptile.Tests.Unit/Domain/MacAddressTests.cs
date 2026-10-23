@@ -53,4 +53,35 @@ public class MacAddressTests
         typed.Should().Be(reported);
         MacAddress.IsWellFormed(typed).Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData("A0:B1:C2:D3:E4:F5")]
+    [InlineData("a0-b1-c2-d3-e4-f5")]
+    [InlineData("a0b1.c2d3.e4f5")]
+    [InlineData("B0:CB:D8:CE:01:E0")]
+    public void A_uniquely_assigned_unicast_address_is_a_board_address(string typed)
+    {
+        MacAddress.Inspect(typed, out var normalised).Should().Be(MacAddressProblem.None);
+        MacAddress.IsDeviceAddress(typed).Should().BeTrue();
+        normalised.Should().Be(normalised.ToUpperInvariant());
+    }
+
+    [Theory]
+    [InlineData("FF:FF:FF:FF:FF:FF", MacAddressProblem.Broadcast)]
+    [InlineData("ff-ff-ff-ff-ff-ff", MacAddressProblem.Broadcast)]
+    [InlineData("00:00:00:00:00:00", MacAddressProblem.AllZero)]
+    [InlineData("01:00:5E:00:00:01", MacAddressProblem.Multicast)]
+    [InlineData("33:33:00:00:00:01", MacAddressProblem.Multicast)]
+    [InlineData("AA:BB:CC:DD:EE", MacAddressProblem.Malformed)]
+    [InlineData("", MacAddressProblem.Malformed)]
+    public void An_address_no_single_board_can_own_is_refused_with_its_reason(
+        string typed,
+        MacAddressProblem expected)
+    {
+        // An ESP32 reports its station address through `WiFi.macAddress()`: 48 bits, unicast, never the broadcast
+        // address and never all zeros. Anything else would match nothing — or, worse, something wrong.
+        MacAddress.Inspect(typed, out _).Should().Be(expected);
+        MacAddress.IsDeviceAddress(typed).Should().BeFalse();
+        MacAddress.Describe(expected).Should().NotBeNullOrWhiteSpace();
+    }
 }

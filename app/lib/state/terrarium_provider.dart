@@ -127,6 +127,7 @@ class TerrariumProvider extends ChangeNotifier {
     required String name,
     String? location,
     String? description,
+    String? ownerUserId,
   }) async {
     final rowVersion = current.rowVersion;
     if (rowVersion == null || rowVersion.isEmpty) {
@@ -139,6 +140,9 @@ class TerrariumProvider extends ChangeNotifier {
         'name': name.trim(),
         'location': location?.trim() ?? '',
         'description': description?.trim() ?? '',
+        // Only when it changed: the server reads an omitted member as "leave it", and an assignment is an
+        // administrator-only change that also carries the bound board across (2026-10-23).
+        'ownerUserId': ?ownerUserId,
       },
     );
     final updated = ApiTerrarium.fromJson(payload);

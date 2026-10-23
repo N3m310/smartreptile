@@ -83,6 +83,10 @@ public sealed class DeviceProvisioningService(
         throttle.RecordAttempt(ipAddress, now);
 
         var chipId = request.ChipId!.Trim();
+
+        // Validated above, so the normalisation cannot fail: storing the canonical form is what makes the
+        // claim-by-MAC lookup match a board that reported lower-case hex (2026-10-23).
+        MacAddress.TryNormalise(request.MacAddress, out var macAddress);
         var existing = await store.FindDeviceByChipIdAsync(chipId, cancellationToken);
 
         if (existing is not null)
@@ -109,7 +113,7 @@ public sealed class DeviceProvisioningService(
             PublicId = await AllocatePublicIdAsync(cancellationToken),
             DeviceName = "New node",
             ChipId = chipId,
-            MacAddress = request.MacAddress!.Trim(),
+            MacAddress = macAddress,
             FirmwareVersion = (request.FirmwareVersion ?? string.Empty).Trim(),
             Status = DeviceStatus.Provisioning,
             Protocol = DeviceProtocol.Mqtt,
@@ -188,18 +192,12 @@ public sealed class DeviceProvisioningService(
     {
         var now = clock.UtcNow;
 
-        if (!MacAddress.TryNormalise(request.MacAddress, out var mac))
+        if (MacAddress.Inspect(request.MacAddress, out var mac) is var problem && problem != MacAddressProblem.None)
         {
             return DeviceOutcome.Invalid(
                 "registration_invalid",
                 "The MAC address was refused.",
-                [
-                    new IdentityViolation(
-                        "macAddress",
-                        "mac_invalid",
-                        "A MAC address must be twelve hex digits, optionally separated by ':' or '-' "
-                        + "(for example AA:BB:CC:DD:EE:FF)."),
-                ]);
+                [new IdentityViolation("macAddress", "mac_invalid", MacAddress.Describe(problem))]);
         }
 
         var device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
@@ -331,20 +329,21 @@ public sealed class DeviceProvisioningService(
         {
             device = await store.FindDeviceByPublicIdAsync(publicId!.Trim(), cancellationToken);
         }
-        else if (MacAddress.TryNormalise(macAddress, out var mac))
-        {
-            device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
-        }
         else
         {
-            return (null,
-            [
-                new IdentityViolation(
-                    "macAddress",
-                    "mac_invalid",
-                    "A MAC address must be twelve hex digits, optionally separated by ':' or '-' "
-                    + "(for example AA:BB:CC:DD:EE:FF)."),
-            ]);
+            // The same rule the self-register and claim-by-MAC routes apply: a group, broadcast or unset address
+            // names no board, so it is refused here rather than looked up (2026-10-23).
+            var problem = MacAddress.Inspect(macAddress, out var mac);
+
+            if (problem != MacAddressProblem.None)
+            {
+                return (null,
+                [
+                    new IdentityViolation("macAddress", "mac_invalid", MacAddress.Describe(problem)),
+                ]);
+            }
+
+            device = await store.FindDeviceByMacAddressAsync(mac, cancellationToken);
         }
 
         if (device is null)
@@ -386,7 +385,10 @@ public sealed class DeviceProvisioningService(
     /// </remarks>
     /// <param name="device">Board to bind, already checked as claimable.</param>
     /// <param name="terrariumId">Terrarium to bind it to.</param>
-    /// <param name="ownerUserId">Acting account, recorded as the device's owner and on the audit row.</param>
+    /// <param name="ownerUserId">
+    /// Account recorded as the device's owner and on the audit row. Null when the enclosure has no owner yet — an
+    /// administrator created it and has not assigned it — and the board then belongs to nobody until it is.
+    /// </param>
     /// <param name="now">Instant of the binding.</param>
     /// <param name="method">Which identification path was used, recorded on the audit row.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
@@ -394,7 +396,7 @@ public sealed class DeviceProvisioningService(
     public string StageBinding(
         Device device,
         Guid terrariumId,
-        Guid ownerUserId,
+        Guid? ownerUserId,
         DateTimeOffset now,
         string method,
         AuditActor? actor = null)
@@ -1057,10 +1059,16 @@ public sealed class DeviceProvisioningService(
         {
             violations.Add(new IdentityViolation("macAddress", "mac_required", "A MAC address is required."));
         }
-        else if (!IsMacAddress(mac))
+        else
         {
-            violations.Add(new IdentityViolation(
-                "macAddress", "mac_invalid", "A MAC address must look like AA:BB:CC:DD:EE:FF."));
+            var problem = MacAddress.Inspect(mac, out _);
+
+            if (problem != MacAddressProblem.None)
+            {
+                // One code for every reason, because the field is the same field — but the message says what is
+                // wrong with this value, which is what lets the person holding the board fix it (2026-10-23).
+                violations.Add(new IdentityViolation("macAddress", "mac_invalid", MacAddress.Describe(problem)));
+            }
         }
 
         var firmware = (request.FirmwareVersion ?? string.Empty).Trim();
@@ -1074,30 +1082,4 @@ public sealed class DeviceProvisioningService(
         return violations;
     }
 
-    private static bool IsMacAddress(string value)
-    {
-        if (value.Length != 17)
-        {
-            return false;
-        }
-
-        for (var index = 0; index < 17; index++)
-        {
-            var c = value[index];
-
-            if (index % 3 == 2)
-            {
-                if (c != ':')
-                {
-                    return false;
-                }
-            }
-            else if (!char.IsAsciiHexDigit(c))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 }
