@@ -132,7 +132,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
             ),
 
             // Offline alert banner if any
-            if (deviceProv.offlineCount > 0) ...[
+            if (!isAdmin && deviceProv.offlineCount > 0) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),

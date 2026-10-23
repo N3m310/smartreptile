@@ -7,6 +7,7 @@ import '../../l10n/generated/app_localizations.dart';
 import '../../l10n/labels.dart';
 import '../../models/admin_models.dart';
 import '../../state/admin_provider.dart';
+import '../../state/session_provider.dart';
 import '../../theme/app_theme.dart';
 import 'admin_widgets.dart';
 
@@ -37,6 +38,9 @@ class _AdminOverviewScreenState extends State<AdminOverviewScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final session = context.watch<SessionProvider>();
+    final role = session.user?.role.toLowerCase() ?? '';
+    final isAdmin = role == 'admin' || role == 'administrator';
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
@@ -77,7 +81,7 @@ class _AdminOverviewScreenState extends State<AdminOverviewScreen> {
                       ),
                     ),
                   _CountsSection(counts: overview.counts),
-                  _FamiliesSection(families: overview.families),
+                  if (!isAdmin) _FamiliesSection(families: overview.families),
                   _RollupSection(accounts: overview.accounts),
                 ],
               ),
