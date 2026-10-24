@@ -40,7 +40,7 @@ void main() {
   late SettingsProvider settings;
   late SessionProvider session;
 
-  Widget app() => MultiProvider(
+  Widget app({ApiClient? terrariumApi}) => MultiProvider(
     providers: [
       ChangeNotifierProvider<AppDataProvider>(create: (_) => AppDataProvider()),
       ChangeNotifierProvider<SettingsProvider>.value(value: settings),
@@ -49,7 +49,8 @@ void main() {
         create: (_) => AdminProvider(api: ApiClient(baseUrl: 'http://localhost')),
       ),
       ChangeNotifierProvider<TerrariumProvider>(
-        create: (_) => TerrariumProvider(ApiClient(baseUrl: 'http://localhost')),
+        create: (_) =>
+            TerrariumProvider(terrariumApi ?? ApiClient(baseUrl: 'http://localhost')),
       ),
       ChangeNotifierProvider<SpeciesProfileProvider>(
         create: (_) => SpeciesProfileProvider(
@@ -232,6 +233,50 @@ void main() {
       find.text('Quản trị'),
       findsNothing,
       reason: 'a signed-out session holds no code, so the tab would lead to a dead screen',
+    );
+  });
+
+  testWidgets('a resumed app reads the terrarium list again', (tester) async {
+    await useLocale('vi', permissions: [Permissions.dataReadAny]);
+    useTallSurface(tester);
+
+    var listReads = 0;
+    final api = ApiClient(
+      baseUrl: 'http://localhost',
+      httpClient: MockClient((request) async {
+        final isTerrariumList = request.url.path == '/api/v1/terrariums';
+        if (isTerrariumList) listReads++;
+        return http.Response(
+          jsonEncode(isTerrariumList ? {'items': <Object>[]} : <String, Object>{}),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    await tester.pumpWidget(app(terrariumApi: api));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Terrarium'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final opened = listReads;
+    expect(opened, greaterThan(0), reason: 'opening the tab reads the caller\'s enclosures');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(
+      listReads,
+      opened + 1,
+      reason: 'an enclosure given to this account from another role only shows after a new read, so a resumed app '
+          're-asks instead of keeping the list it left behind',
     );
   });
 
