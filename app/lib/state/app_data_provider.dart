@@ -195,11 +195,13 @@ class AppDataProvider extends ChangeNotifier {
           }
           _isLive = true;
 
-          // Hydrate readings, thresholds, and 24h history for all loaded terrariums in background
+          // Hydrate readings, thresholds, and 24h history for all loaded terrariums
+          final hydration = <Future<void>>[];
           for (final t in _terrariums) {
-            fetchLatestReadings(t.id).then((_) => fetchHistory(t.id));
-            fetchThresholds(t.id);
+            hydration.add(fetchLatestReadings(t.id).then((_) => fetchHistory(t.id)));
+            hydration.add(fetchThresholds(t.id));
           }
+          await Future.wait(hydration);
         }
       }
     } catch (_) {

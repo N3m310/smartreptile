@@ -134,8 +134,6 @@ void main() {
 
       final appData = AppDataProvider(api: api);
       await appData.loadAll();
-      // Wait for background hydration (fetchLatestReadings -> fetchHistory)
-      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       await tester.pumpWidget(
         ChangeNotifierProvider<AppDataProvider>.value(
@@ -143,7 +141,8 @@ void main() {
           child: const MaterialApp(home: DashboardScreen()),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(appData.currentHistory.length, 2);
       expect(appData.currentHistory[0].temperature, 29.5);

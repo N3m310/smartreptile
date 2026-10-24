@@ -24,11 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final data = context.read<AppDataProvider>();
-      if (data.isLive) {
-        data.fetchLatestReadings(data.selectedTerrariumId).then((_) {
-          if (mounted) data.fetchHistory(data.selectedTerrariumId);
-        });
-      } else {
+      if (!data.isLive && !data.isLoading) {
         data.loadAll();
       }
     });
