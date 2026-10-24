@@ -323,7 +323,7 @@ public static class DeviceEndpoints
         var status = problem.Code switch
         {
             "rate_limited" => StatusCodes.Status429TooManyRequests,
-            "registration_invalid" or "move_invalid" => StatusCodes.Status400BadRequest,
+            "registration_invalid" or "move_invalid" or "claim_invalid" => StatusCodes.Status400BadRequest,
             "device_already_registered" or "terrarium_already_bound" or "device_revoked" or "device_not_claimed"
                 => StatusCodes.Status409Conflict,
             _ => StatusCodes.Status404NotFound,
