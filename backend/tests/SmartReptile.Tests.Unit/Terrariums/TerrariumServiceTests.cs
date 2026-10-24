@@ -1686,6 +1686,7 @@ public class TerrariumServiceTests
             CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.OwnerUserId.Should().BeNull("an ordinary keeper's answer carries no owner block");
         _store.AuditEntries.Should().BeEmpty("the trail records the administrator's cross-account actions, not the "
                                            + "ordinary edit a keeper makes to their own terrarium");
     }
@@ -1727,6 +1728,11 @@ public class TerrariumServiceTests
 
         outcome.Succeeded.Should().BeTrue();
         terrarium.UserId.Should().Be(keeper);
+
+        // The answer names the owner, exactly as the detail read does: an assignment that answered without it would
+        // leave the administrator's screen saying the enclosure belongs to nobody (2026-10-24).
+        outcome.Terrarium!.OwnerUserId.Should().Be(keeper);
+        outcome.Terrarium.OwnerEmail.Should().Be("keeper@example.test");
 
         // Its own verb: "whose enclosure is this" changing hands is exactly what a later reader asks about.
         var entry = _store.AuditEntries.Should().ContainSingle().Subject;

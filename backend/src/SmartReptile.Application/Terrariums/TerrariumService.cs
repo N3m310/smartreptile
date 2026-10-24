@@ -723,7 +723,16 @@ public sealed class TerrariumService(
         var updated = await store.FindAnyAsync(terrariumId, cancellationToken) ?? terrarium;
         var activity = await store.SummariseActivityAsync([terrariumId], cancellationToken);
 
-        return TerrariumOutcome.Found(Summarise(updated, activity), updated.RowVersion);
+        // The answer names the owner on the same terms as the detail read: a cross-account caller is the one who
+        // learns whose enclosure it now is, and an assignment that answers without it would leave the administrator's
+        // screen saying the enclosure belongs to nobody (2026-10-24).
+        var owners = mayReachAnyAccount && updated.UserId is { } updatedOwnerId
+            ? await store.AccountEmailsAsync([updatedOwnerId], cancellationToken)
+            : EmptyOwners;
+
+        return TerrariumOutcome.Found(
+            Summarise(updated, activity, mayReachAnyAccount, OwnerEmailOf(updated, owners)),
+            updated.RowVersion);
     }
 
     /// <summary>
