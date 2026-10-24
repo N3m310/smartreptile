@@ -347,7 +347,7 @@ takes effect within one 15-minute access-token lifetime.
 | GET | `/terrariums` | `terrarium.read` | list with device status summary; `?speciesProfileId=` narrows it to one profile's enclosures |
 | POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound. `data.write.any` creates an **unowned** enclosure (`ownerUserId`/`ownerEmail` null) — assign it on `PATCH` |
 | GET | `/terrariums/{id}` | `terrarium.read` (member) | includes `device`, `openAlertCount`, `latestSampleAt`, `rowVersion` |
-| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed` |
+| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed`; the answer then names the owner (with `ownerEmail`) |
 | DELETE | `/terrariums/{id}` | `terrarium.write` | soft delete; requires `?allowUnboundDevice=true` when a device is bound → else `409 conflict_device_bound` |
 | GET | `/terrariums/{id}/thresholds` | `terrarium.read` | returns `effectiveThresholds[]` with `source` |
 | PUT | `/terrariums/{id}/thresholds` | `terrarium.write` | upsert overrides; validates band ordering |
@@ -505,9 +505,11 @@ this date, stated here because they are contract rather than implementation:
   and both threshold writes. Since 2026-10-17 that is expressed as permissions rather than a composite policy: the
   routes name `terrarium.read`/`terrarium.write` like every other caller's, and the *service* widens the answer for
   an account holding `data.read.any`/`data.write.any`
-  (`TerrariumService.IsMemberAsync(..., mayReachAnyAccount)`). An administrator's list and detail answers carry
-  `ownerUserId` **and** `ownerEmail` — the id is what the client keys on, the address is what it can show, because an
-  id alone does not say whose enclosure it is (2026-10-23). An ordinary caller's answers never carry either. A
+  (`TerrariumService.IsMemberAsync(..., mayReachAnyAccount)`). An administrator's list, detail **and update**
+  answers carry `ownerUserId` **and** `ownerEmail` — the id is what the client keys on, the address is what it can
+  show, because an id alone does not say whose enclosure it is (2026-10-23). The update answer carries them because
+  it is the reply to the assignment itself: without them the screen that just gave the enclosure away would read
+  "belongs to nobody" until it was read again (2026-10-24). An ordinary caller's answers never carry either. A
   cross-account `PATCH` or `DELETE` writes an audit row (`terrarium.updated`, `terrarium.deleted`) with the
   administrator as the actor and the owner in the payload — the ordinary owner edit stays unaudited, as it was.
 

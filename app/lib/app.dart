@@ -16,6 +16,7 @@ import 'screens/species_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
+import 'state/terrarium_provider.dart';
 import 'theme/app_theme.dart';
 import 'widgets/mock_data_notice.dart';
 
@@ -72,8 +73,33 @@ class _RootShell extends StatefulWidget {
   State<_RootShell> createState() => _RootShellState();
 }
 
-class _RootShellState extends State<_RootShell> {
+class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Re-reads the deployment's data when the app comes back to the foreground.
+  ///
+  /// Ownership is shared: an administrator can give an enclosure to another account, a keeper can claim a board, an
+  /// alert can be acknowledged from the web. None of that reaches a screen that is already built, so a resumed app
+  /// asks again instead of showing what it left behind.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!mounted || !context.read<SessionProvider>().isSignedIn) return;
+    context.read<AppDataProvider>().loadAll();
+    context.read<TerrariumProvider>().loadTerrariums();
+  }
 
   @override
   Widget build(BuildContext context) {

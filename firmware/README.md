@@ -11,6 +11,7 @@ Monitoring only: the node reads sensors, filters, buffers and publishes. It hold
 | `include/sr_config.h` | Pin map, intervals, payload budget, plausibility bounds (prefixed `sr_` so the ESP32 framework's own `config.h` cannot shadow it). Quality-flag names live in `lib/firmware_core/payload.h` instead, so firmware and tests share one definition |
 | `lib/firmware_core/` | Pure C++ with no Arduino headers: `filters`, `ring_buffer`, `payload` — the host-tested part |
 | `src/main.cpp` | M1 skeleton: boot logging, status LED, 1 Hz tick, ring-buffer writes. Sensor drivers and transport land in M2 |
+| `arduino/esp32_smartreptile/` | Standalone Arduino sketch for the demo board (DHT11 + LM35 + BH1750); Wi-Fi and device secret are entered over serial and stored in NVS — see `arduino/README.md` |
 | `test/` | Unity tests for the native environment |
 
 ## Commands
