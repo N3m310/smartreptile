@@ -26,6 +26,7 @@ class AppDataProvider extends ChangeNotifier {
 
   List<Map<String, dynamic>> _speciesProfiles = [];
   List<Map<String, dynamic>> _timeZones = [];
+  final Map<String, List<HistoryPoint>> _historyByTerrarium = {};
 
   List<TerrariumModel> get terrariums => _terrariums;
   List<DeviceModel> get devices => _devices;
@@ -54,15 +55,74 @@ class AppDataProvider extends ChangeNotifier {
 
   int get onlineDevicesCount => _devices.where((d) => d.isOnline).length;
 
-  List<HistoryPoint> get currentHistory =>
-      generateMockHistory(_selectedTerrariumId);
+  List<HistoryPoint> get currentHistory => historyFor(_selectedTerrariumId);
 
-  List<HistoryPoint> historyFor(String terrariumId) =>
-      generateMockHistory(terrariumId);
+  List<HistoryPoint> historyFor(String terrariumId) {
+    if (_isLive) {
+      final stored = _historyByTerrarium[terrariumId];
+      if (stored != null && stored.isNotEmpty) {
+        return stored;
+      }
+      return _fallbackLiveHistory(terrariumId);
+    }
+    return generateMockHistory(terrariumId);
+  }
+
+  String _pointStatus(
+    TerrariumModel terrarium,
+    double temp,
+    double hum,
+    int light,
+  ) {
+    final th = terrarium.thresholds;
+    if (temp < th.tempMin || temp > th.tempMax) return 'danger';
+    if (hum < th.humidityMin || hum > th.humidityMax) return 'warning';
+    if (light < th.lightMin || light > th.lightMax) return 'warning';
+    return 'normal';
+  }
+
+  List<HistoryPoint> _fallbackLiveHistory(String terrariumId) {
+    final terrarium = _terrariums.firstWhere(
+      (t) => t.id == terrariumId,
+      orElse: () => _terrariums.first,
+    );
+    final now = DateTime.now();
+    final prev = now.subtract(const Duration(hours: 1));
+    final prevLabel =
+        '${prev.hour.toString().padLeft(2, '0')}:${prev.minute.toString().padLeft(2, '0')}';
+    final nowLabel =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final st = _pointStatus(
+      terrarium,
+      terrarium.currentTemp,
+      terrarium.currentHumidity,
+      terrarium.currentLight,
+    );
+    return [
+      HistoryPoint(
+        time: prevLabel,
+        temperature: terrarium.currentTemp,
+        humidity: terrarium.currentHumidity,
+        light: terrarium.currentLight,
+        status: st,
+      ),
+      HistoryPoint(
+        time: nowLabel,
+        temperature: terrarium.currentTemp,
+        humidity: terrarium.currentHumidity,
+        light: terrarium.currentLight,
+        status: st,
+      ),
+    ];
+  }
 
   void selectTerrarium(String id) {
     if (_selectedTerrariumId != id) {
       _selectedTerrariumId = id;
+      if (_isLive) {
+        fetchLatestReadings(id).then((_) => fetchHistory(id));
+        fetchThresholds(id);
+      }
       notifyListeners();
     }
   }
@@ -72,6 +132,7 @@ class AppDataProvider extends ChangeNotifier {
     _terrariums = List.from(mockTerrariums);
     _devices = List.from(mockDevices);
     _alerts = List.from(mockAlerts);
+    _historyByTerrarium.clear();
     _selectedTerrariumId = _terrariums.first.id;
     _isLive = false;
     _errorMessage = null;
@@ -134,16 +195,153 @@ class AppDataProvider extends ChangeNotifier {
           }
           _isLive = true;
 
-          // Hydrate readings and thresholds for all loaded terrariums in background
+          // Hydrate readings, thresholds, and 24h history for all loaded terrariums
+          final hydration = <Future<void>>[];
           for (final t in _terrariums) {
-            fetchLatestReadings(t.id);
-            fetchThresholds(t.id);
+            hydration.add(fetchLatestReadings(t.id).then((_) => fetchHistory(t.id)));
+            hydration.add(fetchThresholds(t.id));
           }
+          await Future.wait(hydration);
         }
       }
     } catch (_) {
       // Retain existing state on failure
     }
+  }
+
+  /// GET /api/v1/terrariums/{id}/readings (24h history for tempC, humidityPct, lightLux)
+  Future<void> fetchHistory(String terrariumId) async {
+    final client = _api;
+    if (client == null || client.accessToken == null) return;
+
+    try {
+      final to = DateTime.now().toUtc();
+      final from = to.subtract(const Duration(hours: 24));
+      final fromStr = from.toIso8601String();
+      final toStr = to.toIso8601String();
+
+      Future<List<Map<String, dynamic>>> loadMetric(String metric) async {
+        try {
+          final query = ApiClient.query({
+            'metric': metric,
+            'from': fromStr,
+            'to': toStr,
+          });
+          final res = await client.getJson('/api/v1/terrariums/$terrariumId/readings$query');
+          final pts = res['points'];
+          if (pts is List) {
+            return pts.whereType<Map<String, dynamic>>().toList();
+          }
+        } catch (_) {}
+        return const [];
+      }
+
+      final results = await Future.wait([
+        loadMetric('tempC'),
+        loadMetric('humidityPct'),
+        loadMetric('lightLux'),
+      ]);
+
+      final tempPts = results[0];
+      final humPts = results[1];
+      final lightPts = results[2];
+
+      final maxLen = [tempPts.length, humPts.length, lightPts.length]
+          .reduce((a, b) => a > b ? a : b);
+
+      final terrarium = _terrariums.firstWhere(
+        (t) => t.id == terrariumId,
+        orElse: () => _terrariums.first,
+      );
+
+      double lastTemp = terrarium.currentTemp;
+      double lastHum = terrarium.currentHumidity;
+      int lastLight = terrarium.currentLight;
+
+      for (final p in tempPts) {
+        if (p['avg'] is num) {
+          lastTemp = double.parse((p['avg'] as num).toStringAsFixed(1));
+          break;
+        }
+      }
+      for (final p in humPts) {
+        if (p['avg'] is num) {
+          lastHum = double.parse((p['avg'] as num).toStringAsFixed(1));
+          break;
+        }
+      }
+      for (final p in lightPts) {
+        if (p['avg'] is num) {
+          lastLight = (p['avg'] as num).round();
+          break;
+        }
+      }
+
+      final validPoints = <HistoryPoint>[];
+      for (int i = 0; i < maxLen; i++) {
+        final tVal = (i < tempPts.length && tempPts[i]['avg'] is num)
+            ? (tempPts[i]['avg'] as num).toDouble()
+            : null;
+        final hVal = (i < humPts.length && humPts[i]['avg'] is num)
+            ? (humPts[i]['avg'] as num).toDouble()
+            : null;
+        final lVal = (i < lightPts.length && lightPts[i]['avg'] is num)
+            ? (lightPts[i]['avg'] as num).round()
+            : null;
+
+        if (tVal != null || hVal != null || lVal != null) {
+          if (tVal != null) lastTemp = double.parse(tVal.toStringAsFixed(1));
+          if (hVal != null) lastHum = double.parse(hVal.toStringAsFixed(1));
+          if (lVal != null) lastLight = lVal;
+
+          final rawTime = (i < tempPts.length ? tempPts[i]['t'] : null) ??
+              (i < humPts.length ? humPts[i]['t'] : null) ??
+              (i < lightPts.length ? lightPts[i]['t'] : null);
+          final dt = rawTime != null ? DateTime.tryParse(rawTime.toString())?.toLocal() : null;
+          final timeLabel = dt != null
+              ? '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}'
+              : '${i.toString().padLeft(2, '0')}:00';
+
+          validPoints.add(
+            HistoryPoint(
+              time: timeLabel,
+              temperature: lastTemp,
+              humidity: lastHum,
+              light: lastLight,
+              status: _pointStatus(terrarium, lastTemp, lastHum, lastLight),
+            ),
+          );
+        }
+      }
+
+      if (validPoints.isEmpty) {
+        _historyByTerrarium.remove(terrariumId);
+      } else if (validPoints.length == 1) {
+        final only = validPoints.first;
+        _historyByTerrarium[terrariumId] = [
+          HistoryPoint(
+            time: 'Trước',
+            temperature: only.temperature,
+            humidity: only.humidity,
+            light: only.light,
+            status: only.status,
+          ),
+          only,
+        ];
+      } else if (validPoints.length > 24) {
+        final sampled = <HistoryPoint>[];
+        final step = (validPoints.length - 1) / 23.0;
+        for (int i = 0; i < 24; i++) {
+          final idx = (i * step).round().clamp(0, validPoints.length - 1);
+          sampled.add(validPoints[idx]);
+        }
+        _historyByTerrarium[terrariumId] = sampled;
+      } else {
+        _historyByTerrarium[terrariumId] = validPoints;
+      }
+
+      notifyListeners();
+    } catch (_) {}
   }
 
   /// GET /api/v1/terrariums/{id}/thresholds
