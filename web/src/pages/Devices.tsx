@@ -25,6 +25,7 @@ export const Devices: React.FC = () => {
   const [publishIntervalSec, setPublishIntervalSec] = useState(60);
   const [claimCode, setClaimCode] = useState('');
   const [claimMode, setClaimMode] = useState<'code' | 'mac'>('code');
+  const [claimDeviceName, setClaimDeviceName] = useState('');
   const [macAddress, setMacAddress] = useState('');
   const [macError, setMacError] = useState<string | null>(null);
   const [terrariumId, setTerrariumId] = useState('');
@@ -117,13 +118,18 @@ export const Devices: React.FC = () => {
     }
 
     if (!(byMac ? macAddress.trim() : claimCode.trim()) || !terrariumId) return;
+
+    // Sent only when the keeper typed one: an omitted name keeps whatever the board already carries.
+    const deviceName = claimDeviceName.trim() ? claimDeviceName.trim() : undefined;
+
     await runAction(async () => {
       const result = byMac
-        ? await api.claimDeviceByMac({ macAddress: macAddress.trim(), terrariumId })
-        : await api.claimDevice({ claimCode: claimCode.trim(), terrariumId });
+        ? await api.claimDeviceByMac({ macAddress: macAddress.trim(), terrariumId, deviceName })
+        : await api.claimDevice({ claimCode: claimCode.trim(), terrariumId, deviceName });
       setSecret(result.secret);
       setClaimCode('');
       setMacAddress('');
+      setClaimDeviceName('');
       devices.reload();
     }, false);
   };
@@ -226,6 +232,10 @@ export const Devices: React.FC = () => {
               <option value="">Chọn bể nuôi</option>
               {(terrariums.data?.items ?? []).map((terrarium) => <option key={terrarium.id} value={terrarium.id}>{terrarium.name}</option>)}
             </select>
+          </label>
+          <label className="text-xs font-medium text-muted sm:col-span-2">
+            Tên thiết bị (không bắt buộc)
+            <input maxLength={60} value={claimDeviceName} onChange={(event) => setClaimDeviceName(event.target.value)} className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" placeholder="VD: Node bể gecko" />
           </label>
           <button disabled={busy || !terrariumId} className="self-end rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Nhận thiết bị</button>
           {terrariums.error && <p className="text-xs text-critical sm:col-span-3">{describeError(t, terrariums.error)}</p>}

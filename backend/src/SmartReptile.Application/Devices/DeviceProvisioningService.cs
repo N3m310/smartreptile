@@ -159,7 +159,9 @@ public sealed class DeviceProvisioningService(
                 "That claim code is not valid. Check the code shown on the device and try again.");
         }
 
-        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodCode, cancellationToken, mayReachAnyAccount);
+        return await BindAsync(
+            device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodCode, cancellationToken,
+            mayReachAnyAccount, request.DeviceName);
     }
 
     /// <summary>
@@ -224,7 +226,9 @@ public sealed class DeviceProvisioningService(
                 "This device is already bound to another terrarium or revoked.");
         }
 
-        return await BindAsync(device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodMac, cancellationToken, mayReachAnyAccount);
+        return await BindAsync(
+            device, request.TerrariumId, ownerUserId, actor, now, ClaimMethodMac, cancellationToken,
+            mayReachAnyAccount, request.DeviceName);
     }
 
     /// <summary>
@@ -243,6 +247,7 @@ public sealed class DeviceProvisioningService(
     /// <param name="method">Which identification path was used, recorded on the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="mayReachAnyAccount">Whether caller has permissions across all accounts.</param>
+    /// <param name="deviceName">Name to give the board in the same request; omitted or empty keeps the current one.</param>
     private async Task<DeviceOutcome> BindAsync(
         Device device,
         Guid terrariumId,
@@ -251,8 +256,24 @@ public sealed class DeviceProvisioningService(
         DateTimeOffset now,
         string method,
         CancellationToken cancellationToken,
-        bool mayReachAnyAccount = false)
+        bool mayReachAnyAccount = false,
+        string? deviceName = null)
     {
+        var violations = new List<IdentityViolation>();
+        var name = NormaliseDeviceName(deviceName, violations);
+
+        if (violations.Count > 0)
+        {
+            // Refused before anything is written, so a bad name cannot leave a board claimed with the label the
+            // caller did not want (2026-10-23).
+            return DeviceOutcome.Invalid("claim_invalid", "The claim was refused.", violations);
+        }
+
+        if (name is not null)
+        {
+            device.DeviceName = name;
+        }
+
         var terrarium = await store.FindOwnedTerrariumAsync(terrariumId, ownerUserId, cancellationToken, mayReachAnyAccount);
 
         if (terrarium is null)
@@ -769,6 +790,42 @@ public sealed class DeviceProvisioningService(
         await sessions.KickAsync(device.PublicId, "device_revoked", cancellationToken);
     }
 
+    /// <summary>
+    /// Normalises a caller-supplied board name: null when it was omitted (leave whatever is there), the default
+    /// label when it was blank, and the trimmed value otherwise. A name longer than the column is a violation rather
+    /// than a silent truncation.
+    /// </summary>
+    /// <param name="candidate">Name as it arrived, or null when the field was absent.</param>
+    /// <param name="violations">Collects the refusal, when there is one.</param>
+    private static string? NormaliseDeviceName(string? candidate, List<IdentityViolation> violations)
+    {
+        if (candidate is null)
+        {
+            return null;
+        }
+
+        var name = candidate.Trim();
+
+        if (name.Length == 0)
+        {
+            // An empty name would leave the fleet screen with a blank row; the default label is the honest value for
+            // "no name given".
+            return DefaultDeviceName;
+        }
+
+        if (name.Length > DeviceLimits.NameMaxLength)
+        {
+            violations.Add(new IdentityViolation(
+                "deviceName",
+                "device_name_too_long",
+                $"A name may be at most {DeviceLimits.NameMaxLength} characters."));
+
+            return null;
+        }
+
+        return name;
+    }
+
     /// <summary>The label a board carries until its owner renames it.</summary>
     private const string DefaultDeviceName = "New node";
 
@@ -896,23 +953,7 @@ public sealed class DeviceProvisioningService(
 
         var violations = new List<IdentityViolation>();
 
-        var name = request.DeviceName?.Trim();
-        if (request.DeviceName is not null)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                // An empty name would leave the fleet screen with a blank row; the default label is the honest value
-                // for "no name given".
-                name = DefaultDeviceName;
-            }
-            else if (name.Length > DeviceLimits.NameMaxLength)
-            {
-                violations.Add(new IdentityViolation(
-                    "deviceName",
-                    "device_name_too_long",
-                    $"A name may be at most {DeviceLimits.NameMaxLength} characters."));
-            }
-        }
+        var name = NormaliseDeviceName(request.DeviceName, violations);
 
         ValidateInterval(request.SamplingIntervalSec, "samplingIntervalSec", violations);
         ValidateInterval(request.PublishIntervalSec, "publishIntervalSec", violations);
