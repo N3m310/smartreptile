@@ -44,7 +44,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
   // ================= FORM DIALOG: TẠO MỚI / CHỈNH SỬA =================
   Future<void> _openSpeciesFormDialog({SpeciesProfileView? existing}) async {
     final isEditing = existing != null;
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final nameCtrl = TextEditingController(
+      text: existing != null
+          ? SpeciesLocalization.displayName(existing.name)
+          : '',
+    );
     final sciNameCtrl = TextEditingController(
       text: existing?.scientificName ?? '',
     );
@@ -720,7 +724,19 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
               style: TextStyle(color: AppColors.textMuted),
             ),
           ),
-          if (canManage)
+          if (canManage) ...[
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.edit, size: 16),
+              label: const Text('Tùy chỉnh'),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openSpeciesFormDialog(existing: item);
+              },
+            ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orangeAccent,
@@ -733,6 +749,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                 _openDuplicateDialog(item);
               },
             ),
+          ],
         ],
       ),
     );
@@ -1355,34 +1372,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                         ),
                                       ),
 
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 7,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: item.isBuiltIn
-                                              ? Colors.white10
-                                              : AppColors.primary.withValues(
-                                                  alpha: 0.2,
-                                                ),
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          item.isBuiltIn
-                                              ? 'Mặc định'
-                                              : 'Tùy chỉnh',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w600,
-                                            color: item.isBuiltIn
-                                                ? AppColors.textMuted
-                                                : AppColors.primary,
-                                          ),
-                                        ),
-                                      ),
+                                      // Badge "Mặc định" / "Tùy chỉnh" phía trên đã được ẩn theo yêu cầu
                                     ],
                                   ),
 
@@ -1510,8 +1500,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                               _openDuplicateDialog(item),
                                         ),
 
-                                        if (!item.isBuiltIn) ...[
-                                          const SizedBox(width: 6),
+                                        const SizedBox(width: 6),
                                           TextButton.icon(
                                             style: TextButton.styleFrom(
                                               foregroundColor:
@@ -1540,16 +1529,26 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                 ),
                                           ),
                                           const SizedBox(width: 6),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.redAccent,
-                                              size: 18,
+                                          TextButton.icon(
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.redAccent,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
                                             ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            tooltip: 'Xóa hồ sơ',
-                                            onPressed: () async {
+                                            minimumSize: Size.zero,
+                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.redAccent,
+                                            size: 14,
+                                          ),
+                                          label: const Text(
+                                            'Xóa',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                          onPressed: () async {
                                               final confirm = await showDialog<bool>(
                                                 context: context,
                                                 builder: (ctx) => AlertDialog(
@@ -1618,8 +1617,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                 }
                                               }
                                             },
-                                          ),
-                                        ],
+                                          
+                                        )
                                       ],
                                     ],
                                   ),

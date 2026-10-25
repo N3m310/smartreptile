@@ -329,7 +329,7 @@ public static class DeviceEndpoints
             "rate_limited" => StatusCodes.Status429TooManyRequests,
             "registration_invalid" or "move_invalid" or "claim_invalid" => StatusCodes.Status400BadRequest,
             "device_already_registered" or "terrarium_already_bound" or "device_revoked" or "device_not_claimed"
-                or "device_has_history" => StatusCodes.Status409Conflict,
+                or "device_has_history" or "device_already_bound" => StatusCodes.Status409Conflict,
             _ => StatusCodes.Status404NotFound,
         };
 
