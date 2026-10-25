@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:smart_reptile/core/permissions.dart';
 import 'package:smart_reptile/data/api_client.dart';
 import 'package:smart_reptile/data/token_store.dart';
+import 'package:smart_reptile/models/terrarium_models.dart';
 import 'package:smart_reptile/screens/alerts_screen.dart';
 import 'package:smart_reptile/state/app_data_provider.dart';
 import 'package:smart_reptile/state/session_provider.dart';
