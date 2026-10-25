@@ -113,14 +113,16 @@ public static class AlertEndpoints
             var outcome = await service.GetAsync(
                 alertId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Alert) : Problem(outcome.Problem!);
         })
         .WithSummary("One alert with an excerpt of its values")
         .WithDescription("Carries the band that was in force and up to 240 of the newest readings of the episode, "
                        + "oldest first, with `seriesTruncated` when the episode was longer than the excerpt. A "
-                       + "device-level alert (silence, sensor fault, clock skew) has no series to carry.");
+                       + "device-level alert (silence, sensor fault, clock skew) has no series to carry. An "
+                       + "administrator (`data.read.any`) may open any account's alert.");
 
         alerts.MapGet("/{alertId:long}/timeline", async (
             long alertId,
@@ -131,7 +133,8 @@ public static class AlertEndpoints
             var outcome = await service.TimelineAsync(
                 alertId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(new { items = outcome.Timeline }) : Problem(outcome.Problem!);
         })
@@ -151,14 +154,17 @@ public static class AlertEndpoints
                 alertId,
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Changed) : Problem(outcome.Problem!);
         })
         .RequireAuthorization(Permissions.AlertWrite)
         .WithSummary("Acknowledge an alert")
         .WithDescription("Requires `alert.write`. Acknowledging takes ownership without closing the "
-                       + "alert; an alert that is already acknowledged or resolved answers `409 alert_not_open`.");
+                       + "alert; an alert that is already acknowledged or resolved answers `409 alert_not_open`. An "
+                       + "administrator (`data.write.any`) may acknowledge another account's alert, and the audit "
+                       + "row then names the administrator as the actor.");
 
         alerts.MapPost("/{alertId:long}/resolve", async (
             long alertId,
@@ -173,7 +179,8 @@ public static class AlertEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 request,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Changed) : Problem(outcome.Problem!);
         })
@@ -182,7 +189,8 @@ public static class AlertEndpoints
         .WithDescription("Requires `alert.write`. `reason` is one of `Recovered`, `FalsePositive`, "
                        + "`SensorFault` or `Accepted`; an optional `note` is kept on the alert's audit entry. A "
                        + "resolved alert answers `409 alert_not_open`, and a threshold alert cannot re-open until "
-                       + "its band is left for the dwell again.");
+                       + "its band is left for the dwell again. An administrator (`data.write.any`) may resolve "
+                       + "another account's alert; the dwell key it re-arms belongs to that other enclosure.");
 
         // The silences belong to a terrarium (the contract files them under §4.2), so they are mapped into that
         // prefix while living with the alerts they suppress. The group reads with `alert.read`; the two writes name

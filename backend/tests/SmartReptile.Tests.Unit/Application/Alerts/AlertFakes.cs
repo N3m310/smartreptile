@@ -100,6 +100,11 @@ internal sealed class FakeAlertStore : IAlertStore
     }
 
     /// <inheritdoc />
+    /// <remarks>The unscoped lookup: any alert, whoever's enclosure it belongs to.</remarks>
+    public Task<AlertRecord?> FindAnyAsync(long alertId, CancellationToken cancellationToken) =>
+        Task.FromResult(Alerts.FirstOrDefault(record => record.Alert.Id == alertId));
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<AlertSeriesPoint>> ReadEpisodeSeriesAsync(
         Guid terrariumId,
         MetricCode metric,

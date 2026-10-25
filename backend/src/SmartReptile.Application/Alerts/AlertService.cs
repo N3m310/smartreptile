@@ -18,9 +18,12 @@ namespace SmartReptile.Application.Alerts;
 /// dispatcher's (3.5). That split is why every write here is one row plus one audit entry: an alert's <em>content</em>
 /// is never edited by a human, only its ownership and its end.
 /// <para>
-/// <b>Scoping.</b> Every read and every write goes through <see cref="IAlertStore.FindOwnedAsync"/>, which answers
+/// <b>Scoping.</b> Every read and every write goes through <see cref="AlertService.LocateAsync"/>, which answers
 /// null for an alert of somebody else's terrarium exactly as it does for one that does not exist. Callers therefore
 /// get one answer — <c>404 not_found</c> — and cannot use the routes to learn which alert ids exist (BR-02.2).
+/// Since 2026-10-25 that scope widens for an account holding <c>data.read.any</c>/<c>data.write.any</c>: the
+/// administrator may open, acknowledge and resolve any account's alert, which is what makes the rows its audit list
+/// already shows actionable rather than merely visible.
 /// </para>
 /// <para>
 /// <b>Resolution re-arms the dwell key.</b> Closing a threshold alert clears the excursion window its
@@ -83,9 +86,18 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
     /// <param name="alertId">Alert identity.</param>
     /// <param name="userId">Signed-in account.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task<AlertOutcome> GetAsync(long alertId, Guid userId, CancellationToken cancellationToken)
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account read permission, which may open any account's alert (2026-10-25).
+    /// The administrator's audit list already names those rows; a row that cannot be opened is a row that cannot be
+    /// acted on, so the detail and the timeline take the same widening as the two writes.
+    /// </param>
+    public async Task<AlertOutcome> GetAsync(
+        long alertId,
+        Guid userId,
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var record = await store.FindOwnedAsync(alertId, userId, cancellationToken).ConfigureAwait(false);
+        var record = await LocateAsync(alertId, userId, mayReachAnyAccount, cancellationToken).ConfigureAwait(false);
 
         if (record is null)
         {
@@ -137,9 +149,14 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
     /// <param name="alertId">Alert identity.</param>
     /// <param name="userId">Signed-in account.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task<AlertOutcome> TimelineAsync(long alertId, Guid userId, CancellationToken cancellationToken)
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account read permission (2026-10-25).</param>
+    public async Task<AlertOutcome> TimelineAsync(
+        long alertId,
+        Guid userId,
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var record = await store.FindOwnedAsync(alertId, userId, cancellationToken).ConfigureAwait(false);
+        var record = await LocateAsync(alertId, userId, mayReachAnyAccount, cancellationToken).ConfigureAwait(false);
 
         if (record is null)
         {
@@ -198,13 +215,19 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
     /// <param name="userId">Signed-in account; also the actor recorded.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account write permission, so may acknowledge another account's alert
+    /// (2026-10-25). The audit row then names the caller as the actor, which is the whole record of "an administrator
+    /// took ownership of a keeper's incident".
+    /// </param>
     public async Task<AlertOutcome> AcknowledgeAsync(
         long alertId,
         Guid userId,
         AuditActor actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        var record = await store.FindOwnedAsync(alertId, userId, cancellationToken).ConfigureAwait(false);
+        var record = await LocateAsync(alertId, userId, mayReachAnyAccount, cancellationToken).ConfigureAwait(false);
 
         if (record is null)
         {
@@ -244,12 +267,18 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
     /// <param name="request">Reason and note as the caller sent them.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account write permission, so may close another account's alert
+    /// (2026-10-25). The dwell key it re-arms belongs to that other account's enclosure, which is the point: the
+    /// excursion is re-armed wherever it lives, not only where the caller's own enclosures are.
+    /// </param>
     public async Task<AlertOutcome> ResolveAsync(
         long alertId,
         Guid userId,
         ResolveAlertRequest request,
         AuditActor actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -279,7 +308,7 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
                     $"A note may be at most {ResolveNoteMaxLength} characters.")]));
         }
 
-        var record = await store.FindOwnedAsync(alertId, userId, cancellationToken).ConfigureAwait(false);
+        var record = await LocateAsync(alertId, userId, mayReachAnyAccount, cancellationToken).ConfigureAwait(false);
 
         if (record is null)
         {
@@ -318,6 +347,30 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
 
         return new AlertOutcome { Changed = Describe(record) };
     }
+
+    /// <summary>
+    /// The alert a request is about, from the scope the caller is allowed to see.
+    /// </summary>
+    /// <remarks>
+    /// Two scopes, one answer. An ordinary keeper asks for their own alerts only, so an alert of somebody else's
+    /// enclosure answers <c>null</c> — which the routes turn into <c>404</c>, and which is why those ids cannot be
+    /// probed (BR-02.2). An account holding the cross-account permission asks for any account's alert, because the
+    /// administrator's audit list already names those rows and a row that cannot be opened cannot be acted on
+    /// (2026-10-25). Both scopes keep the join that applies the soft-delete filter, so an alert of a deleted
+    /// enclosure stays a historical record for everybody.
+    /// </remarks>
+    /// <param name="alertId">Alert identity.</param>
+    /// <param name="userId">Signed-in caller.</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    private Task<AlertRecord?> LocateAsync(
+        long alertId,
+        Guid userId,
+        bool mayReachAnyAccount,
+        CancellationToken cancellationToken) =>
+        mayReachAnyAccount
+            ? store.FindAnyAsync(alertId, cancellationToken)
+            : store.FindOwnedAsync(alertId, userId, cancellationToken);
 
     /// <summary>
     /// Pushes committed moves, and treats a failed push as a lost push rather than a failed request.

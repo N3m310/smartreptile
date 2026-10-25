@@ -155,6 +155,74 @@ public class AlertServiceTests
     }
 
     [Fact]
+    public async Task An_administrator_may_acknowledge_and_resolve_another_accounts_alert()
+    {
+        var alert = Add(812);
+        var administrator = Guid.NewGuid();
+
+        var acknowledged = await _service.AcknowledgeAsync(
+            alert.Id,
+            administrator,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        acknowledged.Succeeded.Should().BeTrue();
+        alert.State.Should().Be(AlertState.Acknowledged);
+        alert.AcknowledgedByUserId.Should().Be(administrator, "the audit names the account that acted");
+        _store.AuditEntries.Should().ContainSingle().Which.UserId.Should().Be(administrator);
+
+        var resolved = await _service.ResolveAsync(
+            alert.Id,
+            administrator,
+            new ResolveAlertRequest(nameof(ResolvedReason.Accepted), "Checked on site"),
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        resolved.Succeeded.Should().BeTrue();
+        alert.State.Should().Be(AlertState.Resolved);
+        alert.ResolvedByUserId.Should().Be(administrator);
+        _store.AuditEntries.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task The_wide_scope_still_reads_the_detail_and_the_timeline_of_another_accounts_alert()
+    {
+        var alert = Add(812);
+
+        var detail = await _service.GetAsync(alert.Id, Guid.NewGuid(), CancellationToken.None, mayReachAnyAccount: true);
+        var timeline = await _service.TimelineAsync(
+            alert.Id,
+            Guid.NewGuid(),
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        detail.Succeeded.Should().BeTrue();
+        detail.Alert!.Alert.Id.Should().Be(alert.Id);
+        timeline.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task The_wide_scope_does_not_widen_the_ordinary_callers()
+    {
+        var alert = Add(812);
+        var stranger = Guid.NewGuid();
+
+        // The default is still the owner's scope: a caller that does not hold the permission cannot reach the row.
+        var resolved = await _service.ResolveAsync(
+            alert.Id,
+            stranger,
+            new ResolveAlertRequest(nameof(ResolvedReason.Accepted), null),
+            AuditActor.Unknown,
+            CancellationToken.None);
+
+        resolved.Problem!.Code.Should().Be("not_found");
+        alert.State.Should().Be(AlertState.Open);
+        _store.AuditEntries.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task A_second_acknowledgement_is_a_conflict_and_changes_nothing()
     {
         var alert = Add(812);

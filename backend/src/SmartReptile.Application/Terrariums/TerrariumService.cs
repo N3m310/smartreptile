@@ -484,7 +484,9 @@ public sealed class TerrariumService(
             : provisioning.StageBinding(
                 device,
                 terrarium.Id,
-                terrarium.UserId,
+                // An administrator's enclosure starts unowned, so the board falls back to the claimer rather than
+                // inheriting `null` and landing in nobody's fleet (2026-10-25).
+                terrarium.UserId ?? ownerUserId,
                 now,
                 method: request.DeviceId is { Length: > 0 } ? "device_id" : "mac_address",
                 actor);

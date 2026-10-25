@@ -106,6 +106,21 @@ public sealed class EfAlertStore(SmartReptileDbContext db) : IAlertStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The same query with the owner predicate dropped. The joins are kept for the reason they exist in the scoped
+    /// one: the terrarium join is what applies the soft-delete filter, and the device join is what names the board on
+    /// the answer.
+    /// </remarks>
+    public async Task<AlertRecord?> FindAnyAsync(long alertId, CancellationToken cancellationToken) =>
+        await (from alert in db.Alerts
+               join terrarium in db.Terrariums on alert.TerrariumId equals terrarium.Id
+               join device in db.Devices on alert.DeviceId equals device.Id
+               where alert.Id == alertId
+               select new AlertRecord(alert, device.PublicId))
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<AlertSeriesPoint>> ReadEpisodeSeriesAsync(
         Guid terrariumId,
         MetricCode metric,

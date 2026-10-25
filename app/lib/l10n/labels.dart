@@ -129,6 +129,15 @@ String alertStateLabel(AppLocalizations l10n, String state) => switch (state) {
   _ => l10n.adminUnknown,
 };
 
+/// Localised label for a resolution reason (`Recovered`, `FalsePositive`, `SensorFault`, `Accepted`).
+String resolveReasonLabel(AppLocalizations l10n, String reason) => switch (reason) {
+  'Recovered' => l10n.alertReasonRecovered,
+  'FalsePositive' => l10n.alertReasonFalsePositive,
+  'SensorFault' => l10n.alertReasonSensorFault,
+  'Accepted' => l10n.alertReasonAccepted,
+  _ => reason,
+};
+
 /// Localised label for an alert severity.
 String severityLabel(AppLocalizations l10n, String severity) => switch (severity) {
   'Info' => l10n.severityInfo,

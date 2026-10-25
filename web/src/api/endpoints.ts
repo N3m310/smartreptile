@@ -183,12 +183,13 @@ export async function patchDevice(
 }
 
 /**
- * `DELETE /devices/{id}` — remove a board from the account's fleet (item 9b). Revokes every credential, closes the
- * live session and detaches the board from its enclosure; **not** a row delete, so the answer describes the revoked
- * board and its readings and audit history survive.
+ * `DELETE /devices/{id}` — detach a board from its enclosure (item 9b, changed 2026-10-25). The board keeps its
+ * credentials and stays in the fleet as `provisioning`, so it can be bound again; `purge` erases the row instead and
+ * is refused with `device_has_history` while anything still references the board.
  */
-export async function deleteDevice(deviceId: string): Promise<DeviceItem> {
-  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+export async function deleteDevice(deviceId: string, purge = false): Promise<DeviceItem> {
+  const query = purge ? '?purge=true' : '';
+  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}${query}`, { method: 'DELETE' });
 }
 
 /**

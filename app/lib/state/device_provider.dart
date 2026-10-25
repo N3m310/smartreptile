@@ -174,9 +174,25 @@ class DeviceProvider extends ChangeNotifier {
     await loadDevices();
   }
 
+  /// Detaches a board from its enclosure (`DELETE /devices/{id}`).
+  ///
+  /// The board stays in the fleet with its credentials — it goes back to `provisioning` and can be bound to another
+  /// enclosure without being claimed again (2026-10-25). Erasing it is [purgeDevice].
   Future<void> deleteDevice(String deviceId) async {
     await api.deleteJson(
       '/api/v1/devices/${Uri.encodeComponent(deviceId)}',
+    );
+    await loadDevices();
+  }
+
+  /// Erases a board for good (`DELETE /devices/{id}?purge=true`).
+  ///
+  /// Refused with `device_has_history` while any reading, alert, health sample or event names the board — the
+  /// foreign keys cascade, so erasing it would erase the history that explains it. Throws the refusal so the screen
+  /// can show the server's own sentence.
+  Future<void> purgeDevice(String deviceId) async {
+    await api.deleteJson(
+      '/api/v1/devices/${Uri.encodeComponent(deviceId)}?purge=true',
     );
     await loadDevices();
   }

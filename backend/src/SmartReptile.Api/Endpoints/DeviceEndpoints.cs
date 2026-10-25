@@ -39,7 +39,9 @@ public static class DeviceEndpoints
         .WithSummary("List the signed-in account's boards")
         .WithDescription("Requires `device.read`. Each entry carries the identity, the settings, the stored "
                        + "lifecycle state and the derived online/offline badge, plus the enclosure it is bound to. A "
-                       + "board that registered but was never claimed belongs to no fleet yet and is absent.")
+                       + "board that registered but was never claimed belongs to no fleet yet and is absent. A board "
+                       + "detached from its enclosure stays in the fleet as `provisioning`, and a revoked one still "
+                       + "appears so its owner can see why it went quiet; only `?purge=true` on DELETE removes a row.")
         .Produces(StatusCodes.Status200OK);
 
         group.MapGet("/{deviceId}", async (
@@ -128,6 +130,7 @@ public static class DeviceEndpoints
 
         group.MapDelete("/{deviceId}", async (
             string deviceId,
+            bool? purge,
             HttpContext context,
             ClaimsPrincipal principal,
             DeviceProvisioningService provisioning,
@@ -138,18 +141,19 @@ public static class DeviceEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 cancellationToken,
                 RequestActor.From(context),
-                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount());
+                principal.CanWriteAnyAccount() || principal.CanReadAnyAccount(),
+                purge ?? false);
 
             return outcome.Succeeded ? Results.Ok(outcome.Device) : Problem(outcome.Problem!);
         })
         .RequireAuthorization(Permissions.DeviceWrite)
-        .WithSummary("Remove a board from the account's fleet")
-        .WithDescription("Requires `device.write`. Revokes every credential, closes the live session and detaches "
-                       + "the board from its enclosure, so the DI-04 slot is free for a replacement — the same "
-                       + "credential effect as `POST /devices/{id}/revoke`, plus the unbinding. **Not a row "
-                       + "delete**: the readings, health reports, events and audit rows that name the board survive, "
-                       + "which is why the answer describes the revoked board rather than being empty. Recorded as "
-                       + "`device.revoked` with `detached: true`.");
+        .WithSummary("Detach a board from its enclosure")
+        .WithDescription("Requires `device.write`. **Unbinds only**: the board leaves its enclosure (freeing the "
+                       + "DI-04 slot for a replacement), goes back to `provisioning` and stays in the account's "
+                       + "fleet with its credentials intact, so it can be bound again without being claimed twice. "
+                       + "Recorded as `device.unbound`. Killing the credentials is `POST /devices/{id}/revoke`; "
+                       + "erasing the row is `?purge=true`, which is refused with `409 device_has_history` while "
+                       + "anything still references the board (2026-10-25).");
 
         // Anonymous by necessity — the board has no credential yet — so it carries the strongest anti-abuse
         // limits in the system, applied in the service (§02-design/06 §5).
@@ -325,7 +329,7 @@ public static class DeviceEndpoints
             "rate_limited" => StatusCodes.Status429TooManyRequests,
             "registration_invalid" or "move_invalid" or "claim_invalid" => StatusCodes.Status400BadRequest,
             "device_already_registered" or "terrarium_already_bound" or "device_revoked" or "device_not_claimed"
-                => StatusCodes.Status409Conflict,
+                or "device_has_history" => StatusCodes.Status409Conflict,
             _ => StatusCodes.Status404NotFound,
         };
 

@@ -294,6 +294,19 @@ public interface IAlertStore
     Task<AlertRecord?> FindOwnedAsync(long alertId, Guid userId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// One alert of any account, or null when it does not exist or its terrarium was deleted (2026-10-25).
+    /// </summary>
+    /// <remarks>
+    /// The cross-account read the administrator's routes use. It is deliberately <b>not</b> scoped by owner and
+    /// deliberately <b>not</b> unrestricted either: the join to <c>Terrarium</c> still applies that model's query
+    /// filter, so an alert of a soft-deleted enclosure — which the administrator's audit list still shows — cannot
+    /// be acknowledged or resolved through here. A closed enclosure's history is a record, not a queue.
+    /// </remarks>
+    /// <param name="alertId">Alert identity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<AlertRecord?> FindAnyAsync(long alertId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Newest values one metric took inside the episode's window, oldest first, at most
     /// <paramref name="maxPoints"/> of them.
     /// </summary>

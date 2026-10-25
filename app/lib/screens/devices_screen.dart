@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
 import '../core/mac_address.dart';
+import '../core/problem.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/device_model.dart';
 import '../state/device_provider.dart';
@@ -264,6 +265,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   onRotateSecret: () => _rotateSecret(context, device),
                   onRevoke: () => _revokeDevice(context, device),
                   onDelete: () => _deleteDevice(context, device),
+                  onPurge: () => _purgeDevice(context, device),
                   onTap: () => _showDetailDialog(context, device),
                 ),
                 const SizedBox(height: 12),
@@ -393,9 +395,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.bgCard,
-        title: const Text('Gỡ thiết bị', style: TextStyle(color: AppColors.statusDanger)),
+        title: const Text('Gỡ khỏi bể nuôi', style: TextStyle(color: AppColors.statusDanger)),
         content: Text(
-          'Gỡ thiết bị "${device.deviceName}" khỏi bể nuôi và tài khoản? Thiết bị sẽ bị huỷ liên kết để có thể gán cho bể khác.',
+          'Gỡ thiết bị "${device.deviceName}" khỏi bể nuôi? Thiết bị vẫn nằm trong danh sách và giữ nguyên khoá, '
+          'nên có thể gắn lại vào bể khác mà không cần nhận lại.',
           style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
         ),
         actions: [
@@ -409,7 +412,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Gỡ thiết bị'),
+            child: const Text('Gỡ khỏi bể'),
           ),
         ],
       ),
@@ -421,13 +424,70 @@ class _DevicesScreenState extends State<DevicesScreen> {
       await context.read<DeviceProvider>().deleteDevice(device.deviceId);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gỡ thiết bị thành công.')),
+          const SnackBar(content: Text('Đã gỡ thiết bị khỏi bể nuôi.')),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Lỗi gỡ thiết bị: $e')),
+        );
+      }
+    }
+  }
+
+  /// Erases a board for good, which only succeeds while nothing references it (`DELETE /devices/{id}?purge=true`).
+  ///
+  /// Kept beside "Gỡ thiết bị" rather than replacing it: removing a board from the fleet is the everyday act, and
+  /// erasing the row is for a node nobody needs to remember — a mis-registered board, a prototype. The server's own
+  /// refusal is shown verbatim, because it says which kind of board this is.
+  Future<void> _purgeDevice(BuildContext context, DeviceItem device) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgCard,
+        title: const Text('Xoá vĩnh viễn', style: TextStyle(color: AppColors.statusDanger)),
+        content: Text(
+          'Xoá hẳn "${device.deviceName}" khỏi hệ thống? Chỉ xoá được khi thiết bị chưa có dữ liệu đo hay cảnh báo nào. '
+          'Nếu đã có, hãy dùng "Gỡ thiết bị" để giữ lại lịch sử.',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Huỷ', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.statusDanger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Xoá vĩnh viễn'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      await context.read<DeviceProvider>().purgeDevice(device.deviceId);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã xoá thiết bị khỏi hệ thống.')),
+        );
+      }
+    } on AppFailure catch (failure) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              failure.code == 'device_has_history'
+                  ? 'Không xoá được: thiết bị đã có dữ liệu đo hoặc cảnh báo. Hãy dùng "Gỡ thiết bị".'
+                  : 'Lỗi xoá thiết bị: ${failure.detail ?? failure.code}',
+            ),
+          ),
         );
       }
     }
@@ -547,6 +607,7 @@ class _DeviceCard extends StatelessWidget {
     required this.onRotateSecret,
     required this.onRevoke,
     required this.onDelete,
+    required this.onPurge,
     required this.onTap,
   });
 
@@ -557,6 +618,7 @@ class _DeviceCard extends StatelessWidget {
   final VoidCallback onRotateSecret;
   final VoidCallback onRevoke;
   final VoidCallback onDelete;
+  final VoidCallback onPurge;
   final VoidCallback onTap;
 
   @override
@@ -766,9 +828,19 @@ class _DeviceCard extends StatelessWidget {
                           value: 'delete',
                           child: Row(
                             children: [
-                              Icon(Icons.delete_outline, size: 16, color: AppColors.statusDanger),
+                              Icon(Icons.link_off, size: 16, color: AppColors.statusDanger),
                               SizedBox(width: 8),
-                              Text('Gỡ thiết bị', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
+                              Text('Gỡ khỏi bể nuôi', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'purge',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_forever_outlined, size: 16, color: AppColors.statusDanger),
+                              SizedBox(width: 8),
+                              Text('Xoá vĩnh viễn', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
                             ],
                           ),
                         ),
@@ -777,6 +849,7 @@ class _DeviceCard extends StatelessWidget {
                         if (action == 'rotate') onRotateSecret();
                         if (action == 'revoke') onRevoke();
                         if (action == 'delete') onDelete();
+                        if (action == 'purge') onPurge();
                       },
                     ),
                 ],
