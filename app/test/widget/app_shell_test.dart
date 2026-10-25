@@ -81,17 +81,20 @@ void main() {
   ///
   /// The stub answers the login call the way the API does, so the codes under test are read off the payload the
   /// shell would read in production — a test-only setter would have proved nothing about the gate.
-  Future<SessionProvider> sessionHolding(List<String> permissions) async {
+  Future<SessionProvider> sessionHolding(
+    List<String> permissions, {
+    String role = 'Admin',
+  }) async {
     final api = ApiClient(
       baseUrl: 'http://localhost',
       httpClient: MockClient(
         (_) async => http.Response(
           jsonEncode({
             'user': {
-              'id': 'u-admin',
-              'username': 'quan-tri',
-              'email': 'quan-tri@example.com',
-              'role': 'Admin',
+              'id': 'u-user',
+              'username': 'user-test',
+              'email': 'user@example.com',
+              'role': role,
               'roleId': 'a0e00000-0000-4000-8000-000000000004',
               'permissions': permissions,
               'preferredLanguage': 'vi',
@@ -113,13 +116,17 @@ void main() {
       store: TokenStore.inMemory(),
     );
     expect(
-      await signedIn.signIn(usernameOrEmail: 'quan-tri', password: 'Demo1234!'),
+      await signedIn.signIn(usernameOrEmail: 'user-test', password: 'Demo1234!'),
       isTrue,
     );
     return signedIn;
   }
 
-  Future<void> useLocale(String languageCode, {List<String>? permissions}) async {
+  Future<void> useLocale(
+    String languageCode, {
+    List<String>? permissions,
+    String role = 'Admin',
+  }) async {
     settings = SettingsProvider();
     await settings.setLocale(Locale(languageCode));
     session = permissions == null
@@ -127,7 +134,7 @@ void main() {
             api: ApiClient(baseUrl: 'http://localhost'),
             store: TokenStore.inMemory(),
           )..enterGuestMode())
-        : await sessionHolding(permissions);
+        : await sessionHolding(permissions, role: role);
   }
 
   testWidgets('the shell carries the simulated-data notice on the first tab', (tester) async {
@@ -364,5 +371,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(session.isSignedIn, isFalse);
+  });
+
+  testWidgets('owner role hides the IoT devices tab while other roles display it', (tester) async {
+    // 1. Owner role
+    await useLocale('vi', permissions: const [], role: 'Owner');
+    useTallSurface(tester);
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    final navDevicesTab = find.descendant(
+      of: find.byType(NavigationBar),
+      matching: find.textContaining('Thiết bị'),
+    );
+    expect(navDevicesTab, findsNothing);
+
+    // 2. Admin role
+    await useLocale('vi', permissions: [Permissions.dataReadAny], role: 'Admin');
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+
+    expect(navDevicesTab, findsOneWidget);
   });
 }

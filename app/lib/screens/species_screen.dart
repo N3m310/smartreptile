@@ -56,6 +56,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     double tempMax = 33.0;
     double humMin = 50.0;
     double humMax = 75.0;
+    double lightMin = 200.0;
+    double lightMax = 800.0;
 
     if (isEditing) {
       for (final band in existing.bands) {
@@ -65,6 +67,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         } else if (band.metric == 'humidityPct' || band.metric == 'humidity') {
           humMin = band.targetMin;
           humMax = band.targetMax;
+        } else if (band.metric == 'lightLux' || band.metric == 'light') {
+          lightMin = band.targetMin;
+          lightMax = band.targetMax;
         }
       }
     }
@@ -73,6 +78,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     final tempMaxCtrl = TextEditingController(text: tempMax.toStringAsFixed(1));
     final humMinCtrl = TextEditingController(text: humMin.toStringAsFixed(0));
     final humMaxCtrl = TextEditingController(text: humMax.toStringAsFixed(0));
+    final lightMinCtrl = TextEditingController(text: lightMin.toStringAsFixed(0));
+    final lightMaxCtrl = TextEditingController(text: lightMax.toStringAsFixed(0));
 
     String selectedZone = existing?.climateZone ?? ClimateZones.tropical;
     final formKey = GlobalKey<FormState>();
@@ -196,7 +203,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                     const SizedBox(height: 16),
 
                     const Text(
-                      'Tiêu chuẩn nhiệt độ & độ ẩm vi khí hậu:',
+                      'Tiêu chuẩn nhiệt độ, độ ẩm & ánh sáng vi khí hậu:',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
@@ -285,6 +292,53 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                     ),
                     const SizedBox(height: 12),
 
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: lightMinCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Độ sáng min (Lux)',
+                              prefixIcon: Icon(Icons.wb_sunny_outlined, size: 18),
+                            ),
+                            validator: (val) {
+                              if (val == null || double.tryParse(val) == null) {
+                                return 'Nhập số hợp lệ';
+                              }
+                              if (double.parse(val) < 0) {
+                                return 'Min >= 0';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: lightMaxCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Độ sáng max (Lux)',
+                              prefixIcon: Icon(Icons.wb_sunny_outlined, size: 18),
+                            ),
+                            validator: (val) {
+                              final min = double.tryParse(lightMinCtrl.text);
+                              final max = double.tryParse(val ?? '');
+                              if (max == null) return 'Nhập số hợp lệ';
+                              if (min != null && max <= min) return 'Max > Min';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
                     TextFormField(
                       controller: photoperiodCtrl,
                       keyboardType: TextInputType.number,
@@ -331,9 +385,23 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         final tMax = double.parse(tempMaxCtrl.text);
                         final hMin = double.parse(humMinCtrl.text);
                         final hMax = double.parse(humMaxCtrl.text);
+                        final lMin = double.parse(lightMinCtrl.text);
+                        final lMax = double.parse(lightMaxCtrl.text);
                         final photoHours = double.parse(photoperiodCtrl.text);
 
-                        final bands = [
+                        final bands = <SpeciesProfileBandInput>[];
+                        if (isEditing) {
+                          for (final b in existing.bands) {
+                            if (b.metric != 'tempC' &&
+                                b.metric != 'humidityPct' &&
+                                b.metric != 'humidity' &&
+                                b.metric != 'lightLux' &&
+                                b.metric != 'light') {
+                              bands.add(SpeciesProfileBandInput.fromBand(b));
+                            }
+                          }
+                        }
+                        bands.addAll([
                           SpeciesProfileBandInput(
                             metric: 'tempC',
                             phase: 'day',
@@ -346,7 +414,13 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                             targetMin: hMin,
                             targetMax: hMax,
                           ),
-                        ];
+                          SpeciesProfileBandInput(
+                            metric: 'lightLux',
+                            phase: 'any',
+                            targetMin: lMin,
+                            targetMax: lMax,
+                          ),
+                        ]);
 
                         final provider = context.read<SpeciesProfileProvider>();
                         Navigator.pop(modalCtx);
@@ -359,6 +433,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                               scientificName: sciNameCtrl.text.trim(),
                               climateZone: selectedZone,
                               photoperiodHours: photoHours,
+                              lightThresholdLux: lMin,
                               notes: notesCtrl.text.trim(),
                               bands: bands,
                             ),
@@ -381,6 +456,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                               scientificName: sciNameCtrl.text.trim(),
                               climateZone: selectedZone,
                               photoperiodHours: photoHours,
+                              lightThresholdLux: lMin,
                               notes: notesCtrl.text.trim(),
                               bands: bands,
                             ),
@@ -604,9 +680,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                   child: Text(
                     '  - ${band.metric == 'tempC'
                         ? 'Nhiệt độ'
-                        : band.metric == 'humidityPct'
+                        : (band.metric == 'humidityPct' || band.metric == 'humidity')
                         ? 'Độ ẩm'
-                        : band.metric}: ${band.targetMin.toStringAsFixed(1)} ~ ${band.targetMax.toStringAsFixed(1)} ${band.unit} (${band.phase})',
+                        : (band.metric == 'lightLux' || band.metric == 'light')
+                        ? 'Ánh sáng'
+                        : band.metric}: ${band.targetMin.toStringAsFixed(1)} ~ ${band.targetMax.toStringAsFixed(1)} ${band.unit.isNotEmpty ? band.unit : ((band.metric == 'lightLux' || band.metric == 'light') ? 'Lux' : '')} (${band.phase})',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.textMain,
@@ -664,6 +742,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         (session.user?.role.toLowerCase() == 'admin') ||
         session.hasPermission(Permissions.dataReadAny) ||
         session.hasPermission(Permissions.userRead);
+    final isOwner = session.user?.role.toLowerCase() == 'owner';
 
     final canManage =
         session.hasPermission(Permissions.speciesWrite) || isAdmin;
@@ -687,8 +766,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Top Bar & Role guide banner (hidden for role admin, displayed for other roles)
-            if (!isAdmin) ...[
+            // Top Bar & Role guide banner (hidden for role admin and owner, displayed for other roles)
+            if (!isAdmin && !isOwner) ...[
               // Top Bar: Tiêu đề và badge vai trò
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -948,7 +1027,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             else
               // Action toolbar (Search + Add if Admin + Refresh) for other roles
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: EdgeInsets.fromLTRB(16, isOwner ? 12 : 4, 16, 4),
                 child: Row(
                   children: [
                     // Ô tìm kiếm nhanh
@@ -991,32 +1070,34 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
 
-                    // Nút làm mới
-                    IconButton(
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppColors.bgInput,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: const BorderSide(color: AppColors.border),
+                    // Nút làm mới (ẩn ở role owner, hiển thị ở các role còn lại)
+                    if (!isOwner) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.bgInput,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: const BorderSide(color: AppColors.border),
+                          ),
                         ),
+                        icon: const Icon(
+                          Icons.refresh,
+                          size: 18,
+                          color: AppColors.textMain,
+                        ),
+                        tooltip: 'Làm mới',
+                        onPressed: provider.isLoading || provider.isSaving
+                            ? null
+                            : () async {
+                                await provider.fetchProfiles();
+                                _showNotification(
+                                  'Đã làm mới danh mục (${provider.profiles.length} loài).',
+                                );
+                              },
                       ),
-                      icon: const Icon(
-                        Icons.refresh,
-                        size: 18,
-                        color: AppColors.textMain,
-                      ),
-                      tooltip: 'Làm mới',
-                      onPressed: provider.isLoading || provider.isSaving
-                          ? null
-                          : () async {
-                              await provider.fetchProfiles();
-                              _showNotification(
-                                'Đã làm mới danh mục (${provider.profiles.length} loài).',
-                              );
-                            },
-                    ),
+                    ],
 
                     // Nút "Thêm hồ sơ loài" (CHỈ HIỆN VỚI ADMIN)
                     if (canManage) ...[
