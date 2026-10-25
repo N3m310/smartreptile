@@ -6,6 +6,7 @@ import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
 import type { DeviceList, SpeciesProfileList, TerrariumList, TimeZoneList } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
+import { CopyButton } from '../components/CopyButton';
 import { useI18n } from '../i18n';
 import { formatDateTime, formatRelative } from '../lib/format';
 import { describeError, fieldHasError, fieldMessage, fieldMessages } from '../lib/messages';
@@ -348,6 +349,7 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
         >
           <p>{t('terrariumDeviceSecretOnce')}</p>
           <code className="block select-all break-all font-mono text-[11px] text-ink">{secret}</code>
+          <CopyButton value={secret} />
         </div>
       ) : null}
 

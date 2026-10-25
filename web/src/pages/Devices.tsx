@@ -4,6 +4,7 @@ import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { DeviceItem, DeviceList, TerrariumList } from '../api/types';
 import { useI18n } from '../i18n';
+import { CopyButton } from '../components/CopyButton';
 import { inspectMac, macProblemMessage } from '../lib/mac';
 import { describeError } from '../lib/messages';
 import { usePolled } from '../lib/usePolled';
@@ -246,7 +247,10 @@ export const Devices: React.FC = () => {
         <div role="status" className="rounded-xl border border-warning/40 bg-warning/5 p-4 text-sm text-ink">
           <strong>Khóa thiết bị chỉ hiển thị một lần:</strong>
           <code className="ml-2 break-all font-mono">{secret}</code>
-          <button type="button" className="ml-3 text-xs text-accent underline" onClick={() => setSecret(null)}>Đã lưu</button>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <CopyButton value={secret} />
+            <button type="button" className="text-xs text-accent underline" onClick={() => setSecret(null)}>Đã lưu</button>
+          </div>
         </div>
       )}
       {error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, error)}</p>}
