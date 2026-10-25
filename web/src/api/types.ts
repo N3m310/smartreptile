@@ -102,8 +102,12 @@ export interface DeviceSummary {
 export interface TerrariumItem {
   id: string;
   name: string;
-  speciesProfileId: string;
-  speciesName: string;
+  /**
+   * The profile whose bands judge this enclosure, or `null` for one that has none yet (2026-10-25). Both this and
+   * `speciesName` are null together — the server resolves the name from the profile.
+   */
+  speciesProfileId: string | null;
+  speciesName: string | null;
   location: string | null;
   description: string | null;
   timeZoneId: string;
@@ -198,7 +202,11 @@ export interface SpeciesProfileList {
 /** Body of `POST /terrariums`. `timeZoneId` omitted means the deployment's default (ADR-015). */
 export interface CreateTerrariumBody {
   name: string;
-  speciesProfileId: string;
+  /**
+   * The profile whose bands judge the enclosure, or `null`/omitted for one that has none yet (2026-10-25). Without
+   * a profile the readings are still stored, but nothing about the enclosure is being evaluated.
+   */
+  speciesProfileId?: string | null;
   location?: string | null;
   description?: string | null;
   timeZoneId?: string | null;
@@ -701,8 +709,9 @@ export interface AdminTerrariumView {
   name: string;
   ownerId: string | null;
   ownerUsername: string | null;
-  speciesProfileId: string;
-  speciesProfileName: string;
+  /** Null for an enclosure with no species yet (2026-10-25); the name is null exactly when the id is. */
+  speciesProfileId: string | null;
+  speciesProfileName: string | null;
   status: string;
   devicePublicId: string | null;
   deviceStatus: string | null;

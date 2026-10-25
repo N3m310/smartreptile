@@ -35,8 +35,14 @@ public class Terrarium
     /// <summary>Display name, e.g. "Linh's gecko box".</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Species profile whose bands apply unless overridden (FR-10).</summary>
-    public Guid SpeciesProfileId { get; set; }
+    /// <summary>
+    /// Species profile whose bands apply unless overridden (FR-10), or null for an enclosure that has none
+    /// (2026-10-25). A profile is no longer required to create an enclosure: a keeper may set the enclosure up
+    /// before deciding what lives in it, and the evaluation layer then simply has no bands to judge against — the
+    /// readings are still stored, but no temperature, humidity or UV alert can open for it until a profile is
+    /// assigned.
+    /// </summary>
+    public Guid? SpeciesProfileId { get; set; }
 
     /// <summary>Species profile navigation.</summary>
     public Species.SpeciesProfile? SpeciesProfile { get; set; }

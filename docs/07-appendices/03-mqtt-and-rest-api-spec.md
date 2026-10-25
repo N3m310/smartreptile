@@ -348,9 +348,9 @@ takes effect within one 15-minute access-token lifetime.
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/terrariums` | `terrarium.read` | list with device status summary; `?speciesProfileId=` narrows it to one profile's enclosures |
-| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound. `data.write.any` creates an **unowned** enclosure (`ownerUserId`/`ownerEmail` null) — assign it on `PATCH` |
+| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId?, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound. `speciesProfileId` is **optional** (2026-10-25): omitted or null creates an enclosure with no species, which stores and shows readings but has no bands to be judged against. `data.write.any` creates an **unowned** enclosure (`ownerUserId`/`ownerEmail` null) — assign it on `PATCH` |
 | GET | `/terrariums/{id}` | `terrarium.read` (member) | includes `device`, `openAlertCount`, `latestSampleAt`, `rowVersion` |
-| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed`; the answer then names the owner (with `ownerEmail`) |
+| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed`; the answer then names the owner (with `ownerEmail`). `{speciesProfileId}` changes the profile, and the all-zero GUID `00000000-0000-0000-0000-000000000000` detaches it — `null`/omitted still means "leave it" (2026-10-25) |
 | DELETE | `/terrariums/{id}` | `terrarium.write` | soft delete; requires `?allowUnboundDevice=true` when a device is bound → else `409 conflict_device_bound` |
 | GET | `/terrariums/{id}/thresholds` | `terrarium.read` | returns `effectiveThresholds[]` with `source` |
 | PUT | `/terrariums/{id}/thresholds` | `terrarium.write` | upsert overrides; validates band ordering |
@@ -579,12 +579,21 @@ required ISO-8601 instants with `from < to`, otherwise `400 invalid_range`.
 `expected`, capped at 100. A terrarium with no bound device answers `409 device_not_bound`: coverage is a statement
 about a device, and there is nothing honest to say about `null`.
 
-`POST /terrariums` takes `{name, speciesProfileId, location?, description?, timeZoneId?}` and answers `201` with the
+`POST /terrariums` takes `{name, speciesProfileId?, location?, description?, timeZoneId?}` and answers `201` with the
 item shape below. It requires `terrarium.write` and exists ahead of the rest of FR-03 because every other route needs a
 terrarium to point at — `POST /devices/claim` has nothing to bind a board to until one exists. Validation is
 `400 validation_failed` with field-level `errors[]` (`terrarium_name_required`, `terrarium_location_too_long`,
 `terrarium_description_too_long`, `terrarium_timezone_invalid`, `species_profile_not_found`); `timeZoneId` falls back
-to `Defaults:TimeZoneId` when omitted.
+to `Defaults:TimeZoneId` when omitted. `speciesProfileId` is optional since 2026-10-25 — an enclosure may be set up
+before its species is chosen, and `species_profile_not_found` is answered only for an id that was actually sent.
+
+**An enclosure with no species (2026-10-25).** `speciesProfileId` and `speciesName` are null together on every answer
+whose enclosure has none, and the enclosure is otherwise ordinary: it stores and returns its readings, it can hold a
+board, and `GET /terrariums/{id}/thresholds` answers an empty `effectiveThresholds[]`. The consequence is stated
+rather than implied: with no profile bands and no overrides there is nothing to judge, so no temperature, humidity or
+UV alert opens for it until a profile is assigned. On `PATCH`, an omitted or null `speciesProfileId` leaves the
+assignment alone; the all-zero GUID detaches it, which is this contract's spelling of "empty" for a member that is not
+a string.
 
 The item shape returned by `GET /terrariums` (inside `items`), `POST /terrariums` and `GET /terrariums/{id}`:
 
