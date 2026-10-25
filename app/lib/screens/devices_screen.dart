@@ -4,12 +4,72 @@ import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
 import '../core/mac_address.dart';
+import '../core/problem.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/device_model.dart';
 import '../state/device_provider.dart';
 import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
+
+/// Translates backend and device-related errors into user-friendly Vietnamese messages.
+String _translateDeviceError(dynamic error) {
+  if (error is AppFailure) {
+    if (error.isNetworkFailure) {
+      return 'Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại mạng.';
+    }
+    switch (error.code) {
+      case 'device_already_bound':
+      case 'device_already_registered':
+        return 'Địa chỉ MAC này đã tồn tại và đã được liên kết với một chuồng nuôi khác.';
+      case 'terrarium_already_bound':
+        return 'Chuồng nuôi này đã có thiết bị kết nối. Vui lòng chọn chuồng nuôi khác hoặc gỡ thiết bị hiện tại trước.';
+      case 'claim_code_invalid':
+      case 'claim_invalid':
+        return 'Mã nhận thiết bị không chính xác hoặc không hợp lệ.';
+      case 'claim_code_expired':
+        return 'Mã nhận thiết bị đã hết hạn. Vui lòng lấy mã mới trên bo mạch.';
+      case 'device_not_found':
+        return 'Không tìm thấy thiết bị tương ứng với thông tin đã nhập.';
+      case 'device_revoked':
+        return 'Thiết bị này đã bị thu hồi và không thể liên kết.';
+      case 'not_found':
+        return 'Không tìm thấy chuồng nuôi hoặc thiết bị tương ứng.';
+      case 'rate_limited':
+        return 'Thao tác quá nhanh. Vui lòng chờ giây lát rồi thử lại.';
+      default:
+        if (error.detail != null && error.detail!.isNotEmpty) {
+          return error.detail!;
+        }
+        if (error.title != null && error.title!.isNotEmpty) {
+          return error.title!;
+        }
+        return 'Lỗi thao tác thiết bị (${error.code}).';
+    }
+  }
+
+  final errStr = error.toString();
+  if (errStr.contains('device_already_bound') || errStr.contains('device_already_registered')) {
+    return 'Địa chỉ MAC này đã tồn tại và đã được liên kết với một chuồng nuôi khác.';
+  }
+  if (errStr.contains('terrarium_already_bound')) {
+    return 'Chuồng nuôi này đã có thiết bị kết nối. Vui lòng chọn chuồng nuôi khác hoặc gỡ thiết bị hiện tại trước.';
+  }
+  if (errStr.contains('claim_code_invalid') || errStr.contains('claim_invalid')) {
+    return 'Mã nhận thiết bị không chính xác hoặc không hợp lệ.';
+  }
+  if (errStr.contains('claim_code_expired')) {
+    return 'Mã nhận thiết bị đã hết hạn. Vui lòng lấy mã mới trên bo mạch.';
+  }
+  if (errStr.contains('device_not_found')) {
+    return 'Không tìm thấy thiết bị tương ứng với thông tin đã nhập.';
+  }
+  if (errStr.contains('device_revoked')) {
+    return 'Thiết bị này đã bị thu hồi và không thể liên kết.';
+  }
+
+  return errStr.replaceFirst(RegExp(r'^Exception:\s*'), '');
+}
 
 /// Screen managing IoT devices fleet (matching Web `/devices` functionality).
 class DevicesScreen extends StatefulWidget {
@@ -337,7 +397,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi đổi khóa: $e')),
+          SnackBar(content: Text('Lỗi đổi khóa: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -382,7 +442,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi thu hồi khóa: $e')),
+          SnackBar(content: Text('Lỗi thu hồi khóa: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -427,7 +487,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi gỡ thiết bị: $e')),
+          SnackBar(content: Text('Lỗi gỡ thiết bị: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -881,7 +941,7 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Nhận thiết bị IoT',
+                'Nhận thiết bị',
                 style: TextStyle(
                   color: AppColors.textMain,
                   fontWeight: FontWeight.bold,
@@ -1090,7 +1150,7 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
     } catch (e) {
       setState(() {
         _busy = false;
-        _error = 'Không thể nhận thiết bị: $e';
+        _error = _translateDeviceError(e);
       });
     }
   }
@@ -1284,7 +1344,7 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Lỗi gắn thiết bị: $e';
+        _error = _translateDeviceError(e);
       });
     }
   }
@@ -1324,7 +1384,7 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
     } catch (e) {
       setState(() {
         _busy = false;
-        _error = 'Lỗi lưu cấu hình: $e';
+        _error = _translateDeviceError(e);
       });
     }
   }
