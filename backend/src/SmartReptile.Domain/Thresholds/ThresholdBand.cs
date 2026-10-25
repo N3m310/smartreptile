@@ -33,7 +33,7 @@ public sealed record ThresholdBand
     public decimal? CriticalMax { get; init; }
 
     /// <summary>Minutes outside the target band before a Warning alert is opened (BR-11.3).</summary>
-    public int DwellWarnMinutes { get; init; } = 5;
+    public int DwellWarnMinutes { get; init; } = 2;
 
     /// <summary>Minutes outside the critical band before the alert escalates to Critical (BR-11.3).</summary>
     public int DwellCritMinutes { get; init; } = 2;

@@ -986,7 +986,7 @@ public class TerrariumServiceTests
             CancellationToken.None);
 
         var stored = terrarium.ThresholdOverrides.Single();
-        stored.DwellWarnMinutes.Should().Be(5);
+        stored.DwellWarnMinutes.Should().Be(2);
         stored.DwellCritMinutes.Should().Be(2);
         stored.RecoveryMargin.Should().Be(0.5m);
         stored.Enabled.Should().BeTrue();

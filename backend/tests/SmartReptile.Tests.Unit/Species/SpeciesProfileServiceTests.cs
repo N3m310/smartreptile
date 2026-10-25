@@ -186,7 +186,7 @@ public class SpeciesProfileServiceTests
         var day = created.Bands.Single(band => band.Phase == "day");
         day.Metric.Should().Be("tempC", "the wire carries the dictionary key, not the enum");
         day.Unit.Should().Be("°C", "the unit travels with the band so an editor needs no dictionary");
-        day.DwellWarnMinutes.Should().Be(5);
+        day.DwellWarnMinutes.Should().Be(2);
         day.DwellCritMinutes.Should().Be(2);
         day.RecoveryMargin.Should().Be(0.5m);
         day.Enabled.Should().BeTrue();
