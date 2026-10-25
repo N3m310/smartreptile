@@ -66,6 +66,11 @@ public interface ISpeciesProfileStore
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken);
 
+    /// <summary>True when the specified user has the administrator role.</summary>
+    /// <param name="userId">User identity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<bool> IsAdminUserAsync(Guid userId, CancellationToken cancellationToken);
+
     /// <summary>Stages a new profile with its bands.</summary>
     /// <param name="profile">The aggregate to insert.</param>
     void Add(SpeciesProfile profile);

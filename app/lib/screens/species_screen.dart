@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
+import '../core/species_localization.dart';
 import '../models/species_profile.dart';
 import '../state/session_provider.dart';
 import '../state/species_profile_provider.dart';
@@ -495,7 +496,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
   // ================= DIALOG: NHÂN BẢN LOÀI =================
   Future<void> _openDuplicateDialog(SpeciesProfileView target) async {
     final provider = context.read<SpeciesProfileProvider>();
-    final nameCtrl = TextEditingController(text: '${target.name} (Tùy chỉnh)');
+    final targetDisplayName = SpeciesLocalization.displayName(target.name);
+    final nameCtrl = TextEditingController(text: '$targetDisplayName (Tùy chỉnh)');
     final formKey = GlobalKey<FormState>();
 
     final confirm = await showDialog<bool>(
@@ -526,7 +528,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Tạo một bản sao từ "${target.name}" để tinh chỉnh thông số vi khí hậu.',
+                'Tạo một bản sao từ "$targetDisplayName" để tinh chỉnh thông số vi khí hậu.',
                 style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 13,
@@ -607,7 +609,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                item.name,
+                SpeciesLocalization.displayName(item.name),
                 style: const TextStyle(
                   color: AppColors.textMain,
                   fontSize: 16,
@@ -691,16 +693,22 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                     ),
                   ),
                 ),
-              if (item.notes != null && item.notes!.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Ghi chú: ${item.notes}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ],
+              Builder(
+                builder: (context) {
+                  final notes = SpeciesLocalization.displayNotes(item.name, item.notes);
+                  if (notes.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      'Ghi chú: $notes',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -747,6 +755,17 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     final canManage =
         session.hasPermission(Permissions.speciesWrite) || isAdmin;
 
+    if (session.isSignedIn &&
+        provider.profiles.isEmpty &&
+        !provider.isLoading &&
+        provider.errorMessage == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context.read<SpeciesProfileProvider>().fetchProfiles();
+        }
+      });
+    }
+
     // Filter profiles theo query và climate zone
     final filtered = provider.profiles.where((p) {
       if (_selectedClimateFilter != null &&
@@ -754,9 +773,12 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         return false;
       }
       if (_searchQuery.isNotEmpty) {
-        final q = _searchQuery.toLowerCase();
-        return p.name.toLowerCase().contains(q) ||
-            p.scientificName.toLowerCase().contains(q);
+        return SpeciesLocalization.matchesQuery(
+          name: p.name,
+          scientificName: p.scientificName,
+          notes: p.notes,
+          query: _searchQuery,
+        );
       }
       return true;
     }).toList();
@@ -1071,7 +1093,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                       ),
                     ),
 
-                    // Nút làm mới (ẩn ở role owner, hiển thị ở các role còn lại)
+                    // Nút làm mới (ẩn ở role owner theo thiết kế UI, hiển thị ở các role còn lại)
                     if (!isOwner) ...[
                       const SizedBox(width: 8),
                       IconButton(
@@ -1209,22 +1231,32 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
 
             // Danh sách hồ sơ loài
             Expanded(
-              child: filtered.isEmpty
-                  ? Center(
-                      child: provider.isLoading
-                          ? const CircularProgressIndicator(
+              child: RefreshIndicator(
+                onRefresh: () => provider.fetchProfiles(),
+                color: AppColors.primary,
+                child: filtered.isEmpty
+                    ? (provider.isLoading
+                        ? const Center(
+                            child: CircularProgressIndicator(
                               color: AppColors.primary,
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
+                            ),
+                          )
+                        : ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height: MediaQuery.of(context).size.height * 0.25,
+                              ),
+                              const Center(
+                                child: Icon(
                                   Icons.pets,
                                   size: 40,
                                   color: Colors.white24,
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
+                              ),
+                              const SizedBox(height: 8),
+                              Center(
+                                child: Text(
                                   canManage
                                       ? 'Chưa có hồ sơ loài nào khớp bộ lọc.\nNhấn nút "Thêm loài" để tạo mới.'
                                       : 'Không tìm thấy hồ sơ loài nào phù hợp.',
@@ -1234,16 +1266,17 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                     color: AppColors.textMuted,
                                   ),
                                 ),
-                              ],
-                            ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 6,
-                      ),
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
+                              ),
+                            ],
+                          ))
+                    : ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
                         final item = filtered[index];
                         return Card(
                           color: AppColors.bgCard,
@@ -1298,7 +1331,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              item.name,
+                                              SpeciesLocalization.displayName(item.name),
                                               style: const TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.bold,
@@ -1530,7 +1563,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                     ),
                                                   ),
                                                   content: Text(
-                                                    'Bạn có chắc muốn xóa hồ sơ loài "${item.name}" không?',
+                                                    'Bạn có chắc muốn xóa hồ sơ loài "${SpeciesLocalization.displayName(item.name)}" không?',
                                                     style: const TextStyle(
                                                       color:
                                                           AppColors.textMuted,
@@ -1574,7 +1607,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                     .deleteProfile(item.id);
                                                 if (success) {
                                                   _showNotification(
-                                                    'Đã xóa loài "${item.name}"',
+                                                    'Đã xóa loài "${SpeciesLocalization.displayName(item.name)}"',
                                                   );
                                                 } else {
                                                   _showNotification(
@@ -1597,6 +1630,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         );
                       },
                     ),
+              ),
             ),
           ],
         ),

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
 import '../core/problem.dart';
+import '../core/species_localization.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/api_terrarium_models.dart';
 import '../state/session_provider.dart';
@@ -133,7 +134,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               const Text(
-                                'Tá»•ng bá»ƒ nuĂ´i:',
+                                'Tổng bể nuôi:',
                                 style: TextStyle(
                                   color: AppColors.textMuted,
                                   fontSize: 13,
@@ -183,7 +184,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                       fontSize: 13,
                     ),
                     decoration: InputDecoration(
-                      hintText: 'TĂ¬m theo tĂªn bá»ƒ nuĂ´i, loĂ i, vá»‹ trĂ­...',
+                      hintText: 'Tìm theo tên bể nuôi, loài, vị trí...',
                       hintStyle: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 13,
@@ -241,7 +242,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
                           ),
                           SizedBox(height: 10),
                           Text(
-                            'KhĂ´ng tĂ¬m tháº¥y bá»ƒ nuĂ´i phĂ¹ há»£p',
+                            'Không tìm thấy bể nuôi phù hợp',
                             style: TextStyle(
                               color: AppColors.textMuted,
                               fontSize: 14,
@@ -328,7 +329,7 @@ class _TerrariumCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      item.speciesName,
+                      SpeciesLocalization.displayName(item.speciesName),
                       style: const TextStyle(
                         color: AppColors.accent,
                         fontSize: 12,
@@ -531,7 +532,7 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    profile.name,
+                                    SpeciesLocalization.displayName(profile.name),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   if (profile.scientificName.isNotEmpty)
