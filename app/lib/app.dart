@@ -110,6 +110,7 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
     final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
         (session.user?.role.toLowerCase() == 'admin') ||
         session.hasAnyPermission(_administrativePermissions);
+    final isOwner = session.user?.role.toLowerCase() == 'owner';
 
     // The administration tab exists only while the session holds a permission that can open something behind it:
     // `data.read.any` for the get-all views, `user.read` for accounts and roles. A tab that led to a locked screen
@@ -141,24 +142,25 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
         screen: SpeciesScreen(),
         isMock: false,
       ),
-      _ShellTab(
-        destination: isAdmin
-            ? DefaultTextStyle.merge(
-                textAlign: TextAlign.center,
-                child: const NavigationDestination(
+      if (!isOwner)
+        _ShellTab(
+          destination: isAdmin
+              ? DefaultTextStyle.merge(
+                  textAlign: TextAlign.center,
+                  child: const NavigationDestination(
+                    icon: Icon(Icons.developer_board_outlined),
+                    selectedIcon: Icon(Icons.developer_board),
+                    label: 'Thiết bị\nIoT',
+                  ),
+                )
+              : const NavigationDestination(
                   icon: Icon(Icons.developer_board_outlined),
                   selectedIcon: Icon(Icons.developer_board),
-                  label: 'Thiết bị\nIoT',
+                  label: 'Thiết bị IoT',
                 ),
-              )
-            : const NavigationDestination(
-                icon: Icon(Icons.developer_board_outlined),
-                selectedIcon: Icon(Icons.developer_board),
-                label: 'Thiết bị IoT',
-              ),
-        screen: const DevicesScreen(),
-        isMock: false,
-      ),
+          screen: const DevicesScreen(),
+          isMock: false,
+        ),
       _ShellTab(
         destination: NavigationDestination(
           icon: pendingCount > 0

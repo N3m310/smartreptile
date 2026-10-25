@@ -127,11 +127,26 @@ class AppDataProvider extends ChangeNotifier {
     }
   }
 
+  void _resolveAlertTerrariumNames() {
+    for (final alert in _alerts) {
+      final matched = _terrariums.where((t) => t.id == alert.terrariumId);
+      if (matched.isNotEmpty && matched.first.name.isNotEmpty) {
+        alert.terrariumName = 'Chuồng nuôi: ${matched.first.name}';
+      } else if (alert.terrariumName.isNotEmpty &&
+          alert.terrariumName != 'Chuồng nuôi') {
+        if (!alert.terrariumName.startsWith('Chuồng nuôi')) {
+          alert.terrariumName = 'Chuồng nuôi: ${alert.terrariumName}';
+        }
+      }
+    }
+  }
+
   /// Reset to simulated/mock models (e.g. on sign-out or offline test)
   void resetToMocks() {
     _terrariums = List.from(mockTerrariums);
     _devices = List.from(mockDevices);
     _alerts = List.from(mockAlerts);
+    _resolveAlertTerrariumNames();
     _historyByTerrarium.clear();
     _selectedTerrariumId = _terrariums.first.id;
     _isLive = false;
@@ -158,6 +173,7 @@ class AppDataProvider extends ChangeNotifier {
         fetchSpeciesProfiles(),
         fetchTimeZones(),
       ]);
+      _resolveAlertTerrariumNames();
       _isLive = true;
       _errorMessage = null;
     } on AppFailure catch (failure) {
@@ -202,6 +218,7 @@ class AppDataProvider extends ChangeNotifier {
             hydration.add(fetchThresholds(t.id));
           }
           await Future.wait(hydration);
+          _resolveAlertTerrariumNames();
         }
       }
     } catch (_) {
@@ -473,7 +490,12 @@ class AppDataProvider extends ChangeNotifier {
         final list = <AlertModel>[];
         for (final item in items) {
           if (item is Map<String, dynamic>) {
-            list.add(AlertModel.fromApi(item));
+            final alert = AlertModel.fromApi(item);
+            final matched = _terrariums.where((t) => t.id == alert.terrariumId);
+            if (matched.isNotEmpty && matched.first.name.isNotEmpty) {
+              alert.terrariumName = 'Chuồng nuôi: ${matched.first.name}';
+            }
+            list.add(alert);
           }
         }
         _alerts = list;

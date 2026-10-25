@@ -180,7 +180,7 @@ class AlertModel {
   final String title;
   final String message;
   final String terrariumId;
-  final String terrariumName;
+  String terrariumName;
   final String type;
   final String severity;
   bool isResolved;
@@ -214,6 +214,13 @@ class AlertModel {
       message = val != null
           ? 'Độ ẩm hiện tại: $val% (vượt ngưỡng cho phép)'
           : 'Độ ẩm chuồng lệch ngưỡng an toàn.';
+    } else if (metric.contains('light') || metric.contains('lux')) {
+      type = 'light_out_of_range';
+      title = 'Cảnh báo ánh sáng';
+      final val = json['triggeringValue'];
+      message = val != null
+          ? 'Cường độ ánh sáng hiện tại: $val Lux (vượt ngưỡng cho phép)'
+          : 'Cường độ ánh sáng chuồng lệch ngưỡng an toàn.';
     } else if (family == 'device') {
       type = 'device_offline';
       title = 'Mất kết nối thiết bị';
@@ -224,12 +231,19 @@ class AlertModel {
       message = 'Chỉ số đo vượt ngưỡng quy định.';
     }
 
+    final rawTerraName = json['terrariumName']?.toString();
+    final terrariumName = (rawTerraName != null && rawTerraName.isNotEmpty)
+        ? (rawTerraName.startsWith('Chuồng nuôi')
+            ? rawTerraName
+            : 'Chuồng nuôi: $rawTerraName')
+        : 'Chuồng nuôi';
+
     return AlertModel(
       id: id,
       title: title,
       message: message,
       terrariumId: json['terrariumId']?.toString() ?? '',
-      terrariumName: 'Chuồng nuôi',
+      terrariumName: terrariumName,
       type: type,
       severity: severity,
       isResolved: isResolved,
