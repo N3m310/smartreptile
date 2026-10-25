@@ -63,7 +63,7 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     /// </summary>
     private const int ImageMaxBytes = 2 * 1024 * 1024;
     private const int SourceRefMaxLength = 300;
-    private const int DefaultDwellWarnMinutes = 5;
+    private const int DefaultDwellWarnMinutes = 2;
     private const int DefaultDwellCritMinutes = 2;
     private const decimal DefaultRecoveryMargin = 0.5m;
     private const decimal DefaultPhotoperiodHours = 12m;

@@ -51,6 +51,53 @@ public class AlertServiceTests
     }
 
     [Fact]
+    public async Task Another_account_sees_none_of_these_alerts_without_the_administrator_grant()
+    {
+        Add(1);
+
+        var outcome = await _service.ListAsync(
+            Guid.NewGuid(),
+            new AlertQuery(PageSize: 10),
+            CancellationToken.None);
+
+        outcome.Page!.Items.Should().BeEmpty("the read is scoped to the caller's own terrariums");
+    }
+
+    [Fact]
+    public async Task The_page_carries_a_count_per_state_for_the_status_bar()
+    {
+        Add(1);
+        Add(2).State = AlertState.Acknowledged;
+        Add(3).State = AlertState.Resolved;
+        Add(4).State = AlertState.Resolved;
+
+        var outcome = await _service.ListAsync(_store.Owner, new AlertQuery(PageSize: 10), CancellationToken.None);
+
+        var counts = outcome.Page!.Counts;
+        counts.Open.Should().Be(1);
+        counts.Acknowledged.Should().Be(1);
+        counts.Resolved.Should().Be(2);
+        counts.Total.Should().Be(4, "the bar's first tab is the sum of the three it labels");
+    }
+
+    [Fact]
+    public async Task An_administrator_reaches_alerts_this_account_does_not_own()
+    {
+        Add(1);
+        Add(2);
+
+        var outcome = await _service.ListAsync(
+            Guid.NewGuid(),
+            new AlertQuery(PageSize: 10),
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Page!.Items.Should().HaveCount(
+            2,
+            "an unowned terrarium's alerts match no account, so the grant is the only way to list them");
+    }
+
+    [Fact]
     public async Task A_cursor_this_api_did_not_issue_is_refused_as_a_bad_request()
     {
         var outcome = await _service.ListAsync(

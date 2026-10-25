@@ -49,7 +49,15 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
     /// <param name="userId">Signed-in account.</param>
     /// <param name="query">Filters, page size and cursor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task<AlertOutcome> ListAsync(Guid userId, AlertQuery query, CancellationToken cancellationToken)
+    /// <param name="mayReachAnyAccount">
+    /// True for an administrator: the list then spans every account, which is the only read that reaches an alert on
+    /// an ownerless terrarium (see <see cref="IAlertStore.ListAsync"/>).
+    /// </param>
+    public async Task<AlertOutcome> ListAsync(
+        Guid userId,
+        AlertQuery query,
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
         ArgumentNullException.ThrowIfNull(query);
 
@@ -69,7 +77,13 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
 
         // One row more than the page: the extra row is how "there is more" is known without a second count query.
         var rows = await store
-            .ListAsync(userId, query, pageSize + 1, cancellationToken)
+            .ListAsync(userId, query, pageSize + 1, cancellationToken, mayReachAnyAccount)
+            .ConfigureAwait(false);
+
+        // The status bar's labels, from the same filters with the state dropped so the caller can switch between
+        // them rather than being told only about the one already chosen.
+        var counts = await store
+            .CountByStateAsync(userId, query, cancellationToken, mayReachAnyAccount)
             .ConfigureAwait(false);
 
         var hasMore = rows.Count > pageSize;
@@ -79,7 +93,7 @@ public sealed class AlertService(IAlertStore store, ITelemetryBroadcaster broadc
             ? AlertCursor.Encode(items[^1].TriggeredAt, items[^1].Id)
             : null;
 
-        return new AlertOutcome { Page = new AlertPage(items, next) };
+        return new AlertOutcome { Page = new AlertPage(items, next, counts) };
     }
 
     /// <summary>One alert with an excerpt of the values it was judged on.</summary>

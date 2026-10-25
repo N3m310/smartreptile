@@ -318,9 +318,17 @@ export interface AlertView {
   durationSeconds: number | null;
 }
 
+export interface AlertCounts {
+  open: number;
+  acknowledged: number;
+  resolved: number;
+  total: number;
+}
+
 export interface AlertPage {
   items: AlertView[];
   nextCursor: string | null;
+  counts: AlertCounts;
 }
 
 export interface AlertDetail {

@@ -61,7 +61,7 @@ public sealed class TerrariumService(
     private const int LocationMaxLength = 120;
     private const int DescriptionMaxLength = 1000;
     private const int NoteMaxLength = 300;
-    private const int DefaultDwellWarnMinutes = 5;
+    private const int DefaultDwellWarnMinutes = 2;
     private const int DefaultDwellCritMinutes = 2;
     private const decimal DefaultRecoveryMargin = 0.5m;
 

@@ -786,10 +786,22 @@ because they are contract rather than implementation:
   happened, not where the system learned of it. The pair is what makes the order total; an identity alone would not
   say which of two alerts that share an instant came first.
 - **Filters are the contract's five**, and their vocabulary is the response's: `state` is `Open`, `Acknowledged` or
-  `Resolved`, `severity` is `Info`, `Warning` or `Critical` (case-insensitive), `metric` is the REST key (`tempC`),
+  `Resolved` — plus `in_progress`, which is not a lifecycle state but the question "does this still need somebody?"
+  and therefore means open and acknowledged together (2026-10-25). Acknowledgement is ownership, not closure
+  (BR-12.1), so a status tab that dropped a row the moment it was picked up would hide the rows under active work.
+  `severity` is `Info`, `Warning` or `Critical` (case-insensitive), `metric` is the REST key (`tempC`),
   `family` is `enclosure` or `species` — the row's own `family`, carried even by the device-level alerts that have no
   metric to derive it from (2026-10-17) — and `from`/`to` filter on `TriggeredAt`. An unknown value is a
   `400` naming the alternatives rather than an empty page, and an unknown `family` is `400 family_invalid`.
+- **Every page also carries `counts`** (2026-10-25): `open`, `acknowledged`, `resolved` and the `total` of the three.
+  The counts apply every filter the caller sent **except `state`**, because they are how a reader picks a state rather
+  than a report on the one already picked, and they ignore the cursor, because a total that moved with the page number
+  would be a page size. They are what the status bar's tabs are labelled with on both clients — a separate bar above
+  the severity and date filters, not a select sharing a row with them.
+- **An administrator's `GET /alerts` spans every account** (2026-10-25), matching the single-alert read and the two
+  writes of 3.4. The same widening is what reaches an alert on an **ownerless** terrarium: `Terrarium.UserId` became
+  nullable on 2026-10-23, and `<NULL> = <account>` matches nobody, so a scoped read could see no row for a terrarium
+  whose readings it was already showing.
 - **The detail carries no snapshot reference**, although the table above lists one: `Alert.ThresholdSnapshotId`
   exists in `07-appendices/02` §3.8's sketch and in no built table, so a field named after it would promise
   something the database cannot keep. The band the alert denormalises is what explains it today, and the reference

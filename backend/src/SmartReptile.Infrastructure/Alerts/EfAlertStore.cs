@@ -32,7 +32,8 @@ public sealed class EfAlertStore(SmartReptileDbContext db) : IAlertStore
         Guid userId,
         AlertQuery query,
         int take,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool anyAccount = false)
     {
         ArgumentNullException.ThrowIfNull(query);
 
@@ -41,12 +42,26 @@ public sealed class EfAlertStore(SmartReptileDbContext db) : IAlertStore
         var rows = from alert in db.Alerts
                    join terrarium in db.Terrariums on alert.TerrariumId equals terrarium.Id
                    join device in db.Devices on alert.DeviceId equals device.Id
-                   where terrarium.UserId == userId
-                   select new { Alert = alert, DevicePublicId = device.PublicId };
+                   select new { Alert = alert, DevicePublicId = device.PublicId, terrarium.UserId };
+
+        // Dropped for an administrator, for the reason `FindAnyAsync` gives about the single-alert read. It is also
+        // what makes an unowned terrarium reachable at all: `UserId` is nullable since 2026-10-23, and `NULL = <id>`
+        // matches no account, so a scoped read would hide its alerts from everyone — the administrator included.
+        if (!anyAccount)
+        {
+            rows = rows.Where(row => row.UserId == userId);
+        }
 
         if (query.State is { } state)
         {
             rows = rows.Where(row => row.Alert.State == state);
+        }
+
+        if (query.InProgress)
+        {
+            // "Not resolved" rather than "open": an acknowledged alert is still somebody's problem, so the tab that
+            // lists what needs attention keeps it instead of dropping it the moment it is picked up.
+            rows = rows.Where(row => row.Alert.State != AlertState.Resolved);
         }
 
         if (query.Severity is { } severity)
@@ -90,6 +105,62 @@ public sealed class EfAlertStore(SmartReptileDbContext db) : IAlertStore
             .Select(row => new AlertRecord(row.Alert, row.DevicePublicId))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<AlertCounts> CountByStateAsync(
+        Guid userId,
+        AlertQuery query,
+        CancellationToken cancellationToken,
+        bool anyAccount = false)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        // The same joins and the same owner predicate as the list: a count that disagreed with the page it labels
+        // would be worse than no count at all. The device join is kept for the same reason it is in the list — the
+        // list drops an alert whose board row is gone, so its count has to drop it too.
+        var rows = from alert in db.Alerts
+                   join terrarium in db.Terrariums on alert.TerrariumId equals terrarium.Id
+                   join device in db.Devices on alert.DeviceId equals device.Id
+                   where anyAccount || terrarium.UserId == userId
+                   select alert;
+
+        // Everything the caller filtered on, except the state itself — including `InProgress`, which is a state
+        // filter wearing another name: a count that dropped the resolved rows could not label the resolved tab.
+        if (query.Severity is { } severity)
+        {
+            rows = rows.Where(alert => alert.Severity == severity);
+        }
+        if (query.Metric is { } metric)
+        {
+            rows = rows.Where(alert => alert.Metric == metric);
+        }
+
+        if (query.Family is { } family)
+        {
+            rows = rows.Where(alert => alert.Family == family);
+        }
+
+        if (query.FromUtc is { } from)
+        {
+            rows = rows.Where(alert => alert.TriggeredAt >= from);
+        }
+
+        if (query.ToUtc is { } to)
+        {
+            rows = rows.Where(alert => alert.TriggeredAt <= to);
+        }
+
+        var counts = await rows
+            .GroupBy(alert => alert.State)
+            .Select(group => new { State = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return new AlertCounts(
+            counts.Where(count => count.State == AlertState.Open).Sum(count => count.Count),
+            counts.Where(count => count.State == AlertState.Acknowledged).Sum(count => count.Count),
+            counts.Where(count => count.State == AlertState.Resolved).Sum(count => count.Count));
     }
 
     /// <inheritdoc />

@@ -486,21 +486,25 @@ class AppDataProvider extends ChangeNotifier {
       final payload = await client.getJson('/api/v1/alerts');
       final items = payload['items'] as List<dynamic>? ?? [];
 
-      if (items.isNotEmpty) {
-        final list = <AlertModel>[];
-        for (final item in items) {
-          if (item is Map<String, dynamic>) {
-            final alert = AlertModel.fromApi(item);
-            final matched = _terrariums.where((t) => t.id == alert.terrariumId);
-            if (matched.isNotEmpty && matched.first.name.isNotEmpty) {
-              alert.terrariumName = 'Chuồng nuôi: ${matched.first.name}';
-            }
-            list.add(alert);
+      final list = <AlertModel>[];
+      for (final item in items) {
+        if (item is Map<String, dynamic>) {
+          final alert = AlertModel.fromApi(item);
+          final matched = _terrariums.where((t) => t.id == alert.terrariumId);
+          if (matched.isNotEmpty && matched.first.name.isNotEmpty) {
+            alert.terrariumName = 'Chuồng nuôi: ${matched.first.name}';
           }
+          list.add(alert);
         }
-        _alerts = list;
       }
-    } catch (_) {}
+
+      // Assigned even when the answer is empty: an account with no alerts has no alerts, and the seeded mock list
+      // must not stand in for one. Keeping it would report incidents that never happened.
+      _alerts = list;
+    } catch (_) {
+      // A failed read is not evidence of alerts either, so the mock residue goes too.
+      _alerts = [];
+    }
   }
 
   /// GET /api/v1/species-profiles
@@ -608,30 +612,40 @@ class AppDataProvider extends ChangeNotifier {
   }
 
   /// POST /api/v1/alerts/{id}/resolve
-  Future<bool> resolveAlert(String alertId) async {
-    final index = _alerts.indexWhere((a) => a.id == alertId);
-    if (index != -1) {
-      _alerts[index].isResolved = true;
-      _alerts[index].resolvedAt = 'Vừa xong';
-      notifyListeners();
+  ///
+  /// The server refuses a resolve that carries no reason — the four it accepts are the product's own vocabulary for
+  /// why an excursion ended — so the caller supplies one. On a live account the list is re-read afterwards rather
+  /// than patched locally: a resolve can still be refused (`409 alert_not_open`), and a screen that guessed would
+  /// show a closed alert the server had kept open.
+  Future<bool> resolveAlert(String alertId, String reason) async {
+    final client = _api;
+    final numericId = int.tryParse(alertId);
+
+    if (client == null || client.accessToken == null || numericId == null) {
+      // Nothing to call: the local flip is the whole story, which is what the mock-data notice says.
+      final index = _alerts.indexWhere((a) => a.id == alertId);
+      if (index != -1) {
+        _alerts[index].isResolved = true;
+        _alerts[index].resolvedAt = 'Vừa xong';
+        notifyListeners();
+      }
+      return true;
     }
 
-    final client = _api;
-    if (client != null && client.accessToken != null) {
-      final numericId = int.tryParse(alertId);
-      if (numericId != null) {
-        try {
-          await client.postJson(
-            '/api/v1/alerts/$numericId/resolve',
-            body: {'note': 'Đã kiểm tra và xử lý qua ứng dụng di động'},
-          );
-          return true;
-        } catch (_) {
-          return false;
-        }
-      }
+    try {
+      await client.postJson(
+        '/api/v1/alerts/$numericId/resolve',
+        body: {
+          'reason': reason,
+          'note': 'Đã kiểm tra và xử lý qua ứng dụng di động',
+        },
+      );
+      await fetchAlerts();
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
     }
-    return true;
   }
 
   void addTerrarium({
