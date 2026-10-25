@@ -131,9 +131,12 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     {
         var profile = await store.FindAsync(profileId, cancellationToken).ConfigureAwait(false);
 
-        // A foreign custom profile answers exactly like a missing one (BR-02.2) — the rule the list applies by never
-        // returning it, and the picture route applies by refusing to open it.
-        if (profile is null || (!profile.IsBuiltIn && profile.CreatedByUserId != userId))
+        var isCreatedByAdmin = profile?.CreatedByUserId is { } author
+            && await store.IsAdminUserAsync(author, cancellationToken).ConfigureAwait(false);
+
+        // A foreign custom profile answers exactly like a missing one (BR-02.2) — unless it was created by an
+        // administrator as part of the shared catalogue.
+        if (profile is null || (!profile.IsBuiltIn && profile.CreatedByUserId != userId && !isCreatedByAdmin))
         {
             return SpeciesProfileOutcome.NotFound();
         }
@@ -642,9 +645,12 @@ public sealed class SpeciesProfileService(ISpeciesProfileStore store, IFileStore
     {
         var profile = await store.FindAsync(profileId, cancellationToken).ConfigureAwait(false);
 
-        // A foreign custom profile answers exactly like a missing one (BR-02.2) — the same rule the list applies by
-        // never returning it.
-        if (profile is null || (!profile.IsBuiltIn && profile.CreatedByUserId != userId))
+        var isCreatedByAdmin = profile?.CreatedByUserId is { } author
+            && await store.IsAdminUserAsync(author, cancellationToken).ConfigureAwait(false);
+
+        // A foreign custom profile answers exactly like a missing one (BR-02.2) — unless it was created by an
+        // administrator as part of the shared catalogue.
+        if (profile is null || (!profile.IsBuiltIn && profile.CreatedByUserId != userId && !isCreatedByAdmin))
         {
             return SpeciesProfileOutcome.NotFound();
         }

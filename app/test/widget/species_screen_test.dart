@@ -236,5 +236,155 @@ void main() {
       expect(lightBand['targetMax'], 1200.0);
     },
   );
+
+  testWidgets(
+    'built-in profiles display localized Vietnamese names and are searchable in Vietnamese',
+    (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final api = ApiClient(
+        baseUrl: 'http://localhost',
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/api/v1/species-profiles') {
+            return http.Response(
+              jsonEncode(testProfiles),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('{}', 200, headers: {'content-type': 'application/json'});
+        }),
+      );
+
+      final service = SpeciesProfileService(api: api);
+      final provider = SpeciesProfileProvider(service: service);
+      await provider.fetchProfiles();
+
+      final adminSession = await buildSession(
+        role: 'Administrator',
+        permissions: [Permissions.speciesRead],
+      );
+
+      await tester.pumpWidget(buildScreen(session: adminSession, provider: provider));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Display name is localized to Vietnamese
+      expect(find.text('Rồng râu Úc (Arid desert)'), findsOneWidget);
+
+      // Search in Vietnamese
+      final searchInput = find.byType(TextField);
+      await tester.enterText(searchInput, 'rồng râu');
+      await tester.pumpAndSettle();
+      expect(find.text('Rồng râu Úc (Arid desert)'), findsOneWidget);
+
+      // Search in English still works
+      await tester.enterText(searchInput, 'arid');
+      await tester.pumpAndSettle();
+      expect(find.text('Rồng râu Úc (Arid desert)'), findsOneWidget);
+
+      // Non-matching query
+      await tester.enterText(searchInput, 'khong_ton_tai');
+      await tester.pumpAndSettle();
+      expect(find.text('Rồng râu Úc (Arid desert)'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'owner can view all profiles including admin-created ones in read-only mode without create/edit/delete',
+    (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final mixedProfiles = {
+        'items': [
+          {
+            'id': 'sp-builtin-1',
+            'name': 'Arid (desert)',
+            'scientificName': 'Pogona vitticeps',
+            'climateZone': 'Arid',
+            'photoperiodHours': 12,
+            'isBuiltIn': true,
+            'canEdit': false,
+            'bands': [],
+          },
+          {
+            'id': 'sp-admin-1',
+            'name': 'Kỳ đà hoa (Admin authored)',
+            'scientificName': 'Varanus salvator',
+            'climateZone': 'Tropical',
+            'photoperiodHours': 12,
+            'isBuiltIn': false,
+            'canEdit': false, // Owner cannot edit admin profile
+            'bands': [
+              {
+                'metric': 'tempC',
+                'phase': 'day',
+                'targetMin': 28.0,
+                'targetMax': 35.0,
+                'unit': '°C',
+              },
+            ],
+          },
+        ],
+      };
+
+      final api = ApiClient(
+        baseUrl: 'http://localhost',
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/api/v1/species-profiles') {
+            return http.Response(
+              jsonEncode(mixedProfiles),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response('{}', 200, headers: {'content-type': 'application/json'});
+        }),
+      );
+
+      final service = SpeciesProfileService(api: api);
+      final provider = SpeciesProfileProvider(service: service);
+      await provider.fetchProfiles();
+
+      // Owner logs in
+      final ownerSession = await buildSession(
+        role: 'Owner',
+        permissions: [Permissions.speciesRead],
+      );
+
+      await tester.pumpWidget(buildScreen(session: ownerSession, provider: provider));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 1. Owner sees both the built-in profile AND the admin-created profile
+      expect(find.text('Rồng râu Úc (Arid desert)'), findsOneWidget);
+      expect(find.text('Kỳ đà hoa (Admin authored)'), findsOneWidget);
+
+      // 2. Owner does NOT have the 'Thêm loài' button
+      expect(find.text('Thêm loài'), findsNothing);
+
+      // 3. Owner does NOT have edit/delete popups
+      expect(find.byIcon(Icons.more_vert), findsNothing);
+
+      // 4. Owner can tap on the admin-created profile to view details
+      await tester.tap(find.text('Kỳ đà hoa (Admin authored)'));
+      await tester.pumpAndSettle();
+
+      // Details dialog opens
+      expect(find.text('Kỳ đà hoa (Admin authored)'), findsWidgets);
+      expect(find.textContaining('Varanus salvator'), findsWidgets);
+
+      // Management buttons (Lưu, Chỉnh sửa, Nhân bản) must NOT be present in Owner dialog
+      expect(find.text('Nhân bản'), findsNothing);
+      expect(find.text('Chỉnh sửa'), findsNothing);
+
+      // Only 'Đóng' button is available
+      expect(find.text('Đóng'), findsOneWidget);
+    },
+  );
 }
 
