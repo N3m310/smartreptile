@@ -76,7 +76,7 @@ class _TerrariumsScreenState extends State<TerrariumsScreen> {
         ? data.terrariums.where((t) {
             final q = _searchQuery.toLowerCase();
             return t.name.toLowerCase().contains(q) ||
-                t.speciesName.toLowerCase().contains(q) ||
+                (t.speciesName?.toLowerCase().contains(q) ?? false) ||
                 (t.description?.toLowerCase().contains(q) ?? false) ||
                 (t.location?.toLowerCase().contains(q) ?? false);
           }).toList()
@@ -287,6 +287,7 @@ class _TerrariumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
       clipBehavior: Clip.antiAlias,
@@ -329,7 +330,11 @@ class _TerrariumCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      SpeciesLocalization.displayName(item.speciesName),
+                      // The catalogue's profiles carry an English name and a Vietnamese display name; an
+                      // enclosure with no profile has neither, and says so (2026-10-25).
+                      item.speciesName == null
+                          ? l10n.terrariumNoSpecies
+                          : SpeciesLocalization.displayName(item.speciesName!),
                       style: const TextStyle(
                         color: AppColors.accent,
                         fontSize: 12,
@@ -393,14 +398,25 @@ class _CreateTerrariumSheet extends StatefulWidget {
 }
 
 class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
+  /// Dropdown value that means "this enclosure has no species yet" (2026-10-25). A sentinel rather than a null
+  /// value because a `DropdownButtonFormField` renders its hint, not the null item, when its value is null.
+  static const _noProfile = '';
+
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _location = TextEditingController();
   List<ApiSpeciesProfile> _profiles = [];
-  ApiSpeciesProfile? _selected;
+  String _selectedProfileId = _noProfile;
   AppFailure? _failure;
   bool _loadingProfiles = true;
   bool _saving = false;
+
+  ApiSpeciesProfile? get _selectedProfile {
+    for (final profile in _profiles) {
+      if (profile.id == _selectedProfileId) return profile;
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -416,7 +432,7 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
       if (!mounted) return;
       setState(() {
         _profiles = profiles;
-        _selected = profiles.isEmpty ? null : profiles.first;
+        _selectedProfileId = profiles.isEmpty ? _noProfile : profiles.first.id;
         _loadingProfiles = false;
       });
     } on AppFailure catch (failure) {
@@ -429,7 +445,7 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate() || _selected == null) return;
+    if (!_formKey.currentState!.validate()) return;
     setState(() {
       _failure = null;
       _saving = true;
@@ -437,7 +453,7 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
     try {
       final created = await context.read<TerrariumProvider>().createTerrarium(
         name: _name.text,
-        speciesProfileId: _selected!.id,
+        speciesProfileId: _selectedProfileId.isEmpty ? null : _selectedProfileId,
         location: _location.text,
       );
       if (mounted) Navigator.pop(context, created);
@@ -502,67 +518,67 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
             const SizedBox(height: 10),
             if (_loadingProfiles)
               const Center(child: CircularProgressIndicator())
-            else if (_failure != null)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    failureMessage(l10n, _failure!),
-                    style: const TextStyle(color: AppColors.statusDanger),
-                  ),
-                  TextButton(onPressed: _loadProfiles, child: Text(l10n.retry)),
-                ],
-              )
-            else
-              DropdownButtonFormField<ApiSpeciesProfile>(
-                initialValue: _selected,
-                isExpanded: true,
-                decoration: InputDecoration(labelText: l10n.terrariumSpecies),
-                items: _profiles
-                    .map(
-                      (profile) => DropdownMenuItem(
-                        value: profile,
-                        child: Row(
-                          children: [
-                            _ProfileThumbnail(profile: profile),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    SpeciesLocalization.displayName(profile.name),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (profile.scientificName.isNotEmpty)
-                                    Text(
-                                      profile.scientificName,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: AppColors.textMuted,
-                                        fontSize: 11,
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
+            else ...[
+              if (_failure != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          failureMessage(l10n, _failure!),
+                          style: const TextStyle(color: AppColors.statusDanger),
                         ),
                       ),
-                    )
-                    .toList(),
-                onChanged: (profile) => setState(() => _selected = profile),
-                validator: (profile) =>
-                    profile == null ? l10n.speciesProfileChoose : null,
+                      TextButton(onPressed: _loadProfiles, child: Text(l10n.retry)),
+                    ],
+                  ),
+                ),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedProfileId,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: l10n.terrariumSpecies,
+                  helperText: l10n.terrariumSpeciesOptional,
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: _noProfile,
+                    child: Text(
+                      l10n.terrariumNoSpeciesLong,
+                      style: const TextStyle(color: AppColors.textMuted),
+                    ),
+                  ),
+                  for (final profile in _profiles)
+                    DropdownMenuItem(
+                      value: profile.id,
+                      // One line per row: the field is a form control, not a list, and the second line (the Latin
+                      // name) overflowed it by 17 px on a 1080-wide screen. The details are one tap away below.
+                      child: Row(
+                        children: [
+                          _ProfileThumbnail(profile: profile),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              SpeciesLocalization.displayName(profile.name),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+                onChanged: (id) =>
+                    setState(() => _selectedProfileId = id ?? _noProfile),
               ),
-            if (_selected != null) ...[
+            ],
+            if (_selectedProfile != null) ...[
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  onPressed: () => _showProfileDetails(context, _selected!),
+                  onPressed: () =>
+                      _showProfileDetails(context, _selectedProfile!),
                   icon: const Icon(Icons.info_outline),
                   label: Text(l10n.speciesProfileDetail),
                 ),
@@ -588,9 +604,7 @@ class _CreateTerrariumSheetState extends State<_CreateTerrariumSheet> {
             SizedBox(
               height: 48,
               child: ElevatedButton(
-                onPressed: _saving || _loadingProfiles || _selected == null
-                    ? null
-                    : _submit,
+                onPressed: _saving || _loadingProfiles ? null : _submit,
                 child: Text(_saving ? l10n.creating : l10n.create),
               ),
             ),
