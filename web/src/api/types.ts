@@ -220,6 +220,25 @@ export interface CreateTerrariumBody {
 }
 
 /**
+ * Body of `PATCH /terrariums/{id}`. Every member is optional and an omitted one is left unchanged
+ * (`07-appendices/03` §4.2), so a caller sends only what it edited.
+ */
+export interface UpdateTerrariumBody {
+  name?: string | null;
+  /**
+   * The profile whose bands judge the enclosure. Omitted means "leave the current one", which is why there is no
+   * way to spell "no species" with `null`: the all-zero GUID is the record's empty and detaches the profile
+   * (2026-10-25).
+   */
+  speciesProfileId?: string | null;
+  location?: string | null;
+  description?: string | null;
+  timeZoneId?: string | null;
+  /** Administrators only; an ordinary keeper sending it is refused with `owner_change_forbidden`. */
+  ownerUserId?: string | null;
+}
+
+/**
  * One entry of the time-zone catalogue — the value to store plus what a picker renders
  * (`GET /time-zones`, TASKS 2026-10-14, item 11).
  */

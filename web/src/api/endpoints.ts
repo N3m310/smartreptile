@@ -45,6 +45,7 @@ import type {
   UpdateRoleBody,
   UpdateProfileBody,
   UpdateSpeciesProfileBody,
+  UpdateTerrariumBody,
   UserPage,
   UserProfile,
   UserSummary,
@@ -128,6 +129,23 @@ export async function listTerrariums(): Promise<TerrariumList> {
  */
 export async function createTerrarium(body: CreateTerrariumBody): Promise<TerrariumItem> {
   return apiRequest('/api/v1/terrariums', { method: 'POST', body });
+}
+
+/**
+ * `PATCH /terrariums/{id}` — requires `terrarium.write` and the version the caller read, sent as `If-Match`
+ * (`07-appendices/03` §4.2). Omitted members are left unchanged, so a caller sends only what it edited; the
+ * all-zero GUID detaches the species profile, which is what "no species" has to be spelled as.
+ */
+export async function updateTerrarium(
+  id: string,
+  body: UpdateTerrariumBody,
+  rowVersion: string
+): Promise<TerrariumItem> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': rowVersion },
+    body,
+  });
 }
 
 /** `GET /species-profiles` — the built-ins plus this account's own, each with its bands (roadmap 3.9). */

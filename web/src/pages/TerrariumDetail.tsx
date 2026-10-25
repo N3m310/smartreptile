@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Activity, BatteryMedium, Cpu, History, Loader2, Pencil, Plus, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
+import { ArrowLeft, Activity, BatteryMedium, Cpu, History, Leaf, Loader2, Pencil, Plus, Radio, Save, Sliders, Undo2, Wifi } from 'lucide-react';
 import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
-import type { Coverage, DeviceList, EffectiveThreshold, LatestReadings, TerrariumItem, TerrariumThresholds, ThresholdOverrideInput, UserPage } from '../api/types';
+import type { Coverage, DeviceList, EffectiveThreshold, LatestReadings, SpeciesProfileList, TerrariumItem, TerrariumThresholds, ThresholdOverrideInput, UserPage } from '../api/types';
 import { MetricCard } from '../components/MetricCard';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
 import { useI18n } from '../i18n';
@@ -18,13 +18,16 @@ import { useSession } from '../state/session';
  * W2 — one terrarium (roadmap 4.16) with its threshold editor (4.20, over 3.1's read and write halves).
  *
  * The read surface is the server's throughout: every value, the phase it was resolved in and the layer it came from
- * are rendered as sent (ADR-005), so the editor previews exactly what the evaluator will act on. Still unwired:
- * `PATCH`/`DELETE` on the terrarium itself, which are built and belong to a rename/delete form this page does not
- * have yet.
+ * are rendered as sent (ADR-005), so the editor previews exactly what the evaluator will act on. The species can be
+ * re-pointed here (2026-10-25); `DELETE` on the terrarium itself is still unwired, and belongs to a delete form this
+ * page does not have yet.
  */
 
 const POLL_MS = 30_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The record's "empty species": a `PATCH` carrying this id detaches the profile (2026-10-25). */
+const EMPTY_SPECIES_PROFILE_ID = '00000000-0000-0000-0000-000000000000';
 
 export const TerrariumDetail: React.FC = () => {
   const { id = '' } = useParams();
@@ -40,6 +43,9 @@ export const TerrariumDetail: React.FC = () => {
   // cannot give their enclosure away, and the picker needs `user.read` to list candidates.
   const canAssignOwner =
     hasPermission(PERMISSION_CODES.dataWriteAny) && hasPermission(PERMISSION_CODES.userRead);
+  // Re-pointing an enclosure at a different profile is `terrarium.write`: the bands it is judged against belong to
+  // the enclosure, so whoever may edit the enclosure may also change which species it is (FR-18).
+  const canEditSpecies = hasPermission(PERMISSION_CODES.terrariumWrite);
 
   const terrarium = usePolled<TerrariumItem>(() => api.getTerrarium(id), POLL_MS, [id]);
   const latest = usePolled<LatestReadings>(() => api.latestReadings(id), POLL_MS, [id]);
@@ -68,6 +74,23 @@ export const TerrariumDetail: React.FC = () => {
   const [ownerId, setOwnerId] = useState('');
   const [ownerBusy, setOwnerBusy] = useState(false);
   const [ownerError, setOwnerError] = useState<ApiError | null>(null);
+
+  // The catalogue is the create panel's list, read the same way and for the same reason: it changes when someone
+  // authors a profile on another screen, and a picker that reshuffles under a half-made choice is worse than one a
+  // minute old. An account without `terrarium.write` never spends the request.
+  const profiles = usePolled<SpeciesProfileList>(
+    () => (canEditSpecies ? api.listSpeciesProfiles() : Promise.resolve({ items: [] })),
+    null,
+    [canEditSpecies]
+  );
+  // `null` means the keeper has not touched the picker, so the shown value follows the server's. That is what makes
+  // a reload after a save — or the poll that follows — display the stored species instead of a stale choice.
+  const [speciesChoice, setSpeciesChoice] = useState<string | null>(null);
+  const [speciesBusy, setSpeciesBusy] = useState(false);
+  const [speciesError, setSpeciesError] = useState<ApiError | null>(null);
+  const [speciesSaved, setSpeciesSaved] = useState(false);
+  // Bumped after a save so the thresholds below re-read: until an override exists, their bands are the profile's.
+  const [bandRevision, setBandRevision] = useState(0);
 
   const coverage = usePolled<Coverage | null>(
     () => {
@@ -110,6 +133,10 @@ export const TerrariumDetail: React.FC = () => {
 
   const device = latest.data?.device ?? item.device;
 
+  const storedSpecies = item.speciesProfileId ?? '';
+  const selectedSpecies = speciesChoice ?? storedSpecies;
+  const speciesDirty = selectedSpecies !== storedSpecies;
+
   const submitBind = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!bindDeviceId) {
@@ -132,6 +159,40 @@ export const TerrariumDetail: React.FC = () => {
       setBindError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
     } finally {
       setBindBusy(false);
+    }
+  };
+
+  const submitSpecies = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!speciesDirty) {
+      return;
+    }
+
+    if (!item.rowVersion) {
+      // The single-terrarium answer always carries the token; without it the server would refuse the patch anyway.
+      setSpeciesError(new ApiError('precondition_required', 428, null));
+      return;
+    }
+
+    setSpeciesBusy(true);
+    setSpeciesError(null);
+    setSpeciesSaved(false);
+    try {
+      await api.updateTerrarium(
+        item.id,
+        // "No species" is the all-zero GUID, never `null`: null omits the member and would leave the current profile.
+        { speciesProfileId: selectedSpecies === '' ? EMPTY_SPECIES_PROFILE_ID : selectedSpecies },
+        item.rowVersion
+      );
+      setSpeciesChoice(null);
+      setSpeciesSaved(true);
+      terrarium.reload();
+      // The bands below come from the profile until an override exists, so the species change dates them.
+      setBandRevision((revision) => revision + 1);
+    } catch (cause) {
+      setSpeciesError(cause instanceof ApiError ? cause : new ApiError('unknown', 0, null));
+    } finally {
+      setSpeciesBusy(false);
     }
   };
 
@@ -182,7 +243,7 @@ export const TerrariumDetail: React.FC = () => {
           <div>
             <h1 className="font-heading text-2xl font-bold text-ink">{item.name}</h1>
             <p className="mt-1 text-sm text-muted">
-              {item.speciesName}
+              {item.speciesName ?? t('terrariumNoSpecies')}
               {item.location ? ` · ${item.location}` : ''}
             </p>
             {item.description ? <p className="mt-2 text-sm text-muted">{item.description}</p> : null}
@@ -225,6 +286,66 @@ export const TerrariumDetail: React.FC = () => {
           </div>
         </dl>
       </header>
+
+      {/*
+        Re-pointing the enclosure at another species (2026-10-25). The bands that judge it are the profile's, so this
+        is an edit of the enclosure itself: `PATCH /terrariums/{id}` over `terrarium.write`, carrying the version read
+        with the page. A save also dates the thresholds below, which re-read with it.
+      */}
+      {canEditSpecies ? (
+        <section className="rounded-2xl border border-hairline bg-surface px-5 py-4">
+          <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-muted">
+            {t('terrariumSpecies')}
+          </h2>
+          <form onSubmit={(event) => void submitSpecies(event)} className="mt-3 flex flex-wrap items-end gap-2">
+            <label htmlFor="terrarium-species-edit" className="min-w-[240px] flex-1 text-xs text-muted">
+              {t('terrariumSpecies')}
+              <select
+                id="terrarium-species-edit"
+                value={selectedSpecies}
+                onChange={(event) => {
+                  setSpeciesChoice(event.target.value);
+                  setSpeciesSaved(false);
+                }}
+                className="mt-1 block w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"
+              >
+                <option value="">{t('terrariumNoSpeciesLong')}</option>
+                {(profiles.data?.items ?? []).map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.scientificName ? `${profile.name} — ${profile.scientificName}` : profile.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              disabled={speciesBusy || !speciesDirty}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {speciesBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Save className="h-4 w-4" aria-hidden="true" />
+              )}
+              {t('save')}
+            </button>
+          </form>
+          <p className="mt-2 text-[11px] text-muted">
+            {storedSpecies === '' ? t('terrariumNoSpeciesHint') : t('terrariumSpeciesOptional')}
+          </p>
+          {profiles.error ? (
+            <p role="alert" className="mt-2 text-xs text-critical">{describeError(t, profiles.error)}</p>
+          ) : null}
+          {speciesError ? (
+            <p role="alert" className="mt-2 text-xs text-critical">{describeError(t, speciesError)}</p>
+          ) : null}
+          {speciesSaved ? (
+            <p role="status" className="mt-2 rounded-lg border border-brand/40 bg-brand/10 px-2.5 py-2 text-[11px] text-ink">
+              {t('terrariumUpdated')}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {canAssignOwner ? (
         <section className="rounded-2xl border border-hairline bg-surface px-5 py-4">
@@ -442,7 +563,7 @@ export const TerrariumDetail: React.FC = () => {
         </div>
       </section>
 
-      <ThresholdsSection terrariumId={id} canEdit={canEditThresholds} />
+      <ThresholdsSection terrariumId={id} canEdit={canEditThresholds} refreshToken={bandRevision} />
     </div>
   );
 };
@@ -474,12 +595,16 @@ interface BandDraft {
  *    target band and the margin when the field is omitted, so clearing it removes the explicit bounds instead of
  *    pinning them to the target's edges.
  */
-const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean }> = ({ terrariumId, canEdit }) => {
+const ThresholdsSection: React.FC<{ terrariumId: string; canEdit: boolean; refreshToken?: number }> = ({
+  terrariumId,
+  canEdit,
+  refreshToken = 0,
+}) => {
   const { t, lang } = useI18n();
   const thresholds = usePolled<TerrariumThresholds>(
     () => api.terrariumThresholds(terrariumId),
     POLL_MS,
-    [terrariumId]
+    [terrariumId, refreshToken]
   );
 
   const [editing, setEditing] = useState<string | null>(null);
