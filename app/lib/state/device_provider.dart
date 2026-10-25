@@ -94,12 +94,14 @@ class DeviceProvider extends ChangeNotifier {
   Future<ClaimResult> claimDevice({
     required String claimCode,
     required String terrariumId,
+    String? deviceName,
   }) async {
     final payload = await api.postJson(
       '/api/v1/devices/claim',
       body: {
         'claimCode': claimCode.trim(),
         'terrariumId': terrariumId,
+        'deviceName': ?deviceName,
       },
     );
     final result = ClaimResult.fromJson(payload);
@@ -110,12 +112,14 @@ class DeviceProvider extends ChangeNotifier {
   Future<ClaimResult> claimByMac({
     required String macAddress,
     required String terrariumId,
+    String? deviceName,
   }) async {
     final payload = await api.postJson(
       '/api/v1/devices/claim-by-mac',
       body: {
         'macAddress': macAddress.trim(),
         'terrariumId': terrariumId,
+        'deviceName': ?deviceName,
       },
     );
     final result = ClaimResult.fromJson(payload);

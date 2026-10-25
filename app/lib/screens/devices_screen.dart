@@ -848,6 +848,7 @@ class _ClaimDeviceSheet extends StatefulWidget {
 class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
   final _claimCodeController = TextEditingController();
   final _macController = TextEditingController();
+  final _nameController = TextEditingController();
   String? _selectedTerrariumId;
   bool _useMac = false;
   bool _busy = false;
@@ -857,6 +858,7 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
   void dispose() {
     _claimCodeController.dispose();
     _macController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -972,6 +974,23 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
             onChanged: (val) => setState(() => _selectedTerrariumId = val),
           ),
 
+          const SizedBox(height: 16),
+
+          // Optional: a board named here reaches the fleet with that label instead of "New node" (2026-10-23).
+          TextField(
+            controller: _nameController,
+            maxLength: 60,
+            style: const TextStyle(color: AppColors.textMain),
+            decoration: InputDecoration(
+              labelText: 'Tên thiết bị (không bắt buộc)',
+              hintText: 'VD: Node bể gecko',
+              prefixIcon: const Icon(Icons.badge_outlined, color: AppColors.textMuted),
+              filled: true,
+              fillColor: AppColors.bgInput,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(
@@ -1043,15 +1062,20 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
       final deviceProv = context.read<DeviceProvider>();
       final ClaimResult result;
 
+      // Sent only when the keeper typed one: an omitted name keeps whatever the board already carries.
+      final deviceName = _nameController.text.trim().isEmpty ? null : _nameController.text.trim();
+
       if (_useMac) {
         result = await deviceProv.claimByMac(
           macAddress: mac,
           terrariumId: _selectedTerrariumId!,
+          deviceName: deviceName,
         );
       } else {
         result = await deviceProv.claimDevice(
           claimCode: code,
           terrariumId: _selectedTerrariumId!,
+          deviceName: deviceName,
         );
       }
 

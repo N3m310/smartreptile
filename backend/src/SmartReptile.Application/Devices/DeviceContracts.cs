@@ -23,7 +23,14 @@ public sealed record SelfRegisterResult(
     bool AlreadyRegistered);
 
 /// <summary>Claim input: the code off the screen plus the terrarium to bind to.</summary>
-public sealed record ClaimRequest(string? ClaimCode, Guid TerrariumId);
+/// <param name="ClaimCode">Code shown by the board.</param>
+/// <param name="TerrariumId">Enclosure to bind to. Required: a sample must belong to an enclosure, so a board with
+/// nowhere to report into would be claimed but unusable.</param>
+/// <param name="DeviceName">
+/// Name to give the board in the same request (2026-10-23). Omitted keeps the default label; an empty string also
+/// means the default. At most 60 characters — the same rule `PATCH /devices/{id}` applies.
+/// </param>
+public sealed record ClaimRequest(string? ClaimCode, Guid TerrariumId, string? DeviceName = null);
 
 /// <summary>
 /// Claim input for the MAC variant: the address printed on the board instead of a code (TASKS 2026-10-14, item 8).
@@ -33,7 +40,11 @@ public sealed record ClaimRequest(string? ClaimCode, Guid TerrariumId);
 /// normalised before it is looked up.
 /// </param>
 /// <param name="TerrariumId">Terrarium to bind to.</param>
-public sealed record ClaimByMacRequest(string? MacAddress, Guid TerrariumId);
+/// <param name="DeviceName">
+/// Name to give the board in the same request; omitted or empty keeps the default label, and it is capped at 60
+/// characters exactly as `PATCH /devices/{id}` caps it.
+/// </param>
+public sealed record ClaimByMacRequest(string? MacAddress, Guid TerrariumId, string? DeviceName = null);
 
 /// <summary>
 /// The one and only time the device secret is handed out (§02-design/06 §5).

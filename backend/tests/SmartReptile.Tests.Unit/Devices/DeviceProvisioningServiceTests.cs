@@ -175,6 +175,63 @@ public class DeviceProvisioningServiceTests
     }
 
     [Fact]
+    public async Task Claim_names_the_board_when_the_request_does()
+    {
+        var (code, deviceId, terrariumId) = await ArrangeAsync();
+
+        // The claim dialog collects the name, so the fleet never shows "New node" for a board the keeper has just
+        // named (2026-10-23).
+        var outcome = await _service.ClaimAsync(
+            new ClaimRequest(code, terrariumId, "  Gecko box node  "),
+            _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.Devices.Single(device => device.PublicId == deviceId).DeviceName.Should().Be("Gecko box node");
+    }
+
+    [Fact]
+    public async Task Claim_falls_back_to_the_default_label_for_a_blank_name()
+    {
+        var (code, deviceId, terrariumId) = await ArrangeAsync();
+
+        var outcome = await _service.ClaimAsync(new ClaimRequest(code, terrariumId, "   "), _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.Devices.Single(device => device.PublicId == deviceId).DeviceName.Should().Be("New node");
+    }
+
+    [Fact]
+    public async Task Claim_refuses_a_name_longer_than_the_column()
+    {
+        var (code, deviceId, terrariumId) = await ArrangeAsync();
+        var savesBeforeClaim = _store.SaveCount;
+
+        var outcome = await _service.ClaimAsync(
+            new ClaimRequest(code, terrariumId, new string('a', DeviceLimits.NameMaxLength + 1)),
+            _owner);
+
+        // Refused before anything is written, so the board is not claimed with a label nobody can see in full.
+        outcome.Problem!.Code.Should().Be("claim_invalid");
+        outcome.Problem.Errors!.Single().Code.Should().Be("device_name_too_long");
+        _store.Devices.Single(device => device.PublicId == deviceId).TerrariumId.Should().BeNull();
+        _store.SaveCount.Should().Be(savesBeforeClaim, "the claim was refused, so it wrote nothing");
+    }
+
+    [Fact]
+    public async Task ClaimByMac_names_the_board_when_the_request_does()
+    {
+        (await SelfRegisterAsync()).Succeeded.Should().BeTrue();
+        var terrarium = _store.AddTerrarium(_owner);
+
+        var outcome = await _service.ClaimByMacAsync(
+            new ClaimByMacRequest(Mac, terrarium.Id, "Kitchen gecko"),
+            _owner);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.Devices.Single().DeviceName.Should().Be("Kitchen gecko");
+    }
+
+    [Fact]
     public async Task Claim_accepts_the_code_as_the_keeper_would_type_it()
     {
         var (code, _, terrariumId) = await ArrangeAsync();

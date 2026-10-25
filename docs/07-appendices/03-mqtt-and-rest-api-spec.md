@@ -49,13 +49,16 @@ Requires the `device.provision` permission (§4.4).
 POST /api/v1/devices/claim
 Authorization: Bearer <jwt>
 
-{ "claimCode": "K7M2-QP4T", "terrariumId": "6f1c…" }
+{ "claimCode": "K7M2-QP4T", "terrariumId": "6f1c…", "deviceName": "Node bể gecko" }
 ```
 ```http
 200 OK
 { "deviceId": "sr-3f9a2c", "secret": "MFRGGZDFMZTWQ2LK…", "terrariumId": "6f1c…", "boundAtUtc": "…" }
 ```
-`secret` is returned **once**; it is never retrievable again. Errors: `401 unauthenticated`,
+`secret` is returned **once**; it is never retrievable again. `deviceName` is optional (2026-10-23): omitted keeps
+the label the board already carries, an empty string restores the default `New node`, and anything longer than 60
+characters is refused with `400 claim_invalid` / `errors[0].code = device_name_too_long` before anything is written.
+Errors: `401 unauthenticated`,
 `403 insufficient_role`, `404 claim_code_invalid` (unknown, expired, consumed or superseded — deliberately
 indistinguishable), `404 not_found` (unknown **or foreign** terrarium, also indistinguishable so ids cannot be
 probed — `BR-02.2`), `409 terrarium_already_bound`.
@@ -74,7 +77,7 @@ is confined to a board that has already self-registered and has no owner yet.
 POST /api/v1/devices/claim-by-mac
 Authorization: ******
 
-{ "macAddress": "A0-B1-C2-D3-E4-F5", "terrariumId": "6f1c…" }
+{ "macAddress": "A0-B1-C2-D3-E4-F5", "terrariumId": "6f1c…", "deviceName": "Node bể gecko" }
 ```
 
 The address is normalised before it is looked up — `AA:BB:CC:DD:EE:FF`, `aa-bb-cc-dd-ee-ff`, `AABB.CCDD.EEFF` and

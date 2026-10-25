@@ -18,6 +18,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _showHum = true;
   bool _showLight = false;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final data = context.read<AppDataProvider>();
+      if (!data.isLive && !data.isLoading) {
+        data.loadAll();
+      }
+    });
+  }
+
   Color _getStatusColor(String status) {
     switch (status) {
       case 'danger':
@@ -420,98 +432,158 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 18),
-                  SizedBox(
-                    height: 170,
-                    child: LineChart(
-                      LineChartData(
-                        gridData: FlGridData(
-                          show: true,
-                          drawVerticalLine: false,
-                          getDrawingHorizontalLine: (val) =>
-                              FlLine(color: AppColors.border, strokeWidth: 1),
-                        ),
-                        titlesData: FlTitlesData(
-                          rightTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
-                          ),
-                          topTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
-                          ),
-                          bottomTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              reservedSize: 22,
-                              interval: 4,
-                              getTitlesWidget: (value, meta) {
-                                final index = value.toInt();
-                                if (index >= 0 && index < history.length) {
-                                  return Text(
-                                    history[index].time,
-                                    style: const TextStyle(
-                                      color: AppColors.textMuted,
-                                      fontSize: 9,
-                                    ),
-                                  );
-                                }
-                                return const SizedBox();
-                              },
+                  Builder(
+                    builder: (context) {
+                      final onlyLight = _showLight && !_showTemp && !_showHum;
+                      final maxLightVal = history.isEmpty
+                          ? 1000.0
+                          : history
+                              .map((h) => h.light.toDouble())
+                              .reduce((a, b) => a > b ? a : b);
+                      final lightScale = onlyLight
+                          ? 1.0
+                          : (maxLightVal > 1600.0 ? maxLightVal / 80.0 : 20.0);
+
+                      final plottedYs = <double>[
+                        if (_showTemp)
+                          for (final h in history) h.temperature,
+                        if (_showHum)
+                          for (final h in history) h.humidity,
+                        if (_showLight)
+                          for (final h in history) h.light / lightScale,
+                      ];
+
+                      double? minY;
+                      double? maxY;
+                      if (plottedYs.isNotEmpty) {
+                        final rawMin = plottedYs.reduce((a, b) => a < b ? a : b);
+                        final rawMax = plottedYs.reduce((a, b) => a > b ? a : b);
+                        if ((rawMax - rawMin).abs() < 4.0) {
+                          final pad = (rawMax.abs() * 0.1).clamp(3.0, 5000.0);
+                          minY = (rawMin - pad).clamp(0.0, double.infinity);
+                          maxY = rawMax + pad;
+                        } else {
+                          final pad = (rawMax - rawMin) * 0.1;
+                          minY = (rawMin - pad).clamp(0.0, double.infinity);
+                          maxY = rawMax + pad;
+                        }
+                      }
+
+                      final bottomInterval = history.length <= 6
+                          ? 1.0
+                          : (history.length / 5).ceilToDouble();
+                      final showDots = history.length <= 12;
+
+                      return SizedBox(
+                        height: 170,
+                        child: LineChart(
+                          LineChartData(
+                            minY: minY,
+                            maxY: maxY,
+                            gridData: FlGridData(
+                              show: true,
+                              drawVerticalLine: false,
+                              getDrawingHorizontalLine: (val) => FlLine(
+                                color: AppColors.border,
+                                strokeWidth: 1,
+                              ),
                             ),
-                          ),
-                          leftTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              reservedSize: 28,
-                              getTitlesWidget: (value, meta) => Text(
-                                value.toInt().toString(),
-                                style: const TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 9,
+                            titlesData: FlTitlesData(
+                              rightTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false),
+                              ),
+                              topTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false),
+                              ),
+                              bottomTitles: AxisTitles(
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  reservedSize: 22,
+                                  interval: bottomInterval,
+                                  getTitlesWidget: (value, meta) {
+                                    if ((value - value.roundToDouble()).abs() >
+                                        0.01) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    final index = value.round();
+                                    if (index >= 0 && index < history.length) {
+                                      return Text(
+                                        history[index].time,
+                                        style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 9,
+                                        ),
+                                      );
+                                    }
+                                    return const SizedBox.shrink();
+                                  },
+                                ),
+                              ),
+                              leftTitles: AxisTitles(
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  reservedSize: 36,
+                                  getTitlesWidget: (value, meta) {
+                                    final label = value >= 1000
+                                        ? '${(value / 1000).toStringAsFixed(value >= 10000 ? 0 : 1)}k'
+                                        : value.toInt().toString();
+                                    return Text(
+                                      label,
+                                      style: const TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 9,
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
+                            borderData: FlBorderData(show: false),
+                            lineBarsData: [
+                              if (_showTemp)
+                                LineChartBarData(
+                                  spots: [
+                                    for (int i = 0; i < history.length; i++)
+                                      FlSpot(
+                                        i.toDouble(),
+                                        history[i].temperature,
+                                      ),
+                                  ],
+                                  isCurved: true,
+                                  color: AppColors.statusDanger,
+                                  barWidth: 2.5,
+                                  dotData: FlDotData(show: showDots),
+                                ),
+                              if (_showHum)
+                                LineChartBarData(
+                                  spots: [
+                                    for (int i = 0; i < history.length; i++)
+                                      FlSpot(i.toDouble(), history[i].humidity),
+                                  ],
+                                  isCurved: true,
+                                  color: AppColors.primary,
+                                  barWidth: 2.5,
+                                  dotData: FlDotData(show: showDots),
+                                ),
+                              if (_showLight)
+                                LineChartBarData(
+                                  spots: [
+                                    for (int i = 0; i < history.length; i++)
+                                      FlSpot(
+                                        i.toDouble(),
+                                        history[i].light / lightScale,
+                                      ),
+                                  ],
+                                  isCurved: true,
+                                  color: AppColors.accent,
+                                  barWidth: 2,
+                                  dotData: FlDotData(show: showDots),
+                                ),
+                            ],
                           ),
                         ),
-                        borderData: FlBorderData(show: false),
-                        lineBarsData: [
-                          if (_showTemp)
-                            LineChartBarData(
-                              spots: [
-                                for (int i = 0; i < history.length; i++)
-                                  FlSpot(i.toDouble(), history[i].temperature),
-                              ],
-                              isCurved: true,
-                              color: AppColors.statusDanger,
-                              barWidth: 2.5,
-                              dotData: const FlDotData(show: false),
-                            ),
-                          if (_showHum)
-                            LineChartBarData(
-                              spots: [
-                                for (int i = 0; i < history.length; i++)
-                                  FlSpot(i.toDouble(), history[i].humidity),
-                              ],
-                              isCurved: true,
-                              color: AppColors.primary,
-                              barWidth: 2.5,
-                              dotData: const FlDotData(show: false),
-                            ),
-                          if (_showLight)
-                            LineChartBarData(
-                              spots: [
-                                for (int i = 0; i < history.length; i++)
-                                  FlSpot(
-                                    i.toDouble(),
-                                    history[i].light / 20.0,
-                                  ), // Scale for chart
-                              ],
-                              isCurved: true,
-                              color: AppColors.accent,
-                              barWidth: 2,
-                              dotData: const FlDotData(show: false),
-                            ),
-                        ],
-                      ),
-                    ),
+                      );
+                    },
                   ),
                 ],
               ),

@@ -193,11 +193,18 @@ export async function moveDevice(deviceId: string, terrariumId: string): Promise
 export async function claimDeviceByMac(body: {
   macAddress: string;
   terrariumId: string;
+  /** Name to give the board in the same request; omitted keeps the default label (2026-10-23). */
+  deviceName?: string;
 }): Promise<{ deviceId: string; secret: string; terrariumId: string; boundAtUtc: string }> {
   return apiRequest('/api/v1/devices/claim-by-mac', { method: 'POST', body });
 }
 
-export async function claimDevice(body: { claimCode: string; terrariumId: string }): Promise<{
+export async function claimDevice(body: {
+  claimCode: string;
+  terrariumId: string;
+  /** Name to give the board in the same request; omitted keeps the default label (2026-10-23). */
+  deviceName?: string;
+}): Promise<{
   deviceId: string;
   secret: string;
   terrariumId: string;
