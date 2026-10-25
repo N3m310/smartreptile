@@ -145,13 +145,10 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
       if (!isOwner)
         _ShellTab(
           destination: isAdmin
-              ? DefaultTextStyle.merge(
-                  textAlign: TextAlign.center,
-                  child: const NavigationDestination(
-                    icon: Icon(Icons.developer_board_outlined),
-                    selectedIcon: Icon(Icons.developer_board),
-                    label: 'Thiết bị\nIoT',
-                  ),
+              ? const NavigationDestination(
+                  icon: Icon(Icons.developer_board_outlined),
+                  selectedIcon: Icon(Icons.developer_board),
+                  label: 'Thiết bị',
                 )
               : const NavigationDestination(
                   icon: Icon(Icons.developer_board_outlined),
