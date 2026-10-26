@@ -137,6 +137,54 @@ class AdminProvider extends ChangeNotifier {
     await loadAlerts();
   }
 
+  /// Acknowledges any account's alert (`POST /alerts/{id}/ack`, 2026-10-25).
+  ///
+  /// The administrator may act on a row this list shows, which is the point of the widening: a get-all view whose
+  /// rows cannot be handled is a view that sends the reader somewhere else. Answers null on success, or the refusal
+  /// to show, and reloads the page either way so the row's state is the server's.
+  Future<AppFailure?> acknowledgeAlert(int alertId) => _mutateAlert(
+    () => _api.postJson('/api/v1/alerts/$alertId/ack'),
+  );
+
+  /// Resolves any account's alert with the reason the administrator chose (`POST /alerts/{id}/resolve`).
+  Future<AppFailure?> resolveAlert(int alertId, String reason, {String? note}) =>
+      _mutateAlert(
+        () => _api.postJson(
+          '/api/v1/alerts/$alertId/resolve',
+          body: {'reason': reason, 'note': ?note},
+        ),
+      );
+
+  /// Runs one alert write and re-reads the page it changed.
+  Future<AppFailure?> _mutateAlert(
+    Future<Map<String, dynamic>> Function() request,
+  ) async {
+    try {
+      await request();
+      await loadAlerts(skip: _alerts?.skip ?? 0);
+      return null;
+    } on AppFailure catch (failure) {
+      return failure;
+    }
+  }
+
+  /// Removes any account's board from its fleet, or erases it when nothing references it (2026-10-25).
+  ///
+  /// The route already widens to `data.write.any`/`data.read.any`, so this is the admin list's way of acting on a row
+  /// it shows. Answers null on success, or the refusal — `device_has_history` is the one a screen wants to explain
+  /// rather than print.
+  Future<AppFailure?> deleteDevice(String publicId, {required bool purge}) async {
+    try {
+      await _api.deleteJson(
+        '/api/v1/devices/${Uri.encodeComponent(publicId)}${purge ? '?purge=true' : ''}',
+      );
+      await loadDevices(skip: _devices?.skip ?? 0);
+      return null;
+    } on AppFailure catch (failure) {
+      return failure;
+    }
+  }
+
   /// Reads one page of species profiles.
   Future<void> loadSpeciesProfiles({String? search, int skip = 0}) async {
     final filter = search ?? _speciesProfiles?.search ?? '';

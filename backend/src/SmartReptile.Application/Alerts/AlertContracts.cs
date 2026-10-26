@@ -88,6 +88,11 @@ public static class AlertCursor
 /// <param name="ToUtc">Only alerts triggered at or before this instant.</param>
 /// <param name="Cursor">Position to continue from, or null for the first page.</param>
 /// <param name="PageSize">Rows requested, clamped to <see cref="AlertPaging.MaxPageSize"/>.</param>
+/// <param name="InProgress">
+/// Only alerts that have not been resolved yet — open and acknowledged together. The status bar's "cần xử lý" tab
+/// means this, because an acknowledged alert is still the keeper's problem: ownership is not closure (BR-12.1), and a
+/// tab that dropped one the moment it was picked up would hide exactly the rows somebody is working on.
+/// </param>
 public sealed record AlertQuery(
     AlertState? State = null,
     AlertSeverity? Severity = null,
@@ -96,7 +101,8 @@ public sealed record AlertQuery(
     DateTimeOffset? FromUtc = null,
     DateTimeOffset? ToUtc = null,
     string? Cursor = null,
-    int PageSize = AlertPaging.DefaultPageSize);
+    int PageSize = AlertPaging.DefaultPageSize,
+    bool InProgress = false);
 
 /// <summary>One alert as the list and the detail respond (FR-12, <c>07-appendices/03</c> §4.5).</summary>
 /// <param name="Id">Identity, used by the ack/resolve/timeline routes.</param>
@@ -198,10 +204,28 @@ public sealed record NotificationAttemptRecord(
     string? Reason,
     string Title);
 
+/// <summary>
+/// How many alerts the current filters match, per lifecycle state — what the status bar is labelled with.
+/// </summary>
+/// <remarks>
+/// Counted over every filter the caller sent <b>except</b> the state itself, because the numbers are how the caller
+/// decides which state to look at. A device-level alert has no metric, so the count cannot come from the metric
+/// dictionary and has to be the store's own query — the page and its labels therefore come from one place.
+/// </remarks>
+/// <param name="Open">Rows still open.</param>
+/// <param name="Acknowledged">Rows a human took ownership of but has not closed.</param>
+/// <param name="Resolved">Rows closed by recovery or by hand.</param>
+public sealed record AlertCounts(int Open, int Acknowledged, int Resolved)
+{
+    /// <summary>Every row the filters match, whatever its state.</summary>
+    public int Total => Open + Acknowledged + Resolved;
+}
+
 /// <summary>One page of alerts, newest first.</summary>
 /// <param name="Items">The alerts.</param>
 /// <param name="NextCursor">Cursor for the next page, or null when this page was the last.</param>
-public sealed record AlertPage(IReadOnlyList<AlertView> Items, string? NextCursor);
+/// <param name="Counts">Per-state totals for the same filters, so the status bar can be labelled before paging.</param>
+public sealed record AlertPage(IReadOnlyList<AlertView> Items, string? NextCursor, AlertCounts Counts);
 
 /// <summary>An alert row with the one field of its device a client needs: the public id.</summary>
 /// <param name="Alert">Stored row.</param>
@@ -281,17 +305,53 @@ public interface IAlertStore
     /// <param name="query">Filters, including the cursor to continue from.</param>
     /// <param name="take">Rows to return.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="anyAccount">
+    /// When true the owner predicate is dropped and every account's alerts are returned — the administrator's read.
+    /// It is also the only way an alert on an <b>ownerless</b> terrarium is ever returned: <c>Terrarium.UserId</c> is
+    /// nullable (2026-10-23) and <c>NULL = &lt;account&gt;</c> matches nobody, so a scoped read cannot reach one.
+    /// </param>
     Task<IReadOnlyList<AlertRecord>> ListAsync(
         Guid userId,
         AlertQuery query,
         int take,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool anyAccount = false);
+
+    /// <summary>
+    /// How many alerts the same filters match, per lifecycle state — the labels of the status bar.
+    /// </summary>
+    /// <remarks>
+    /// Every filter is applied <b>except</b> the state, for the reason the counts exist: they are how the caller picks
+    /// a state. The cursor is ignored too, because a total that moved with the page number would be a page size.
+    /// </remarks>
+    /// <param name="userId">Signed-in account.</param>
+    /// <param name="query">Filters, with any state and cursor ignored.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="anyAccount">When true, the owner predicate is dropped, exactly as <see cref="ListAsync"/> does.</param>
+    Task<AlertCounts> CountByStateAsync(
+        Guid userId,
+        AlertQuery query,
+        CancellationToken cancellationToken,
+        bool anyAccount = false);
 
     /// <summary>One alert, provided it belongs to a terrarium of <paramref name="userId"/>; null otherwise.</summary>
     /// <param name="alertId">Alert identity.</param>
     /// <param name="userId">Signed-in account.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<AlertRecord?> FindOwnedAsync(long alertId, Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// One alert of any account, or null when it does not exist or its terrarium was deleted (2026-10-25).
+    /// </summary>
+    /// <remarks>
+    /// The cross-account read the administrator's routes use. It is deliberately <b>not</b> scoped by owner and
+    /// deliberately <b>not</b> unrestricted either: the join to <c>Terrarium</c> still applies that model's query
+    /// filter, so an alert of a soft-deleted enclosure — which the administrator's audit list still shows — cannot
+    /// be acknowledged or resolved through here. A closed enclosure's history is a record, not a queue.
+    /// </remarks>
+    /// <param name="alertId">Alert identity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<AlertRecord?> FindAnyAsync(long alertId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Newest values one metric took inside the episode's window, oldest first, at most

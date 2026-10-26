@@ -493,7 +493,7 @@ public sealed class ReferenceDataSeeder(SmartReptileDbContext db, ILogger<Refere
         decimal targetMax,
         decimal? criticalMin = null,
         decimal? criticalMax = null,
-        int dwellWarn = 5,
+        int dwellWarn = 2,
         int dwellCrit = 2,
         decimal margin = 0.5m,
         BandCitation? source = null) => new()

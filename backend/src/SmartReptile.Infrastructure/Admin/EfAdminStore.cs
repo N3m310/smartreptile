@@ -192,7 +192,7 @@ public sealed class EfAdminStore(SmartReptileDbContext db) : IAdminStore
                 // Null for an enclosure an administrator created and has not assigned yet.
                 row.OwnerUsername,
                 row.SpeciesProfileId,
-                row.SpeciesProfileName!,
+                row.SpeciesProfileName,
                 row.Status.ToString(),
                 row.DevicePublicId,
                 row.DeviceStatus?.ToString(),

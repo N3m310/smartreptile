@@ -39,7 +39,7 @@ public static class AlertEndpoints
             AlertService service,
             CancellationToken cancellationToken) =>
         {
-            if (!TryParseState(state, out var stateFilter, out var stateProblem))
+            if (!TryParseState(state, out var stateFilter, out var inProgress, out var stateProblem))
             {
                 return Problem(stateProblem!);
             }
@@ -92,17 +92,22 @@ public static class AlertEndpoints
                     from,
                     to,
                     cursor,
-                    pageSize ?? AlertPaging.DefaultPageSize),
-                cancellationToken);
+                    pageSize ?? AlertPaging.DefaultPageSize,
+                    inProgress),
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Page) : Problem(outcome.Problem!);
         })
-        .WithSummary("List alerts across the signed-in account's terrariums")
+        .WithSummary("List alerts: the signed-in account's terrariums, or every account's for an administrator")
         .WithDescription("Newest first, and **paged**: `?cursor=&pageSize=` (default 50, max 200) with the next "
                        + "position returned as `nextCursor` and absent on the last page. Filter by `state` "
-                       + "(Open, Acknowledged, Resolved), `severity` (Info, Warning, Critical), `metric`, `family` "
+                       + "(`Open`, `Acknowledged`, `Resolved`, or `in_progress` for everything not yet resolved), "
+                       + "`severity` (Info, Warning, Critical), `metric`, `family` "
                        + "(enclosure for the enclosure's humidity, light and board; species for the animal's "
-                       + "temperature and UV) and a trigger window `from`/`to`.");
+                       + "temperature and UV) and a trigger window `from`/`to`. `counts` labels the status bar and is "
+                       + "taken with `state` dropped. A caller holding `data.read.any` sees "
+                       + "every account's alerts, which is also how an alert on an ownerless terrarium is reached.");
 
         alerts.MapGet("/{alertId:long}", async (
             long alertId,
@@ -113,14 +118,16 @@ public static class AlertEndpoints
             var outcome = await service.GetAsync(
                 alertId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Alert) : Problem(outcome.Problem!);
         })
         .WithSummary("One alert with an excerpt of its values")
         .WithDescription("Carries the band that was in force and up to 240 of the newest readings of the episode, "
                        + "oldest first, with `seriesTruncated` when the episode was longer than the excerpt. A "
-                       + "device-level alert (silence, sensor fault, clock skew) has no series to carry.");
+                       + "device-level alert (silence, sensor fault, clock skew) has no series to carry. An "
+                       + "administrator (`data.read.any`) may open any account's alert.");
 
         alerts.MapGet("/{alertId:long}/timeline", async (
             long alertId,
@@ -131,7 +138,8 @@ public static class AlertEndpoints
             var outcome = await service.TimelineAsync(
                 alertId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(new { items = outcome.Timeline }) : Problem(outcome.Problem!);
         })
@@ -151,14 +159,17 @@ public static class AlertEndpoints
                 alertId,
                 principal.GetUserId() ?? Guid.Empty,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Changed) : Problem(outcome.Problem!);
         })
         .RequireAuthorization(Permissions.AlertWrite)
         .WithSummary("Acknowledge an alert")
         .WithDescription("Requires `alert.write`. Acknowledging takes ownership without closing the "
-                       + "alert; an alert that is already acknowledged or resolved answers `409 alert_not_open`.");
+                       + "alert; an alert that is already acknowledged or resolved answers `409 alert_not_open`. An "
+                       + "administrator (`data.write.any`) may acknowledge another account's alert, and the audit "
+                       + "row then names the administrator as the actor.");
 
         alerts.MapPost("/{alertId:long}/resolve", async (
             long alertId,
@@ -173,7 +184,8 @@ public static class AlertEndpoints
                 principal.GetUserId() ?? Guid.Empty,
                 request,
                 RequestActor.From(context),
-                cancellationToken);
+                cancellationToken,
+                principal.CanWriteAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(outcome.Changed) : Problem(outcome.Problem!);
         })
@@ -182,7 +194,8 @@ public static class AlertEndpoints
         .WithDescription("Requires `alert.write`. `reason` is one of `Recovered`, `FalsePositive`, "
                        + "`SensorFault` or `Accepted`; an optional `note` is kept on the alert's audit entry. A "
                        + "resolved alert answers `409 alert_not_open`, and a threshold alert cannot re-open until "
-                       + "its band is left for the dwell again.");
+                       + "its band is left for the dwell again. An administrator (`data.write.any`) may resolve "
+                       + "another account's alert; the dwell key it re-arms belongs to that other enclosure.");
 
         // The silences belong to a terrarium (the contract files them under §4.2), so they are mapped into that
         // prefix while living with the alerts they suppress. The group reads with `alert.read`; the two writes name
@@ -202,7 +215,8 @@ public static class AlertEndpoints
             var outcome = await service.ListAsync(
                 terrariumId,
                 principal.GetUserId() ?? Guid.Empty,
-                cancellationToken);
+                cancellationToken,
+                principal.CanReadAnyAccount());
 
             return outcome.Succeeded ? Results.Ok(new { items = outcome.Silences }) : Problem(outcome.Problem!);
         })
@@ -280,13 +294,27 @@ public static class AlertEndpoints
     /// <summary>Family keys a `family` filter accepts, for the message of a refusal.</summary>
     private static string FamilyKeys => string.Join(", ", AlertFamilies.All.Select(AlertFamilies.ApiKey));
 
-    private static bool TryParseState(string? state, out AlertState? parsed, out AlertProblem? problem)
+    private static bool TryParseState(
+        string? state,
+        out AlertState? parsed,
+        out bool inProgress,
+        out AlertProblem? problem)
     {
         parsed = null;
+        inProgress = false;
         problem = null;
 
         if (string.IsNullOrWhiteSpace(state))
         {
+            return true;
+        }
+
+        // `in_progress` is not a lifecycle state, it is the question "does this still need somebody?" — open and
+        // acknowledged together, which is what the status bar's first tab asks.
+        if (string.Equals(state.Trim(), "in_progress", StringComparison.OrdinalIgnoreCase))
+        {
+            inProgress = true;
+
             return true;
         }
 
@@ -297,7 +325,7 @@ public static class AlertEndpoints
             return true;
         }
 
-        problem = new AlertProblem("validation_failed", "state must be one of: Open, Acknowledged, Resolved.");
+        problem = new AlertProblem("validation_failed", "state must be one of: Open, Acknowledged, Resolved, in_progress.");
 
         return false;
     }

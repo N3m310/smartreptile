@@ -155,7 +155,7 @@ public sealed record TerrariumThresholds(
 /// <param name="TargetMax">Upper bound of the target band; required.</param>
 /// <param name="CriticalMin">Lower critical bound; omitted derives it from the target band.</param>
 /// <param name="CriticalMax">Upper critical bound; omitted derives it from the target band.</param>
-/// <param name="DwellWarnMinutes">Minutes out of band before a Warning; defaults to 5.</param>
+/// <param name="DwellWarnMinutes">Minutes out of band before a Warning; defaults to 2.</param>
 /// <param name="DwellCritMinutes">Minutes critically out of band before escalation; defaults to 2.</param>
 /// <param name="RecoveryMargin">Distance back inside the band that counts as recovered; defaults to 0.5.</param>
 /// <param name="Note">Why this terrarium differs from the profile; at most 300 characters.</param>
@@ -185,7 +185,11 @@ public sealed record UpdateThresholdsRequest(IReadOnlyList<ThresholdOverrideInpu
 /// deserialisation failure, exactly as in the onboarding contracts.
 /// </summary>
 /// <param name="Name">Display name, required, at most 60 characters.</param>
-/// <param name="SpeciesProfileId">Profile whose bands apply until an override is authored (FR-10).</param>
+/// <param name="SpeciesProfileId">
+/// Profile whose bands apply until an override is authored (FR-10), or null for an enclosure that has none yet
+/// (2026-10-25). An enclosure with no profile is a valid enclosure: it stores and shows its readings, and the
+/// evaluation layer has no bands to judge them against until one is assigned on the update route.
+/// </param>
 /// <param name="Location">Free-text location label; users are advised not to enter an address.</param>
 /// <param name="Description">Keeper notes.</param>
 /// <param name="TimeZoneId">IANA/Windows zone id; defaults to the configured system default (ADR-015).</param>
@@ -199,7 +203,7 @@ public sealed record UpdateThresholdsRequest(IReadOnlyList<ThresholdOverrideInpu
 /// </param>
 public sealed record CreateTerrariumRequest(
     string? Name,
-    Guid SpeciesProfileId,
+    Guid? SpeciesProfileId,
     string? Location,
     string? Description,
     string? TimeZoneId,
@@ -212,7 +216,11 @@ public sealed record CreateTerrariumRequest(
 /// cannot distinguish "absent" from "null" once the body is bound to this record.
 /// </summary>
 /// <param name="Name">New display name; omitted leaves the current one.</param>
-/// <param name="SpeciesProfileId">New profile whose bands apply; omitted leaves the current one.</param>
+/// <param name="SpeciesProfileId">
+/// New profile whose bands apply; omitted leaves the current one. <c>Guid.Empty</c> — the all-zero GUID — clears the
+/// assignment, which is this record's spelling of "empty" for a member that is not a string, and the only way a
+/// patch can say "this enclosure has no species" rather than "leave it as it is" (2026-10-25).
+/// </param>
 /// <param name="Location">New location label; empty string clears it.</param>
 /// <param name="Description">New keeper notes; empty string clears them.</param>
 /// <param name="TimeZoneId">New zone for local-day bucketing; omitted leaves the current one.</param>
@@ -290,8 +298,11 @@ public sealed record LatestReadings(
 /// <summary>A terrarium as the list and detail endpoints return it.</summary>
 /// <param name="Id">Surrogate key, the value clients put in the URL.</param>
 /// <param name="Name">Display name.</param>
-/// <param name="SpeciesProfileId">Assigned profile.</param>
-/// <param name="SpeciesName">Profile name, resolved for display so the client needs no second call.</param>
+/// <param name="SpeciesProfileId">Assigned profile, null for an enclosure that has none yet (2026-10-25).</param>
+/// <param name="SpeciesName">
+/// Profile name, resolved for display so the client needs no second call; null exactly when
+/// <paramref name="SpeciesProfileId"/> is.
+/// </param>
 /// <param name="Location">Free-text location label.</param>
 /// <param name="Description">Keeper notes.</param>
 /// <param name="TimeZoneId">Zone used for local-day bucketing and phase selection.</param>
@@ -303,8 +314,8 @@ public sealed record LatestReadings(
 public sealed record TerrariumSummary(
     Guid Id,
     string Name,
-    Guid SpeciesProfileId,
-    string SpeciesName,
+    Guid? SpeciesProfileId,
+    string? SpeciesName,
     string? Location,
     string? Description,
     string TimeZoneId,

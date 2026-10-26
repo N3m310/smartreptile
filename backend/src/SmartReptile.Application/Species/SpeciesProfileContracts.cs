@@ -13,7 +13,7 @@ namespace SmartReptile.Application.Species;
 /// <param name="TargetMax">Upper bound of the target band; required.</param>
 /// <param name="CriticalMin">Lower critical bound; omitted derives it from the target band plus the margin.</param>
 /// <param name="CriticalMax">Upper critical bound; omitted derives it from the target band plus the margin.</param>
-/// <param name="DwellWarnMinutes">Minutes out of band before a Warning; defaults to 5.</param>
+/// <param name="DwellWarnMinutes">Minutes out of band before a Warning; defaults to 2.</param>
 /// <param name="DwellCritMinutes">Minutes critically out of band before escalation; defaults to 2.</param>
 /// <param name="RecoveryMargin">Distance back inside the band that counts as recovered; defaults to 0.5.</param>
 /// <param name="Enabled">False keeps the numbers without judging against them; defaults to true.</param>

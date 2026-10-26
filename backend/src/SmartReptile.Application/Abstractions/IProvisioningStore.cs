@@ -78,13 +78,32 @@ public interface IProvisioningStore
     /// <remarks>
     /// Scoped by <c>UserId</c>, which is set at claim time. A board that registered but was never claimed has no
     /// owner and therefore belongs to nobody's fleet yet — it appears in the list only once it is bound.
+    /// <para>
+    /// <b>Nothing is filtered out.</b> A board detached from its enclosure stays in the fleet — it is the account's
+    /// board, merely unbound — and so does a revoked one, because "why did this node stop reporting" is a question
+    /// the fleet has to be able to answer. Only a purge removes a row (2026-10-25).
+    /// </para>
     /// </remarks>
     Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// All boards in the deployment with the bound terrarium loaded. Used when an administrator lists devices (data.read.any).
+    /// All boards in the deployment with the bound terrarium loaded. Used when an administrator lists devices
+    /// (data.read.any). Unfiltered, for the reason <see cref="ListOwnedAsync"/> gives.
     /// </summary>
     Task<IReadOnlyList<Device>> ListAllAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// True when anything still references the board — a reading, an alert, a health report, an event. The check a
+    /// hard delete has to pass before the row may go (2026-10-25), because those foreign keys cascade and erasing a
+    /// board would otherwise erase the history that explains it.
+    /// </summary>
+    /// <param name="deviceId">Surrogate key of the board.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<bool> HasHistoryAsync(Guid deviceId, CancellationToken cancellationToken);
+
+    /// <summary>Stages a hard delete of the board row. Only reachable behind <see cref="HasHistoryAsync"/>.</summary>
+    /// <param name="device">Board to remove.</param>
+    void RemoveDevice(Device device);
 
     /// <summary>Commits staged changes.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);

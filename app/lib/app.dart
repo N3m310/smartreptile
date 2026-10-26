@@ -16,6 +16,7 @@ import 'screens/species_screen.dart';
 import 'state/app_data_provider.dart';
 import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
+import 'state/terrarium_provider.dart';
 import 'theme/app_theme.dart';
 import 'widgets/mock_data_notice.dart';
 
@@ -52,7 +53,11 @@ class SmartReptileApp extends StatelessWidget {
     return MaterialApp(
       title: 'VIVARIUMGUARD',
       debugShowCheckedModeBanner: false,
-      locale: settings.locale,
+      // Vietnamese unless the keeper picked another language. Deliberately not "follow the device": every screen in
+      // this shell is written in Vietnamese, so an `en-US` handset only mixed English catalogue strings into
+      // Vietnamese copy — an English dialog title over a Vietnamese alert, which is what this used to produce. The
+      // prototype keeps the provider's own "follow the device" default, because its screens are English by design.
+      locale: settings.locale ?? const Locale('vi'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: AppTheme.darkTheme,
@@ -72,8 +77,33 @@ class _RootShell extends StatefulWidget {
   State<_RootShell> createState() => _RootShellState();
 }
 
-class _RootShellState extends State<_RootShell> {
+class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Re-reads the deployment's data when the app comes back to the foreground.
+  ///
+  /// Ownership is shared: an administrator can give an enclosure to another account, a keeper can claim a board, an
+  /// alert can be acknowledged from the web. None of that reaches a screen that is already built, so a resumed app
+  /// asks again instead of showing what it left behind.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!mounted || !context.read<SessionProvider>().isSignedIn) return;
+    context.read<AppDataProvider>().loadAll();
+    context.read<TerrariumProvider>().loadTerrariums();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +114,7 @@ class _RootShellState extends State<_RootShell> {
     final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
         (session.user?.role.toLowerCase() == 'admin') ||
         session.hasAnyPermission(_administrativePermissions);
+    final isOwner = session.user?.role.toLowerCase() == 'owner';
 
     // The administration tab exists only while the session holds a permission that can open something behind it:
     // `data.read.any` for the get-all views, `user.read` for accounts and roles. A tab that led to a locked screen
@@ -115,24 +146,22 @@ class _RootShellState extends State<_RootShell> {
         screen: SpeciesScreen(),
         isMock: false,
       ),
-      _ShellTab(
-        destination: isAdmin
-            ? DefaultTextStyle.merge(
-                textAlign: TextAlign.center,
-                child: const NavigationDestination(
+      if (!isOwner)
+        _ShellTab(
+          destination: isAdmin
+              ? const NavigationDestination(
                   icon: Icon(Icons.developer_board_outlined),
                   selectedIcon: Icon(Icons.developer_board),
-                  label: 'Thiết bị\nIoT',
+                  label: 'Thiết bị',
+                )
+              : const NavigationDestination(
+                  icon: Icon(Icons.developer_board_outlined),
+                  selectedIcon: Icon(Icons.developer_board),
+                  label: 'Thiết bị IoT',
                 ),
-              )
-            : const NavigationDestination(
-                icon: Icon(Icons.developer_board_outlined),
-                selectedIcon: Icon(Icons.developer_board),
-                label: 'Thiết bị IoT',
-              ),
-        screen: const DevicesScreen(),
-        isMock: false,
-      ),
+          screen: const DevicesScreen(),
+          isMock: false,
+        ),
       _ShellTab(
         destination: NavigationDestination(
           icon: pendingCount > 0

@@ -61,6 +61,36 @@ public class SpeciesProfileServiceTests
         outcome.Profiles![1].CanEdit.Should().BeTrue("the account owns it");
     }
 
+    [Fact]
+    public async Task List_includes_profiles_created_by_admin_even_for_owner()
+    {
+        var adminId = Guid.NewGuid();
+        _store.AddAdmin(adminId);
+        _store.AddBuiltIn("Arid (desert)", (MetricCode.TempC, 38m, 42m));
+        _store.AddProfile(adminId, "Admin created profile", (MetricCode.TempC, 25m, 30m));
+
+        var outcome = await _service.ListAsync(_owner, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Profiles!.Select(profile => profile.Name).Should().Contain("Admin created profile");
+        var adminProfile = outcome.Profiles!.Single(p => p.Name == "Admin created profile");
+        adminProfile.CanEdit.Should().BeFalse("owner cannot edit profile created by admin");
+    }
+
+    [Fact]
+    public async Task Get_allows_owner_to_view_admin_created_profile_as_read_only()
+    {
+        var adminId = Guid.NewGuid();
+        _store.AddAdmin(adminId);
+        var adminProfile = _store.AddProfile(adminId, "Admin species", (MetricCode.TempC, 25m, 30m));
+
+        var outcome = await _service.GetAsync(adminProfile.Id, _owner, CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Profile!.Name.Should().Be("Admin species");
+        outcome.Profile.CanEdit.Should().BeFalse("owner cannot edit admin-created profile");
+    }
+
     // ---- read ---------------------------------------------------------------------------------------
 
     [Fact]
@@ -156,7 +186,7 @@ public class SpeciesProfileServiceTests
         var day = created.Bands.Single(band => band.Phase == "day");
         day.Metric.Should().Be("tempC", "the wire carries the dictionary key, not the enum");
         day.Unit.Should().Be("°C", "the unit travels with the band so an editor needs no dictionary");
-        day.DwellWarnMinutes.Should().Be(5);
+        day.DwellWarnMinutes.Should().Be(2);
         day.DwellCritMinutes.Should().Be(2);
         day.RecoveryMargin.Should().Be(0.5m);
         day.Enabled.Should().BeTrue();

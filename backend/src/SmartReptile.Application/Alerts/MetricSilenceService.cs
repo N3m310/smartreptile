@@ -30,12 +30,20 @@ public sealed class MetricSilenceService(IMetricSilenceStore store, IClock clock
     /// <param name="terrariumId">Terrarium to read.</param>
     /// <param name="userId">Signed-in account.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True for an administrator, who reaches every account's terrarium — the same grant the alert reads take. It is
+    /// also the only read that reaches an <b>ownerless</b> terrarium: <c>Terrarium.UserId</c> is nullable, and a
+    /// membership check against <c>NULL</c> matches nobody, so the screen would get a 404 for a terrarium it is
+    /// already showing alerts for.
+    /// </param>
     public async Task<SilenceOutcome> ListAsync(
         Guid terrariumId,
         Guid userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mayReachAnyAccount = false)
     {
-        if (!await store.IsMemberAsync(terrariumId, userId, cancellationToken).ConfigureAwait(false))
+        if (!mayReachAnyAccount &&
+            !await store.IsMemberAsync(terrariumId, userId, cancellationToken).ConfigureAwait(false))
         {
             return SilenceOutcome.NotFound();
         }

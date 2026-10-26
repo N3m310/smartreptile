@@ -179,7 +179,7 @@ public class ThresholdOverride
     public decimal? CriticalMax { get; set; }
 
     /// <summary>Minutes outside the target band before a Warning is raised.</summary>
-    public int DwellWarnMinutes { get; set; } = 5;
+    public int DwellWarnMinutes { get; set; } = 2;
 
     /// <summary>Minutes outside the critical band before escalation.</summary>
     public int DwellCritMinutes { get; set; } = 2;

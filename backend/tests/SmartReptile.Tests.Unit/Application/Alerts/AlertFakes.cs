@@ -80,13 +80,32 @@ internal sealed class FakeAlertStore : IAlertStore
         Guid userId,
         AlertQuery query,
         int take,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool anyAccount = false)
     {
         LastListTake = take;
 
-        IReadOnlyList<AlertRecord> rows = userId == Owner ? [.. Alerts.Take(take)] : [];
+        // Every row the fake holds belongs to `Owner`, so the two reads differ only in who is asking — which is the
+        // distinction the service has to forward.
+        IReadOnlyList<AlertRecord> rows = anyAccount || userId == Owner ? [.. Alerts.Take(take)] : [];
 
         return Task.FromResult(rows);
+    }
+
+    /// <inheritdoc />
+    public Task<AlertCounts> CountByStateAsync(
+        Guid userId,
+        AlertQuery query,
+        CancellationToken cancellationToken,
+        bool anyAccount = false)
+    {
+        // The fake holds one account's rows, so the scope rule is the only part of the query it has to model.
+        var rows = anyAccount || userId == Owner ? Alerts : [];
+
+        return Task.FromResult(new AlertCounts(
+            rows.Count(row => row.Alert.State == AlertState.Open),
+            rows.Count(row => row.Alert.State == AlertState.Acknowledged),
+            rows.Count(row => row.Alert.State == AlertState.Resolved)));
     }
 
     /// <inheritdoc />
@@ -98,6 +117,11 @@ internal sealed class FakeAlertStore : IAlertStore
 
         return Task.FromResult(row);
     }
+
+    /// <inheritdoc />
+    /// <remarks>The unscoped lookup: any alert, whoever's enclosure it belongs to.</remarks>
+    public Task<AlertRecord?> FindAnyAsync(long alertId, CancellationToken cancellationToken) =>
+        Task.FromResult(Alerts.FirstOrDefault(record => record.Alert.Id == alertId));
 
     /// <inheritdoc />
     public Task<IReadOnlyList<AlertSeriesPoint>> ReadEpisodeSeriesAsync(

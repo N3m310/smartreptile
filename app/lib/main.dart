@@ -94,11 +94,13 @@ Future<void> main() async {
       appData.resetToMocks();
     } else {
       appData.loadAll();
+      species.fetchProfiles();
     }
   });
 
   if (session.isSignedIn) {
     appData.loadAll();
+    species.fetchProfiles();
   }
 
   runApp(

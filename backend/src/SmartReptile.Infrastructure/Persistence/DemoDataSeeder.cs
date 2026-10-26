@@ -556,7 +556,7 @@ public sealed class DemoDataSeeder(
                     TargetMax = 29m,
                     CriticalMin = 18m,
                     CriticalMax = 32m,
-                    DwellWarnMinutes = 5,
+                    DwellWarnMinutes = 2,
                     DwellCritMinutes = 2,
                     RecoveryMargin = 0.5m,
                     Enabled = true,

@@ -124,12 +124,16 @@ class _RowCard extends StatelessWidget {
     required this.subtitle,
     required this.badges,
     required this.facts,
+    this.actions = const [],
   });
 
   final String title;
   final String? subtitle;
   final List<Widget> badges;
   final List<Widget> facts;
+
+  /// Buttons a row offers, below its facts. Empty for the lists that are read-only by nature.
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +175,10 @@ class _RowCard extends StatelessWidget {
           ],
           const SizedBox(height: 8),
           ...facts,
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(children: actions),
+          ],
         ],
       ),
     );
@@ -333,6 +341,76 @@ class _DeviceListState extends State<_DeviceList> {
                 : '${row.batteryPct!.toStringAsFixed(0)} %',
           ),
         ],
+        // A board an administrator can see but not remove sends them to the keeper's phone; the two actions here are
+        // the same pair the keeper's own fleet offers (2026-10-25).
+        actions: [
+          if (row.status.toLowerCase() != 'revoked')
+            TextButton.icon(
+              onPressed: () => _delete(row, purge: false),
+              icon: const Icon(Icons.link_off, size: 16),
+              label: Text(l10n.adminDeviceRemove),
+            ),
+          TextButton.icon(
+            onPressed: () => _delete(row, purge: true),
+            icon: const Icon(Icons.delete_forever_outlined, size: 16),
+            label: Text(l10n.adminDevicePurge),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Removes a board from its owner's fleet, or erases it when nothing references it.
+  Future<void> _delete(AdminDevice row, {required bool purge}) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final admin = context.read<AdminProvider>();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.bgCard,
+        title: Text(
+          purge ? l10n.adminDevicePurge : l10n.adminDeviceRemove,
+          style: const TextStyle(color: AppColors.statusDanger),
+        ),
+        content: Text(
+          purge
+              ? 'Xoá hẳn "${row.publicId}" khỏi hệ thống? Chỉ xoá được khi thiết bị chưa có dữ liệu đo hay cảnh báo nào.'
+              : 'Gỡ "${row.publicId}" khỏi bể nuôi của ${row.ownerUsername ?? 'chủ hiện tại'}? '
+                    'Thiết bị vẫn trong đội, giữ khoá và gắn lại được vào bể khác.',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.cancel, style: const TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.statusDanger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(purge ? l10n.adminDevicePurge : l10n.adminDeviceRemove),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final failure = await admin.deleteDevice(row.publicId, purge: purge);
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failure == null
+              ? (purge ? l10n.adminDevicePurged : l10n.adminDeviceRemoved)
+              : failure.code == 'device_has_history'
+                  ? 'Không xoá được: thiết bị đã có dữ liệu đo hoặc cảnh báo. Hãy dùng "Gỡ thiết bị".'
+                  : failureMessage(l10n, failure),
+        ),
       ),
     );
   }
@@ -476,6 +554,77 @@ class _AlertListState extends State<_AlertList> {
                 : MetricFormat.dateTime(row.resolvedAt!),
           ),
         ],
+        // The two lifecycle actions, on the row itself: this list is where an administrator sees another account's
+        // incident, so it is where they have to be able to take it (2026-10-25).
+        actions: [
+          if (row.state.toLowerCase() == 'open')
+            TextButton.icon(
+              onPressed: () => _acknowledge(row),
+              icon: const Icon(Icons.visibility_outlined, size: 16),
+              label: Text(l10n.alertAcknowledge),
+            ),
+          if (row.state.toLowerCase() != 'resolved')
+            TextButton.icon(
+              onPressed: () => _resolve(row),
+              icon: const Icon(Icons.task_alt_outlined, size: 16),
+              label: Text(l10n.alertResolve),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Takes ownership of another account's alert and says so when the server refuses.
+  Future<void> _acknowledge(AdminAlert row) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final failure = await context.read<AdminProvider>().acknowledgeAlert(row.id);
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failure == null ? l10n.alertAcknowledged : failureMessage(l10n, failure),
+        ),
+      ),
+    );
+  }
+
+  /// Closes another account's alert with the reason the administrator picks.
+  Future<void> _resolve(AdminAlert row) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        backgroundColor: AppColors.bgCard,
+        title: Text(l10n.alertResolve),
+        children: [
+          for (final code in const [
+            'Recovered',
+            'FalsePositive',
+            'SensorFault',
+            'Accepted',
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, code),
+              child: Text(
+                resolveReasonLabel(l10n, code),
+                style: const TextStyle(color: AppColors.textMain),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (reason == null || !mounted) return;
+
+    final failure = await context.read<AdminProvider>().resolveAlert(row.id, reason);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failure == null ? l10n.alertResolved : failureMessage(l10n, failure),
+        ),
       ),
     );
   }

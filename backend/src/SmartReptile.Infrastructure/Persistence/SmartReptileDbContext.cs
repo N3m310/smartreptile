@@ -295,6 +295,9 @@ public class SmartReptileDbContext(DbContextOptions<SmartReptileDbContext> optio
             // "This account's live enclosures", which is every list query: the owner leads, the state narrows.
             entity.HasIndex(t => new { t.UserId, t.Status });
             entity.HasOne<User>().WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.Restrict);
+
+            // Optional since 2026-10-25: an enclosure may exist before its species does. The foreign key stays
+            // restricted so a profile that an enclosure still names cannot be deleted out from under it.
             entity.HasOne(t => t.SpeciesProfile).WithMany()
                 .HasForeignKey(t => t.SpeciesProfileId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("Terrarium");

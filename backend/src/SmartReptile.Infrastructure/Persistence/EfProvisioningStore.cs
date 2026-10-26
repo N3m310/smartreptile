@@ -80,7 +80,9 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
             cancellationToken);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken) =>
+    public async Task<IReadOnlyList<Device>> ListOwnedAsync(
+        Guid ownerUserId,
+        CancellationToken cancellationToken) =>
         // The terrarium is included for its name, which the fleet screen shows beside the board. No credentials: a
         // list has no use for them, and the fewer queries that materialise a hash the better.
         await db.Devices
@@ -99,6 +101,18 @@ public sealed class EfProvisioningStore(SmartReptileDbContext db) : IProvisionin
             .ThenBy(device => device.PublicId)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<bool> HasHistoryAsync(Guid deviceId, CancellationToken cancellationToken) =>
+        await db.TelemetrySamples.AnyAsync(sample => sample.DeviceId == deviceId, cancellationToken)
+            .ConfigureAwait(false)
+        || await db.Alerts.AnyAsync(alert => alert.DeviceId == deviceId, cancellationToken).ConfigureAwait(false)
+        || await db.DeviceHealthSamples.AnyAsync(sample => sample.DeviceId == deviceId, cancellationToken)
+            .ConfigureAwait(false)
+        || await db.DeviceEvents.AnyAsync(row => row.DeviceId == deviceId, cancellationToken).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void RemoveDevice(Device device) => db.Devices.Remove(device);
 
     /// <inheritdoc />
     public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);

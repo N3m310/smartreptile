@@ -119,7 +119,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     DropdownMenuItem(
                       value: terrarium.id,
                       child: Text(
-                        '${terrarium.name} · ${terrarium.speciesName}',
+                        '${terrarium.name} · ${terrarium.speciesName ?? 'Chưa chọn loài'}',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),

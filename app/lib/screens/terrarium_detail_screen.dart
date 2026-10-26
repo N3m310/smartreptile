@@ -273,9 +273,26 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  terrarium.speciesName,
-                  style: const TextStyle(color: AppColors.accent),
+                  terrarium.speciesName ?? l10n.terrariumNoSpecies,
+                  style: TextStyle(
+                    color: terrarium.speciesName == null
+                        ? AppColors.textMuted
+                        : AppColors.accent,
+                  ),
                 ),
+                // Stated rather than left to be discovered: with no profile there are no bands, so nothing about
+                // this enclosure is being judged (2026-10-25).
+                if (terrarium.speciesName == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      l10n.terrariumNoSpeciesHint,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
                 if (terrarium.location?.isNotEmpty == true)
                   Text(
                     terrarium.location!,
@@ -628,6 +645,10 @@ class _EditTerrariumDialog extends StatefulWidget {
 }
 
 class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
+  /// Dropdown value for "this enclosure has no species" — see `_CreateTerrariumSheetState._noProfile` for why it
+  /// is a sentinel rather than a null value.
+  static const _noProfile = '';
+
   late final TextEditingController _name;
   late final TextEditingController _location;
   late final TextEditingController _description;
@@ -635,6 +656,8 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
   AppFailure? _failure;
   bool _saving = false;
   String? _ownerUserId;
+  List<ApiSpeciesProfile> _profiles = const [];
+  late String _profileId = widget.current.speciesProfileId ?? _noProfile;
 
   @override
   void initState() {
@@ -642,13 +665,21 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
     _name = TextEditingController(text: widget.current.name);
     _location = TextEditingController(text: widget.current.location ?? '');
     _description = TextEditingController(text: widget.current.description ?? '');
-    _ownerUserId = widget.current.ownerUserId;
 
-    // An administrator assigns the enclosure here; the picker needs the deployment's accounts, which the admin
-    // screens load for their own lists and which may not have been read yet on this route.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        context.read<AccountsProvider?>()?.loadAccounts();
+    // An administrator assigns the enclosure here, and a keeper changes its species here; both pickers need the
+    // deployment's lists, which the other screens load for their own purposes and which may not have been read yet
+    // on this route.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      context.read<AccountsProvider?>()?.loadAccounts();
+      final provider = context.read<TerrariumProvider>();
+      try {
+        final profiles = await provider.loadSpeciesProfiles();
+        if (mounted) setState(() => _profiles = profiles);
+      } catch (_) {
+        // The picker stays on its current value; the rest of the dialog still works, and a missed species list
+        // must not stop a keeper renaming their enclosure. Any failure is swallowed for the same reason: an empty
+        // catalogue and an unreachable server both leave the field showing what the terrarium already names.
       }
     });
   }
@@ -671,6 +702,10 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
     // Only when it changed: an omitted member means "leave it", and an assignment is administrator-only.
     final ownerChange = _ownerUserId != widget.current.ownerUserId ? _ownerUserId : null;
 
+    // Tri-state, matching the patch: unchanged sends nothing, a profile sends its id, and "no species" sends the
+    // all-zero GUID the provider reads as a detach.
+    final profileChanged = _profileId != (widget.current.speciesProfileId ?? _noProfile);
+
     try {
       final updated = await context.read<TerrariumProvider>().updateTerrarium(
         widget.current,
@@ -678,6 +713,9 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
         location: _location.text,
         description: _description.text,
         ownerUserId: ownerChange,
+        speciesProfileId:
+            profileChanged && _profileId.isNotEmpty ? _profileId : null,
+        clearSpeciesProfile: profileChanged && _profileId.isEmpty,
       );
       if (mounted) {
         Navigator.pop(context, updated);
@@ -743,6 +781,47 @@ class _EditTerrariumDialogState extends State<_EditTerrariumDialog> {
                 validator: (value) => (value?.length ?? 0) > 1000
                     ? l10n.terrariumDescriptionTooLong
                     : null,
+              ),
+              const SizedBox(height: 8),
+              // Changing or clearing the species was impossible before 2026-10-25: the dialog named the profile and
+              // offered no way to change it, so an enclosure set up with the wrong species stayed wrong.
+              DropdownButtonFormField<String>(
+                initialValue: _profileId,
+                isExpanded: true,
+                dropdownColor: AppColors.bgCard,
+                style: const TextStyle(color: AppColors.textMain, fontSize: 14),
+                decoration: InputDecoration(
+                  labelText: l10n.terrariumSpecies,
+                  helperText: l10n.terrariumSpeciesOptional,
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: _noProfile,
+                    child: Text(
+                      l10n.terrariumNoSpeciesLong,
+                      style: const TextStyle(color: AppColors.textMuted),
+                    ),
+                  ),
+                  // The assigned profile as the terrarium itself named it, until the catalogue arrives: a dropdown
+                  // whose value is not among its items throws, and a field that silently showed "no species" while
+                  // the enclosure has one would be worse than a label that clears once the list loads.
+                  if (_profileId != _noProfile &&
+                      !_profiles.any((profile) => profile.id == _profileId))
+                    DropdownMenuItem(
+                      value: _profileId,
+                      child: Text(
+                        widget.current.speciesName ?? _profileId,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  for (final profile in _profiles)
+                    DropdownMenuItem(
+                      value: profile.id,
+                      child: Text(profile.name, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (id) =>
+                    setState(() => _profileId = id ?? _noProfile),
               ),
               if (canAssignOwner) ...[
                 const Divider(height: 24),

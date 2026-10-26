@@ -51,6 +51,53 @@ public class AlertServiceTests
     }
 
     [Fact]
+    public async Task Another_account_sees_none_of_these_alerts_without_the_administrator_grant()
+    {
+        Add(1);
+
+        var outcome = await _service.ListAsync(
+            Guid.NewGuid(),
+            new AlertQuery(PageSize: 10),
+            CancellationToken.None);
+
+        outcome.Page!.Items.Should().BeEmpty("the read is scoped to the caller's own terrariums");
+    }
+
+    [Fact]
+    public async Task The_page_carries_a_count_per_state_for_the_status_bar()
+    {
+        Add(1);
+        Add(2).State = AlertState.Acknowledged;
+        Add(3).State = AlertState.Resolved;
+        Add(4).State = AlertState.Resolved;
+
+        var outcome = await _service.ListAsync(_store.Owner, new AlertQuery(PageSize: 10), CancellationToken.None);
+
+        var counts = outcome.Page!.Counts;
+        counts.Open.Should().Be(1);
+        counts.Acknowledged.Should().Be(1);
+        counts.Resolved.Should().Be(2);
+        counts.Total.Should().Be(4, "the bar's first tab is the sum of the three it labels");
+    }
+
+    [Fact]
+    public async Task An_administrator_reaches_alerts_this_account_does_not_own()
+    {
+        Add(1);
+        Add(2);
+
+        var outcome = await _service.ListAsync(
+            Guid.NewGuid(),
+            new AlertQuery(PageSize: 10),
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        outcome.Page!.Items.Should().HaveCount(
+            2,
+            "an unowned terrarium's alerts match no account, so the grant is the only way to list them");
+    }
+
+    [Fact]
     public async Task A_cursor_this_api_did_not_issue_is_refused_as_a_bad_request()
     {
         var outcome = await _service.ListAsync(
@@ -152,6 +199,74 @@ public class AlertServiceTests
             State = nameof(AlertState.Acknowledged),
             Metric = "tempC",
         });
+    }
+
+    [Fact]
+    public async Task An_administrator_may_acknowledge_and_resolve_another_accounts_alert()
+    {
+        var alert = Add(812);
+        var administrator = Guid.NewGuid();
+
+        var acknowledged = await _service.AcknowledgeAsync(
+            alert.Id,
+            administrator,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        acknowledged.Succeeded.Should().BeTrue();
+        alert.State.Should().Be(AlertState.Acknowledged);
+        alert.AcknowledgedByUserId.Should().Be(administrator, "the audit names the account that acted");
+        _store.AuditEntries.Should().ContainSingle().Which.UserId.Should().Be(administrator);
+
+        var resolved = await _service.ResolveAsync(
+            alert.Id,
+            administrator,
+            new ResolveAlertRequest(nameof(ResolvedReason.Accepted), "Checked on site"),
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        resolved.Succeeded.Should().BeTrue();
+        alert.State.Should().Be(AlertState.Resolved);
+        alert.ResolvedByUserId.Should().Be(administrator);
+        _store.AuditEntries.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task The_wide_scope_still_reads_the_detail_and_the_timeline_of_another_accounts_alert()
+    {
+        var alert = Add(812);
+
+        var detail = await _service.GetAsync(alert.Id, Guid.NewGuid(), CancellationToken.None, mayReachAnyAccount: true);
+        var timeline = await _service.TimelineAsync(
+            alert.Id,
+            Guid.NewGuid(),
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        detail.Succeeded.Should().BeTrue();
+        detail.Alert!.Alert.Id.Should().Be(alert.Id);
+        timeline.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task The_wide_scope_does_not_widen_the_ordinary_callers()
+    {
+        var alert = Add(812);
+        var stranger = Guid.NewGuid();
+
+        // The default is still the owner's scope: a caller that does not hold the permission cannot reach the row.
+        var resolved = await _service.ResolveAsync(
+            alert.Id,
+            stranger,
+            new ResolveAlertRequest(nameof(ResolvedReason.Accepted), null),
+            AuditActor.Unknown,
+            CancellationToken.None);
+
+        resolved.Problem!.Code.Should().Be("not_found");
+        alert.State.Should().Be(AlertState.Open);
+        _store.AuditEntries.Should().BeEmpty();
     }
 
     [Fact]

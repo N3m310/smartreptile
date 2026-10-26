@@ -5,6 +5,7 @@ using SmartReptile.Application.Ingest;
 using SmartReptile.Domain.Alerts;
 using SmartReptile.Domain.Auditing;
 using SmartReptile.Domain.Evaluation;
+using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Metrics;
 using SmartReptile.Domain.Thresholds;
 using SmartReptile.Infrastructure.Alerts;
@@ -206,6 +207,74 @@ public sealed class AlertLifecycleTests(DatabaseFixture fixture)
 
         audit.Select(row => row.Action)
             .Should().Equal(AuditAction.MetricSilenced, AuditAction.SilenceCancelled);
+
+        await tx.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task An_administrator_may_acknowledge_and_resolve_another_accounts_alert()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        // The keeper's alert, and an administrator who owns nothing here.
+        var theirs = await OwnedAsync(db, "cross");
+        var administrator = await Seed.UserAsync(db, SystemRoles.AdminId);
+        var store = new EfAlertStore(db);
+        var service = new AlertService(store, new RecordingBroadcaster(), new SystemClock());
+
+        (await store.FindOwnedAsync(theirs.AlertId, administrator, CancellationToken.None)).Should().BeNull(
+            "the owner-scoped lookup is unchanged: the administrator owns no enclosure in this account");
+        (await store.FindAnyAsync(theirs.AlertId, CancellationToken.None)).Should().NotBeNull(
+            "the cross-account lookup the administrator's routes now use");
+
+        var acknowledged = await service.AcknowledgeAsync(
+            theirs.AlertId,
+            administrator,
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        acknowledged.Succeeded.Should().BeTrue();
+
+        var resolved = await service.ResolveAsync(
+            theirs.AlertId,
+            administrator,
+            new ResolveAlertRequest("Accepted", "checked on site"),
+            AuditActor.Unknown,
+            CancellationToken.None,
+            mayReachAnyAccount: true);
+
+        resolved.Succeeded.Should().BeTrue();
+
+        var stored = await db.Alerts.SingleAsync(row => row.Id == theirs.AlertId);
+        stored.State.Should().Be(AlertState.Resolved);
+        stored.AcknowledgedByUserId.Should().Be(administrator);
+        stored.ResolvedByUserId.Should().Be(administrator);
+
+        var audit = await db.AuditLogs
+            .Where(row => row.EntityName == "Alert" && row.EntityId == theirs.AlertId.ToString())
+            .ToListAsync();
+
+        audit.Should().HaveCount(2, "one row for the acknowledgement and one for the resolution");
+        audit.Should().OnlyContain(row => row.UserId == administrator, "the trail names whoever acted");
+
+        await tx.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task The_cross_account_lookup_still_hides_an_alert_of_a_deleted_enclosure()
+    {
+        await using var db = fixture.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        var theirs = await OwnedAsync(db, "cross-deleted");
+        var store = new EfAlertStore(db);
+
+        await Seed.SoftDeleteAsync(db, theirs.TerrariumId);
+
+        (await store.FindAnyAsync(theirs.AlertId, CancellationToken.None)).Should().BeNull(
+            "a closed enclosure's history is a record, not a queue: the join keeps the soft-delete filter");
 
         await tx.RollbackAsync();
     }

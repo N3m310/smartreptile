@@ -21,6 +21,7 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
     private readonly List<SpeciesProfile> _profiles = [];
     private readonly List<AuditLog> _audit = [];
     private readonly HashSet<Guid> _users = [];
+    private readonly HashSet<Guid> _admins = [];
     private readonly HashSet<Guid> _assigned = [];
 
     /// <summary>How many times the store was committed — asserted so "nothing was written" is a real assertion.</summary>
@@ -33,6 +34,9 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
 
     /// <summary>Registers an account, so the write paths' caller check accepts it.</summary>
     public void AddUser(Guid userId) => _users.Add(userId);
+
+    /// <summary>Marks an account as an administrator, whose profiles are visible to all callers.</summary>
+    public void AddAdmin(Guid userId) => _admins.Add(userId);
 
     /// <summary>Marks a profile as assigned to a terrarium, which is what the delete rule refuses.</summary>
     public void AssignToTerrarium(Guid profileId) => _assigned.Add(profileId);
@@ -85,7 +89,7 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
     public Task<IReadOnlyList<SpeciesProfile>> ListVisibleAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<SpeciesProfile>>(
             [.. _profiles
-                .Where(profile => profile.IsBuiltIn || profile.CreatedByUserId == userId)
+                .Where(profile => profile.IsBuiltIn || profile.CreatedByUserId == userId || (profile.CreatedByUserId.HasValue && _admins.Contains(profile.CreatedByUserId.Value)))
                 .OrderBy(profile => profile.Name, StringComparer.Ordinal)]);
 
     public Task<SpeciesProfile?> FindAsync(Guid profileId, CancellationToken cancellationToken) =>
@@ -106,6 +110,9 @@ internal sealed class FakeSpeciesProfileStore : ISpeciesProfileStore
 
     public Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult(_users.Contains(userId));
+
+    public Task<bool> IsAdminUserAsync(Guid userId, CancellationToken cancellationToken) =>
+        Task.FromResult(_admins.Contains(userId));
 
     public void Add(SpeciesProfile profile) => _profiles.Add(profile);
 

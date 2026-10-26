@@ -63,8 +63,8 @@ public sealed record AdminAccountRollup(
 /// <param name="Name">Display name.</param>
 /// <param name="OwnerId">Owning account.</param>
 /// <param name="OwnerUsername">Owning account's login name.</param>
-/// <param name="SpeciesProfileId">Species profile in force.</param>
-/// <param name="SpeciesProfileName">That profile's common name.</param>
+/// <param name="SpeciesProfileId">Species profile in force, null for an enclosure that has none yet.</param>
+/// <param name="SpeciesProfileName">That profile's common name, null exactly when the id is.</param>
 /// <param name="Status">Lifecycle status, as the REST surface spells it.</param>
 /// <param name="DevicePublicId">Public id of the bound board, if one is.</param>
 /// <param name="DeviceStatus">That board's status.</param>
@@ -76,8 +76,8 @@ public sealed record AdminTerrariumView(
     string Name,
     Guid? OwnerId,
     string? OwnerUsername,
-    Guid SpeciesProfileId,
-    string SpeciesProfileName,
+    Guid? SpeciesProfileId,
+    string? SpeciesProfileName,
     string Status,
     string? DevicePublicId,
     string? DeviceStatus,

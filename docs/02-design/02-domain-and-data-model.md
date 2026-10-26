@@ -119,7 +119,7 @@ either has all three set or none, and a removal nulls the first two while dating
 | `Phase` | tinyint | 0 Any, 1 Day, 2 Night |
 | `TargetMin`, `TargetMax` | decimal(9,3) | must satisfy ordering rule |
 | `CriticalMin`, `CriticalMax` | decimal(9,3) | nullable → falls back to target ± default margin |
-| `DwellWarnMinutes` | smallint | default 5 |
+| `DwellWarnMinutes` | smallint | default 2 |
 | `DwellCritMinutes` | smallint | default 2 |
 | `RecoveryMargin` | decimal(9,3) | default per metric |
 | `SourceRef`, `SourceUrl` | nvarchar | **required for built-ins** (brief §6) |

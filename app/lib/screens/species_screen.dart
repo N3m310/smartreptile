@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
+import '../core/species_localization.dart';
 import '../models/species_profile.dart';
 import '../state/session_provider.dart';
 import '../state/species_profile_provider.dart';
@@ -43,7 +44,11 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
   // ================= FORM DIALOG: TẠO MỚI / CHỈNH SỬA =================
   Future<void> _openSpeciesFormDialog({SpeciesProfileView? existing}) async {
     final isEditing = existing != null;
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final nameCtrl = TextEditingController(
+      text: existing != null
+          ? SpeciesLocalization.displayName(existing.name)
+          : '',
+    );
     final sciNameCtrl = TextEditingController(
       text: existing?.scientificName ?? '',
     );
@@ -56,6 +61,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     double tempMax = 33.0;
     double humMin = 50.0;
     double humMax = 75.0;
+    double lightMin = 200.0;
+    double lightMax = 800.0;
 
     if (isEditing) {
       for (final band in existing.bands) {
@@ -65,6 +72,9 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         } else if (band.metric == 'humidityPct' || band.metric == 'humidity') {
           humMin = band.targetMin;
           humMax = band.targetMax;
+        } else if (band.metric == 'lightLux' || band.metric == 'light') {
+          lightMin = band.targetMin;
+          lightMax = band.targetMax;
         }
       }
     }
@@ -73,6 +83,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
     final tempMaxCtrl = TextEditingController(text: tempMax.toStringAsFixed(1));
     final humMinCtrl = TextEditingController(text: humMin.toStringAsFixed(0));
     final humMaxCtrl = TextEditingController(text: humMax.toStringAsFixed(0));
+    final lightMinCtrl = TextEditingController(text: lightMin.toStringAsFixed(0));
+    final lightMaxCtrl = TextEditingController(text: lightMax.toStringAsFixed(0));
 
     String selectedZone = existing?.climateZone ?? ClimateZones.tropical;
     final formKey = GlobalKey<FormState>();
@@ -196,7 +208,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                     const SizedBox(height: 16),
 
                     const Text(
-                      'Tiêu chuẩn nhiệt độ & độ ẩm vi khí hậu:',
+                      'Tiêu chuẩn nhiệt độ, độ ẩm & ánh sáng vi khí hậu:',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
@@ -285,6 +297,53 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                     ),
                     const SizedBox(height: 12),
 
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: lightMinCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Độ sáng min (Lux)',
+                              prefixIcon: Icon(Icons.wb_sunny_outlined, size: 18),
+                            ),
+                            validator: (val) {
+                              if (val == null || double.tryParse(val) == null) {
+                                return 'Nhập số hợp lệ';
+                              }
+                              if (double.parse(val) < 0) {
+                                return 'Min >= 0';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: lightMaxCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Độ sáng max (Lux)',
+                              prefixIcon: Icon(Icons.wb_sunny_outlined, size: 18),
+                            ),
+                            validator: (val) {
+                              final min = double.tryParse(lightMinCtrl.text);
+                              final max = double.tryParse(val ?? '');
+                              if (max == null) return 'Nhập số hợp lệ';
+                              if (min != null && max <= min) return 'Max > Min';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
                     TextFormField(
                       controller: photoperiodCtrl,
                       keyboardType: TextInputType.number,
@@ -331,9 +390,23 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         final tMax = double.parse(tempMaxCtrl.text);
                         final hMin = double.parse(humMinCtrl.text);
                         final hMax = double.parse(humMaxCtrl.text);
+                        final lMin = double.parse(lightMinCtrl.text);
+                        final lMax = double.parse(lightMaxCtrl.text);
                         final photoHours = double.parse(photoperiodCtrl.text);
 
-                        final bands = [
+                        final bands = <SpeciesProfileBandInput>[];
+                        if (isEditing) {
+                          for (final b in existing.bands) {
+                            if (b.metric != 'tempC' &&
+                                b.metric != 'humidityPct' &&
+                                b.metric != 'humidity' &&
+                                b.metric != 'lightLux' &&
+                                b.metric != 'light') {
+                              bands.add(SpeciesProfileBandInput.fromBand(b));
+                            }
+                          }
+                        }
+                        bands.addAll([
                           SpeciesProfileBandInput(
                             metric: 'tempC',
                             phase: 'day',
@@ -346,7 +419,13 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                             targetMin: hMin,
                             targetMax: hMax,
                           ),
-                        ];
+                          SpeciesProfileBandInput(
+                            metric: 'lightLux',
+                            phase: 'any',
+                            targetMin: lMin,
+                            targetMax: lMax,
+                          ),
+                        ]);
 
                         final provider = context.read<SpeciesProfileProvider>();
                         Navigator.pop(modalCtx);
@@ -359,6 +438,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                               scientificName: sciNameCtrl.text.trim(),
                               climateZone: selectedZone,
                               photoperiodHours: photoHours,
+                              lightThresholdLux: lMin,
                               notes: notesCtrl.text.trim(),
                               bands: bands,
                             ),
@@ -381,6 +461,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                               scientificName: sciNameCtrl.text.trim(),
                               climateZone: selectedZone,
                               photoperiodHours: photoHours,
+                              lightThresholdLux: lMin,
                               notes: notesCtrl.text.trim(),
                               bands: bands,
                             ),
@@ -419,7 +500,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
   // ================= DIALOG: NHÂN BẢN LOÀI =================
   Future<void> _openDuplicateDialog(SpeciesProfileView target) async {
     final provider = context.read<SpeciesProfileProvider>();
-    final nameCtrl = TextEditingController(text: '${target.name} (Tùy chỉnh)');
+    final targetDisplayName = SpeciesLocalization.displayName(target.name);
+    final nameCtrl = TextEditingController(text: '$targetDisplayName (Tùy chỉnh)');
     final formKey = GlobalKey<FormState>();
 
     final confirm = await showDialog<bool>(
@@ -450,7 +532,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Tạo một bản sao từ "${target.name}" để tinh chỉnh thông số vi khí hậu.',
+                'Tạo một bản sao từ "$targetDisplayName" để tinh chỉnh thông số vi khí hậu.',
                 style: const TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 13,
@@ -531,7 +613,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                item.name,
+                SpeciesLocalization.displayName(item.name),
                 style: const TextStyle(
                   color: AppColors.textMain,
                   fontSize: 16,
@@ -604,25 +686,33 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                   child: Text(
                     '  - ${band.metric == 'tempC'
                         ? 'Nhiệt độ'
-                        : band.metric == 'humidityPct'
+                        : (band.metric == 'humidityPct' || band.metric == 'humidity')
                         ? 'Độ ẩm'
-                        : band.metric}: ${band.targetMin.toStringAsFixed(1)} ~ ${band.targetMax.toStringAsFixed(1)} ${band.unit} (${band.phase})',
+                        : (band.metric == 'lightLux' || band.metric == 'light')
+                        ? 'Ánh sáng'
+                        : band.metric}: ${band.targetMin.toStringAsFixed(1)} ~ ${band.targetMax.toStringAsFixed(1)} ${band.unit.isNotEmpty ? band.unit : ((band.metric == 'lightLux' || band.metric == 'light') ? 'Lux' : '')} (${band.phase})',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.textMain,
                     ),
                   ),
                 ),
-              if (item.notes != null && item.notes!.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Ghi chú: ${item.notes}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ],
+              Builder(
+                builder: (context) {
+                  final notes = SpeciesLocalization.displayNotes(item.name, item.notes);
+                  if (notes.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      'Ghi chú: $notes',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -634,7 +724,19 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
               style: TextStyle(color: AppColors.textMuted),
             ),
           ),
-          if (canManage)
+          if (canManage) ...[
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.edit, size: 16),
+              label: const Text('Tùy chỉnh'),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openSpeciesFormDialog(existing: item);
+              },
+            ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orangeAccent,
@@ -647,6 +749,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                 _openDuplicateDialog(item);
               },
             ),
+          ],
         ],
       ),
     );
@@ -664,9 +767,21 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         (session.user?.role.toLowerCase() == 'admin') ||
         session.hasPermission(Permissions.dataReadAny) ||
         session.hasPermission(Permissions.userRead);
+    final isOwner = session.user?.role.toLowerCase() == 'owner';
 
     final canManage =
         session.hasPermission(Permissions.speciesWrite) || isAdmin;
+
+    if (session.isSignedIn &&
+        provider.profiles.isEmpty &&
+        !provider.isLoading &&
+        provider.errorMessage == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context.read<SpeciesProfileProvider>().fetchProfiles();
+        }
+      });
+    }
 
     // Filter profiles theo query và climate zone
     final filtered = provider.profiles.where((p) {
@@ -675,9 +790,12 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
         return false;
       }
       if (_searchQuery.isNotEmpty) {
-        final q = _searchQuery.toLowerCase();
-        return p.name.toLowerCase().contains(q) ||
-            p.scientificName.toLowerCase().contains(q);
+        return SpeciesLocalization.matchesQuery(
+          name: p.name,
+          scientificName: p.scientificName,
+          notes: p.notes,
+          query: _searchQuery,
+        );
       }
       return true;
     }).toList();
@@ -687,8 +805,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Top Bar & Role guide banner (hidden for role admin, displayed for other roles)
-            if (!isAdmin) ...[
+            // Top Bar & Role guide banner (hidden for role admin and owner, displayed for other roles)
+            if (!isAdmin && !isOwner) ...[
               // Top Bar: Tiêu đề và badge vai trò
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -948,7 +1066,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
             else
               // Action toolbar (Search + Add if Admin + Refresh) for other roles
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: EdgeInsets.fromLTRB(16, isOwner ? 12 : 4, 16, 4),
                 child: Row(
                   children: [
                     // Ô tìm kiếm nhanh
@@ -991,32 +1109,34 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
 
-                    // Nút làm mới
-                    IconButton(
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppColors.bgInput,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: const BorderSide(color: AppColors.border),
+                    // Nút làm mới (ẩn ở role owner theo thiết kế UI, hiển thị ở các role còn lại)
+                    if (!isOwner) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.bgInput,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: const BorderSide(color: AppColors.border),
+                          ),
                         ),
+                        icon: const Icon(
+                          Icons.refresh,
+                          size: 18,
+                          color: AppColors.textMain,
+                        ),
+                        tooltip: 'Làm mới',
+                        onPressed: provider.isLoading || provider.isSaving
+                            ? null
+                            : () async {
+                                await provider.fetchProfiles();
+                                _showNotification(
+                                  'Đã làm mới danh mục (${provider.profiles.length} loài).',
+                                );
+                              },
                       ),
-                      icon: const Icon(
-                        Icons.refresh,
-                        size: 18,
-                        color: AppColors.textMain,
-                      ),
-                      tooltip: 'Làm mới',
-                      onPressed: provider.isLoading || provider.isSaving
-                          ? null
-                          : () async {
-                              await provider.fetchProfiles();
-                              _showNotification(
-                                'Đã làm mới danh mục (${provider.profiles.length} loài).',
-                              );
-                            },
-                    ),
+                    ],
 
                     // Nút "Thêm hồ sơ loài" (CHỈ HIỆN VỚI ADMIN)
                     if (canManage) ...[
@@ -1128,22 +1248,32 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
 
             // Danh sách hồ sơ loài
             Expanded(
-              child: filtered.isEmpty
-                  ? Center(
-                      child: provider.isLoading
-                          ? const CircularProgressIndicator(
+              child: RefreshIndicator(
+                onRefresh: () => provider.fetchProfiles(),
+                color: AppColors.primary,
+                child: filtered.isEmpty
+                    ? (provider.isLoading
+                        ? const Center(
+                            child: CircularProgressIndicator(
                               color: AppColors.primary,
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
+                            ),
+                          )
+                        : ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height: MediaQuery.of(context).size.height * 0.25,
+                              ),
+                              const Center(
+                                child: Icon(
                                   Icons.pets,
                                   size: 40,
                                   color: Colors.white24,
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
+                              ),
+                              const SizedBox(height: 8),
+                              Center(
+                                child: Text(
                                   canManage
                                       ? 'Chưa có hồ sơ loài nào khớp bộ lọc.\nNhấn nút "Thêm loài" để tạo mới.'
                                       : 'Không tìm thấy hồ sơ loài nào phù hợp.',
@@ -1153,16 +1283,17 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                     color: AppColors.textMuted,
                                   ),
                                 ),
-                              ],
-                            ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 6,
-                      ),
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
+                              ),
+                            ],
+                          ))
+                    : ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
                         final item = filtered[index];
                         return Card(
                           color: AppColors.bgCard,
@@ -1217,7 +1348,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              item.name,
+                                              SpeciesLocalization.displayName(item.name),
                                               style: const TextStyle(
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.bold,
@@ -1241,34 +1372,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                         ),
                                       ),
 
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 7,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: item.isBuiltIn
-                                              ? Colors.white10
-                                              : AppColors.primary.withValues(
-                                                  alpha: 0.2,
-                                                ),
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          item.isBuiltIn
-                                              ? 'Mặc định'
-                                              : 'Tùy chỉnh',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w600,
-                                            color: item.isBuiltIn
-                                                ? AppColors.textMuted
-                                                : AppColors.primary,
-                                          ),
-                                        ),
-                                      ),
+                                      // Badge "Mặc định" / "Tùy chỉnh" phía trên đã được ẩn theo yêu cầu
                                     ],
                                   ),
 
@@ -1396,8 +1500,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                               _openDuplicateDialog(item),
                                         ),
 
-                                        if (!item.isBuiltIn) ...[
-                                          const SizedBox(width: 6),
+                                        const SizedBox(width: 6),
                                           TextButton.icon(
                                             style: TextButton.styleFrom(
                                               foregroundColor:
@@ -1426,16 +1529,26 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                 ),
                                           ),
                                           const SizedBox(width: 6),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.redAccent,
-                                              size: 18,
+                                          TextButton.icon(
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.redAccent,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
                                             ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                            tooltip: 'Xóa hồ sơ',
-                                            onPressed: () async {
+                                            minimumSize: Size.zero,
+                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.redAccent,
+                                            size: 14,
+                                          ),
+                                          label: const Text(
+                                            'Xóa',
+                                            style: TextStyle(fontSize: 12),
+                                          ),
+                                          onPressed: () async {
                                               final confirm = await showDialog<bool>(
                                                 context: context,
                                                 builder: (ctx) => AlertDialog(
@@ -1449,7 +1562,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                     ),
                                                   ),
                                                   content: Text(
-                                                    'Bạn có chắc muốn xóa hồ sơ loài "${item.name}" không?',
+                                                    'Bạn có chắc muốn xóa hồ sơ loài "${SpeciesLocalization.displayName(item.name)}" không?',
                                                     style: const TextStyle(
                                                       color:
                                                           AppColors.textMuted,
@@ -1493,7 +1606,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                     .deleteProfile(item.id);
                                                 if (success) {
                                                   _showNotification(
-                                                    'Đã xóa loài "${item.name}"',
+                                                    'Đã xóa loài "${SpeciesLocalization.displayName(item.name)}"',
                                                   );
                                                 } else {
                                                   _showNotification(
@@ -1504,8 +1617,8 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                                                 }
                                               }
                                             },
-                                          ),
-                                        ],
+                                          
+                                        )
                                       ],
                                     ],
                                   ),
@@ -1516,6 +1629,7 @@ class _SpeciesScreenState extends State<SpeciesScreen> {
                         );
                       },
                     ),
+              ),
             ),
           ],
         ),

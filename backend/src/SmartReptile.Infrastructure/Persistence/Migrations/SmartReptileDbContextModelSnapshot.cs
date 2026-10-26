@@ -1430,7 +1430,7 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
-                    b.Property<Guid>("SpeciesProfileId")
+                    b.Property<Guid?>("SpeciesProfileId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("Status")
@@ -1736,8 +1736,7 @@ namespace SmartReptile.Infrastructure.Persistence.Migrations
                     b.HasOne("SmartReptile.Domain.Species.SpeciesProfile", "SpeciesProfile")
                         .WithMany()
                         .HasForeignKey("SpeciesProfileId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("SmartReptile.Domain.Identity.User", null)
                         .WithMany()
