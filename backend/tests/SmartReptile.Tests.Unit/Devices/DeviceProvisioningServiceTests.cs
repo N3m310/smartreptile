@@ -1136,6 +1136,20 @@ public class DeviceProvisioningServiceTests
     }
 
     [Fact]
+    public async Task Purge_by_admin_succeeds_even_when_the_board_has_history()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+        _store.DeviceHasHistory = true;
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor, mayReachAnyAccount: true, purge: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.RemovedDevices.Should().Contain(device);
+        _store.Devices.Should().NotContain(candidate => candidate.PublicId == deviceId);
+    }
+
+    [Fact]
     public async Task Delete_of_another_accounts_board_is_not_found()
     {
         var theirs = new Device

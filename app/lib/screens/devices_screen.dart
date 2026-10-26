@@ -33,6 +33,8 @@ String _translateDeviceError(dynamic error) {
         return 'Không tìm thấy thiết bị tương ứng với thông tin đã nhập.';
       case 'device_revoked':
         return 'Thiết bị này đã bị thu hồi và không thể liên kết.';
+      case 'device_has_history':
+        return 'Thiết bị đã có dữ liệu đo hoặc cảnh báo. Không thể xóa nếu không phải quản trị viên.';
       case 'not_found':
         return 'Không tìm thấy chuồng nuôi hoặc thiết bị tương ứng.';
       case 'rate_limited':
@@ -495,21 +497,32 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  /// Erases a board for good, which only succeeds while nothing references it (`DELETE /devices/{id}?purge=true`).
+  /// Erases a board for good (`DELETE /devices/{id}?purge=true`).
   ///
-  /// Kept beside "Gỡ thiết bị" rather than replacing it: removing a board from the fleet is the everyday act, and
-  /// erasing the row is for a node nobody needs to remember — a mis-registered board, a prototype. The server's own
-  /// refusal is shown verbatim, because it says which kind of board this is.
+  /// For administrators, this purges the device and cascades the deletion of associated history (alerts, readings).
+  /// For keepers, this only succeeds while nothing references it.
   Future<void> _purgeDevice(BuildContext context, DeviceItem device) async {
+    final session = context.read<SessionProvider>();
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.bgCard,
-        title: const Text('Xoá vĩnh viễn', style: TextStyle(color: AppColors.statusDanger)),
+        title: Text(
+          isAdmin ? 'Xác nhận xóa thiết bị' : 'Xoá vĩnh viễn',
+          style: const TextStyle(color: AppColors.statusDanger, fontWeight: FontWeight.w600),
+        ),
         content: Text(
-          'Xoá hẳn "${device.deviceName}" khỏi hệ thống? Chỉ xoá được khi thiết bị chưa có dữ liệu đo hay cảnh báo nào. '
-          'Nếu đã có, hãy dùng "Gỡ thiết bị" để giữ lại lịch sử.',
-          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+          isAdmin
+              ? 'Bạn có chắc chắn muốn xóa thiết bị "${device.deviceName}" khỏi hệ thống không?\n\n'
+                'Lưu ý: Khi xóa thiết bị, các dữ liệu liên quan như cảnh báo và dữ liệu đo sẽ biến mất hoàn toàn.'
+              : 'Xoá hẳn "${device.deviceName}" khỏi hệ thống? Chỉ xoá được khi thiết bị chưa có dữ liệu đo hay cảnh báo nào. '
+                'Nếu đã có, hãy dùng "Gỡ khỏi bể nuôi" để giữ lại lịch sử.',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
         ),
         actions: [
           TextButton(
@@ -522,7 +535,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Xoá vĩnh viễn'),
+            child: Text(isAdmin ? 'Xác nhận xóa' : 'Xoá vĩnh viễn'),
           ),
         ],
       ),
@@ -543,10 +556,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
           SnackBar(
             content: Text(
               failure.code == 'device_has_history'
-                  ? 'Không xoá được: thiết bị đã có dữ liệu đo hoặc cảnh báo. Hãy dùng "Gỡ thiết bị".'
-                  : 'Lỗi xoá thiết bị: ${failure.detail ?? failure.code}',
+                  ? 'Không xoá được: thiết bị đã có dữ liệu đo hoặc cảnh báo. Hãy dùng "Gỡ khỏi bể nuôi".'
+                  : 'Lỗi xoá thiết bị: ${_translateDeviceError(failure)}',
             ),
           ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi xoá thiết bị: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -899,7 +918,7 @@ class _DeviceCard extends StatelessWidget {
                             children: [
                               Icon(Icons.delete_forever_outlined, size: 16, color: AppColors.statusDanger),
                               SizedBox(width: 8),
-                              Text('Xoá vĩnh viễn', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
+                              Text('Xoá thiết bị', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
                             ],
                           ),
                         ),

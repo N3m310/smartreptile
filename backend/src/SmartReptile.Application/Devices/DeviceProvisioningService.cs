@@ -749,7 +749,8 @@ public sealed class DeviceProvisioningService(
         {
             // Checked before anything is written, so a refused purge leaves the board exactly as it was rather than
             // half removed — a board that is revoked but still listed is the state a keeper would have to reason about.
-            if (await store.HasHistoryAsync(device.Id, cancellationToken).ConfigureAwait(false))
+            // Administrators (mayReachAnyAccount) can force purge, cascading all associated readings and alerts.
+            if (!mayReachAnyAccount && await store.HasHistoryAsync(device.Id, cancellationToken).ConfigureAwait(false))
             {
                 return DeviceOutcome.Failure(
                     "device_has_history",
