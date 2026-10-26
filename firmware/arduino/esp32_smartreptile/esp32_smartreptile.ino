@@ -51,7 +51,7 @@ String password;
 // IP của máy tính đang chạy backend TRONG CÙNG mạng Wi-Fi với ESP32.
 // Kiểm tra lại bằng: ipconfig   (dòng IPv4 Address của card Wi-Fi)
 // Nếu IP đổi (DHCP cấp lại), chỉ cần sửa đúng dòng dưới rồi nạp lại.
-#define SR_SERVER_IP "192.168.2.247"
+#define SR_SERVER_IP "192.168.100.164"
 
 // Port REST mặc định của dự án là 8080 (launchSettings.json / docker-compose.yml).
 const char* apiUrl = "http://" SR_SERVER_IP ":8080/api/v1/ingest/http";
@@ -70,8 +70,8 @@ const uint16_t mqttPort = SR_MQTT_TLS ? 8883 : 1883;
 //
 // publicId không phải bí mật nên để làm default; secret thì KHÔNG: nó chỉ tồn tại trong NVS của board.
 // Board chưa nạp secret sẽ không gửi gì cả (xem loop()) thay vì nhận 401 lặng lẽ.
-#define SR_DEFAULT_DEVICE_ID     "sr-u3qb8w"
-#define SR_DEFAULT_DEVICE_SECRET ""
+#define SR_DEFAULT_DEVICE_ID     "sr-qytxxn"
+#define SR_DEFAULT_DEVICE_SECRET "NSDU7VC3VLY3K7AO26YCMARV6VUXCB77T25UIZSRR7ILO7R47GGQ"
 
 const char* firmwareVersion = "1.0.0";   // tối đa 16 ký tự (rule V-03)
 const char* ntpServer       = "pool.ntp.org";

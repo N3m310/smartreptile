@@ -312,7 +312,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     const SizedBox(height: 16),
                     // Language Switcher Pills
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 6,
                       children: [
                         Text(
                           l10n.language.toUpperCase(),
@@ -323,13 +326,11 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: AppColors.textMuted,
                           ),
                         ),
-                        const SizedBox(width: 10),
                         _LanguagePill(
                           label: l10n.languageVi,
                           isSelected: (settings.locale?.languageCode ?? Localizations.localeOf(context).languageCode) == 'vi',
                           onTap: () => settings.setLocale(const Locale('vi')),
                         ),
-                        const SizedBox(width: 8),
                         _LanguagePill(
                           label: l10n.languageEn,
                           isSelected: (settings.locale?.languageCode ?? Localizations.localeOf(context).languageCode) == 'en',

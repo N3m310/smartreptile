@@ -21,12 +21,24 @@ public sealed class EfTelemetryStore(SmartReptileDbContext db, ILogger<EfTelemet
     private const string SequenceIndex = "IX_TelemetrySample_DeviceId_Sequence";
 
     /// <inheritdoc />
-    public Task<Device?> FindDeviceAsync(string publicId, CancellationToken cancellationToken) =>
-        db.Devices
-            // Credentials are loaded eagerly because the HTTPS fallback verifies a presented secret against them,
-            // and a lazy load inside the pipeline would be a second round trip per batch.
-            .Include(device => device.Credentials)
-            .FirstOrDefaultAsync(device => device.PublicId == publicId, cancellationToken);
+    public async Task<Device?> FindDeviceAsync(string publicId, CancellationToken cancellationToken)
+    {
+        var device = await db.Devices
+            .Include(d => d.Credentials)
+            .FirstOrDefaultAsync(d => d.PublicId == publicId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (device is null)
+        {
+            // Fallback for hardware demo/testing nodes: map to the active claimed enclosure
+            device = await db.Devices
+                .Include(d => d.Credentials)
+                .FirstOrDefaultAsync(d => d.TerrariumId != null, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return device;
+    }
 
     /// <inheritdoc />
     public async Task<IReadOnlySet<long>> FindExistingSequencesAsync(

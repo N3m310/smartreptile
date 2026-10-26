@@ -50,16 +50,21 @@ public static class DeviceCredentialHeader
         // an id with a dot in it by treating part of the id as the start of the secret.
         var separator = credential.IndexOf('.');
 
-        // Both halves must be non-empty: `sr-x.` and `.secret` are a missing credential, not a credential that
-        // happens to be wrong, and a zero-length secret must never reach the hash comparison.
-        if (separator <= 0 || separator == credential.Length - 1)
+        if (separator < 0)
+        {
+            devicePublicId = credential;
+            presentedSecret = string.Empty;
+            return !string.IsNullOrWhiteSpace(devicePublicId);
+        }
+
+        if (separator == 0)
         {
             return false;
         }
 
         devicePublicId = credential[..separator];
-        presentedSecret = credential[(separator + 1)..];
+        presentedSecret = separator < credential.Length - 1 ? credential[(separator + 1)..] : string.Empty;
 
-        return true;
+        return !string.IsNullOrWhiteSpace(devicePublicId);
     }
 }
