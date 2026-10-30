@@ -18,7 +18,6 @@ import 'state/session_provider.dart';
 import 'state/settings_provider.dart';
 import 'state/terrarium_provider.dart';
 import 'theme/app_theme.dart';
-import 'widgets/mock_data_notice.dart';
 
 /// The permissions that make the administration tab worth showing: either one opens at least one screen behind it.
 const List<String> _administrativePermissions = [
@@ -26,19 +25,12 @@ const List<String> _administrativePermissions = [
   Permissions.userRead,
 ];
 
-/// One destination of the shell: the tab, the screen, and whether that screen is still on the mock models.
+/// One destination of the shell: the tab and the screen behind it.
 class _ShellTab {
-  const _ShellTab({
-    required this.destination,
-    required this.screen,
-    this.isMock = true,
-  });
+  const _ShellTab({required this.destination, required this.screen});
 
   final Widget destination;
   final Widget screen;
-
-  /// False for a screen that reads the API, which is what decides whether the simulated-data notice is shown over it.
-  final bool isMock;
 }
 
 /// Root widget: theme, localisation and the navigation shell.
@@ -111,7 +103,8 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
     final session = context.watch<SessionProvider>();
     final l10n = AppLocalizations.of(context);
     final pendingCount = appData.pendingAlertsCount;
-    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+    final isAdmin =
+        (session.user?.role.toLowerCase() == 'administrator') ||
         (session.user?.role.toLowerCase() == 'admin') ||
         session.hasAnyPermission(_administrativePermissions);
     final isOwner = session.user?.role.toLowerCase() == 'owner';
@@ -135,7 +128,6 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
           label: 'Terrarium',
         ),
         screen: TerrariumsScreen(),
-        isMock: false,
       ),
       const _ShellTab(
         destination: NavigationDestination(
@@ -144,7 +136,6 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
           label: 'Hồ sơ loài',
         ),
         screen: SpeciesScreen(),
-        isMock: false,
       ),
       if (!isOwner)
         _ShellTab(
@@ -160,7 +151,6 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
                   label: 'Thiết bị IoT',
                 ),
           screen: const DevicesScreen(),
-          isMock: false,
         ),
       _ShellTab(
         destination: NavigationDestination(
@@ -195,7 +185,6 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
           label: 'Lịch sử',
         ),
         screen: HistoryScreen(),
-        isMock: false,
       ),
       if (session.hasAnyPermission(_administrativePermissions))
         _ShellTab(
@@ -205,7 +194,6 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
             label: l10n.navAdmin,
           ),
           screen: const AdminHubScreen(),
-          isMock: false,
         )
       else
         _ShellTab(
@@ -215,7 +203,6 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
             label: l10n.navProfile,
           ),
           screen: const ProfileScreen(),
-          isMock: false,
         ),
     ];
 
@@ -241,21 +228,30 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(width: 10),
-            RichText(
-              text: const TextSpan(
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.8,
-                  color: AppColors.textMain,
-                ),
-                children: [
-                  TextSpan(text: 'VIVARIUM'),
-                  TextSpan(
-                    text: 'GUARD',
-                    style: TextStyle(color: AppColors.primary),
+            // Flexible + FittedBox: on a narrow handset the app bar gives the title less width than the wordmark
+            // wants, and a bare Row paints the last letters past the edge (the fullstack E2E caught it at 411 dp).
+            // Scaling down keeps the whole wordmark readable instead of clipping it.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: RichText(
+                  text: const TextSpan(
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.8,
+                      color: AppColors.textMain,
+                    ),
+                    children: [
+                      TextSpan(text: 'VIVARIUM'),
+                      TextSpan(
+                        text: 'GUARD',
+                        style: TextStyle(color: AppColors.primary),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ],
@@ -294,18 +290,7 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
           ),
         ],
       ),
-      // The notice sits above the tabs rather than on each screen: the keeper's tabs are still rendering the M1 mock
-      // models, so the honest statement is about them, and it will move into the screens one at a time as they are
-      // wired — a screen that shows it is a screen that is still inventing its numbers (task 4.14's rule). The
-      // administration tab is *not* on mock models: everything behind it is the real API, so it does not carry the
-      // notice, and hiding it there is the same rule read the other way round.
-      body: Column(
-        children: [
-          if (tabs[index].isMock && !context.watch<AppDataProvider>().isLive)
-            const MockDataNotice(),
-          Expanded(child: tabs[index].screen),
-        ],
-      ),
+      body: tabs[index].screen,
       bottomNavigationBar: DefaultTextStyle.merge(
         textAlign: TextAlign.center,
         child: NavigationBar(

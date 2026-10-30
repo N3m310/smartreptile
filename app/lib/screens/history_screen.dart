@@ -30,7 +30,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
-    _initialize();
+    // Post-frame on purpose: `loadTerrariums` sets `_loading` and notifies synchronously before its first
+    // `await`, and calling it from `initState` marks the `TerrariumProvider` scope dirty while the shell is
+    // still building this screen ("setState() or markNeedsBuild() called during build").
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
   }
 
   Future<void> _initialize() async {
@@ -58,8 +61,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       metric: _metric,
       from: from,
       to: _to,
-    );
-    _coverage = provider.loadCoverage(id: id, from: from, to: _to);
+    )..ignore();
+    _coverage = provider.loadCoverage(id: id, from: from, to: _to)..ignore();
   }
 
   Future<void> _refresh() async {

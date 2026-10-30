@@ -490,6 +490,38 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | TC-E2E-05 | Silent device | unplug the node for 10 min | offline indicator, evaluation paused notice, `DeviceSilent` warning then critical, auto-resolve on restore, back-fill visible in the chart with the correction of the gap | 1 |
 | TC-E2E-06 | Release-mode ops check | release APK on a real phone + dashboard + admin page | release build proof captured; `/health`/`/ready`/`/metrics` correct; audit log complete for the session; retention status visible | 2 |
 
+> **Every case in the table above needs a person at the bench.** The software half of `TC-E2E-01/03/05/06` is
+> automated separately — `integration_test` suites that drive the real app against a stubbed API and against the
+> compose stack — and is tracked as `E2E-AI-*` in `05-e2e-ai-testing-plan.md` §6. Those ids are the ones that count
+> for "runs without a person"; the table above stays the record of what still needs hardware.
+
+### E.1 Automated end-to-end (`E2E-AI-*`, app)
+
+Run with `powershell -File scripts\e2e.ps1` (see `05-e2e-ai-testing-plan.md` §8). Reports land in
+`build/e2e/<suite>.json`; the nightly CI job `app-e2e` uploads them as the `e2e-reports` artifact.
+
+| Id | Case | Suite | Covers | Status |
+|---|---|---|---|---|
+| E2E-AI-01 | The app boots, a guest enters the shell, every destination opens | smoke | `TC-E2E-01` (app half), `TC-W-01` | ✅ 2026-10-30 |
+| E2E-AI-02 | Guest mode enters the shell without a single API call | hermetic | `TC-W-01` | ✅ |
+| E2E-AI-03 | Successful sign-in reaches the dashboard | hermetic | `TC-W-01` | ✅ |
+| E2E-AI-04 | A refused credential shows the error and stays on the form | hermetic | `TC-W-02` | ✅ |
+| E2E-AI-05 | Registration issues a recovery code and returns to sign-in | hermetic | `TC-W-03` | ✅ |
+| E2E-AI-06 | An empty catalogue renders the shell, not an error | hermetic | `TC-W-05` | ✅ |
+| E2E-AI-07 | The language pill switches the whole form to English | hermetic | `NFR-06` | ✅ |
+| E2E-AI-08 | Signing out clears the keychain, not just the screen | hermetic | `FR-01` | ✅ |
+| E2E-AI-09 | A real sign-in shows the account its own enclosure | fullstack | `TC-E2E-01` (app half) | ✅ |
+| E2E-AI-10 | The enclosure detail opens on that enclosure | fullstack | `FR-03` | ✅ |
+| E2E-AI-11 | History opens for an enclosure with no readings | fullstack | `FR-09` | ✅ |
+| E2E-AI-12 | Signing out against the real backend lands on the sign-in form | fullstack | `FR-01` | ✅ |
+| E2E-AI-13 | API outage degrades, does not crash | fullstack | `NFR-03` | ☐ needs a container stop mid-run |
+| E2E-AI-14 | An excursion ingested from the device reaches the app | alerts | `TC-E2E-03` (app half), `FR-11`, `FR-12` | ✅ |
+| E2E-AI-15 | Silence is presented as silence | fullstack | `TC-E2E-05` (app half), `FR-07` | ☐ needs ≥ 3 min of wall clock |
+
+What the automated half deliberately does **not** claim: `TC-E2E-02` (24 h soak), `TC-E2E-04` (sensor accuracy),
+real FCM delivery, and the release-APK photograph — all still manual, and all still in §E above and in
+`03-manual-qa-checklist.md`.
+
 ---
 
 ## F. Case-count summary
@@ -500,5 +532,6 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | Backend unit (TC-U-*) | 65 | ≥ 70% line coverage on Domain + Application |
 | Backend integration | 19 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
-| E2E | 6 | executed per milestone, results recorded |
-| **Total** | **116** | |
+| E2E (manual, §E) | 6 | executed per milestone, results recorded |
+| E2E-AI (automated, §E.1) | 15 | 13 green as of 2026-10-30; 2 outstanding (`E2E-AI-13/15`) |
+| **Total** | **131** | |

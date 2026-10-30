@@ -84,7 +84,8 @@ class _LoginScreenState extends State<LoginScreen> {
         );
         if (!ok && mounted) {
           setState(() {
-            _error = session.lastFailure ??
+            _error =
+                session.lastFailure ??
                 const AppFailure(code: 'invalid_credentials', statusCode: 401);
           });
         }
@@ -142,7 +143,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (_) {
       if (mounted) {
-        setState(() => _error = const AppFailure(code: 'errorGeneric', statusCode: 500));
+        setState(
+          () =>
+              _error = const AppFailure(code: 'errorGeneric', statusCode: 500),
+        );
       }
     }
   }
@@ -169,7 +173,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (_) {
       if (mounted) {
-        setState(() => _error = const AppFailure(code: 'errorGeneric', statusCode: 500));
+        setState(
+          () =>
+              _error = const AppFailure(code: 'errorGeneric', statusCode: 500),
+        );
       }
     }
   }
@@ -203,7 +210,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final String actionLabel = switch (_mode) {
       AuthMode.register => isBusy ? l10n.registering : l10n.register,
-      AuthMode.recover || AuthMode.reset => isBusy ? l10n.recovering : l10n.recoverButton,
+      AuthMode.recover ||
+      AuthMode.reset => isBusy ? l10n.recovering : l10n.recoverButton,
       AuthMode.signIn => isBusy ? l10n.signingIn : l10n.signIn,
     };
 
@@ -277,7 +285,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                     TextSpan(text: 'VIVARIUM'),
                                     TextSpan(
                                       text: 'GUARD',
-                                      style: TextStyle(color: AppColors.primary),
+                                      style: TextStyle(
+                                        color: AppColors.primary,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -311,8 +321,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
 
                     const SizedBox(height: 16),
-                    // Language Switcher Pills
-                    Row(
+                    // Language Switcher Pills. A Wrap, not a Row: on a 360-411 dp handset the three children need
+                    // more width than the card gives them, and a Row simply paints them past the edge (found by
+                    // the fullstack E2E on a 411 dp emulator — 82 px past it).
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
                           l10n.language.toUpperCase(),
@@ -323,16 +338,24 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: AppColors.textMuted,
                           ),
                         ),
-                        const SizedBox(width: 10),
                         _LanguagePill(
+                          identifier: 'login.lang.vi',
                           label: l10n.languageVi,
-                          isSelected: (settings.locale?.languageCode ?? Localizations.localeOf(context).languageCode) == 'vi',
+                          isSelected:
+                              (settings.locale?.languageCode ??
+                                  Localizations.localeOf(context)
+                                      .languageCode) ==
+                              'vi',
                           onTap: () => settings.setLocale(const Locale('vi')),
                         ),
-                        const SizedBox(width: 8),
                         _LanguagePill(
+                          identifier: 'login.lang.en',
                           label: l10n.languageEn,
-                          isSelected: (settings.locale?.languageCode ?? Localizations.localeOf(context).languageCode) == 'en',
+                          isSelected:
+                              (settings.locale?.languageCode ??
+                                  Localizations.localeOf(context)
+                                      .languageCode) ==
+                              'en',
                           onTap: () => settings.setLocale(const Locale('en')),
                         ),
                       ],
@@ -355,53 +378,67 @@ class _LoginScreenState extends State<LoginScreen> {
                     // Error Alert Banner
                     if (_error != null) ...[
                       const SizedBox(height: 14),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: AppColors.statusDanger.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AppColors.statusDanger.withValues(alpha: 0.5),
+                      Semantics(
+                        identifier: 'login.error',
+                        container: true,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
                           ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(
-                              Icons.error_outline,
-                              color: AppColors.statusDanger,
-                              size: 18,
+                          decoration: BoxDecoration(
+                            color: AppColors.statusDanger.withValues(
+                              alpha: 0.12,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    failureMessage(l10n, _error!),
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.white,
-                                      height: 1.3,
-                                    ),
-                                  ),
-                                  if (_error!.errors.isNotEmpty)
-                                    for (final err in _error!.errors)
-                                      if (err is Map && err['message'] != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 4),
-                                          child: Text(
-                                            '• ${err['message']}',
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: AppColors.statusDanger,
-                                            ),
-                                          ),
-                                        ),
-                                ],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.statusDanger.withValues(
+                                alpha: 0.5,
                               ),
                             ),
-                          ],
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: AppColors.statusDanger,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      failureMessage(l10n, _error!),
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.white,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                    if (_error!.errors.isNotEmpty)
+                                      for (final err in _error!.errors)
+                                        if (err is Map &&
+                                            err['message'] != null)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              top: 4,
+                                            ),
+                                            child: Text(
+                                              '• ${err['message']}',
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: AppColors.statusDanger,
+                                              ),
+                                            ),
+                                          ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -410,7 +447,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (_notice != null) ...[
                       const SizedBox(height: 14),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.primary.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(12),
@@ -480,7 +520,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 IconButton(
                                   icon: Icon(
                                     _isCopied ? Icons.check : Icons.copy,
-                                    color: _isCopied ? AppColors.primary : AppColors.textMuted,
+                                    color: _isCopied
+                                        ? AppColors.primary
+                                        : AppColors.textMuted,
                                     size: 20,
                                   ),
                                   tooltip: 'Sao chép mã',
@@ -498,6 +540,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     // Form Fields
                     if (_mode == AuthMode.register) ...[
                       _FormField(
+                        identifier: 'login.username',
                         label: l10n.username,
                         icon: Icons.person_outline,
                         controller: _usernameController,
@@ -506,6 +549,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.email',
                         label: l10n.email,
                         icon: Icons.mail_outline,
                         controller: _emailController,
@@ -515,17 +559,21 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.password',
                         label: l10n.password,
                         icon: Icons.lock_outline,
                         controller: _passwordController,
                         obscureText: !_showPassword,
                         suffixIcon: IconButton(
                           icon: Icon(
-                            _showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            _showPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
                             color: AppColors.textMuted,
                             size: 20,
                           ),
-                          onPressed: () => setState(() => _showPassword = !_showPassword),
+                          onPressed: () =>
+                              setState(() => _showPassword = !_showPassword),
                         ),
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submit(),
@@ -533,10 +581,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 6),
                       Text(
                         l10n.passwordHint,
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ] else if (_mode == AuthMode.signIn) ...[
                       _FormField(
+                        identifier: 'login.identifier',
                         label: l10n.usernameOrEmail,
                         icon: Icons.person_outline,
                         controller: _identifierController,
@@ -545,23 +597,28 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.password',
                         label: l10n.password,
                         icon: Icons.lock_outline,
                         controller: _passwordController,
                         obscureText: !_showPassword,
                         suffixIcon: IconButton(
                           icon: Icon(
-                            _showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            _showPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
                             color: AppColors.textMuted,
                             size: 20,
                           ),
-                          onPressed: () => setState(() => _showPassword = !_showPassword),
+                          onPressed: () =>
+                              setState(() => _showPassword = !_showPassword),
                         ),
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submit(),
                       ),
                     ] else if (_mode == AuthMode.recover) ...[
                       _FormField(
+                        identifier: 'login.identifier',
                         label: l10n.usernameOrEmail,
                         icon: Icons.person_outline,
                         controller: _identifierController,
@@ -570,6 +627,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.code',
                         label: l10n.recoveryCode,
                         icon: Icons.vpn_key_outlined,
                         controller: _codeController,
@@ -579,21 +637,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 6),
                       Text(
                         l10n.recoverHintBackup,
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.newPassword',
                         label: l10n.newPassword,
                         icon: Icons.lock_outline,
                         controller: _newPasswordController,
                         obscureText: !_showNewPassword,
                         suffixIcon: IconButton(
                           icon: Icon(
-                            _showNewPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            _showNewPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
                             color: AppColors.textMuted,
                             size: 20,
                           ),
-                          onPressed: () => setState(() => _showNewPassword = !_showNewPassword),
+                          onPressed: () => setState(
+                            () => _showNewPassword = !_showNewPassword,
+                          ),
                         ),
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submit(),
@@ -601,11 +667,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 6),
                       Text(
                         l10n.passwordHint,
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ] else ...[
                       // AuthMode.reset
                       _FormField(
+                        identifier: 'login.identifier',
                         label: l10n.usernameOrEmail,
                         icon: Icons.person_outline,
                         controller: _identifierController,
@@ -614,6 +684,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.resetCode',
                         label: l10n.resetCodeLabel,
                         icon: Icons.vpn_key_outlined,
                         controller: _codeController,
@@ -623,21 +694,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 6),
                       Text(
                         l10n.recoverHintIssued,
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       _FormField(
+                        identifier: 'login.newPassword',
                         label: l10n.newPassword,
                         icon: Icons.lock_outline,
                         controller: _newPasswordController,
                         obscureText: !_showNewPassword,
                         suffixIcon: IconButton(
                           icon: Icon(
-                            _showNewPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            _showNewPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
                             color: AppColors.textMuted,
                             size: 20,
                           ),
-                          onPressed: () => setState(() => _showNewPassword = !_showNewPassword),
+                          onPressed: () => setState(
+                            () => _showNewPassword = !_showNewPassword,
+                          ),
                         ),
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submit(),
@@ -645,7 +724,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 6),
                       Text(
                         l10n.passwordHint,
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ],
 
@@ -654,53 +736,60 @@ class _LoginScreenState extends State<LoginScreen> {
                     // Main Action Submit Button
                     SizedBox(
                       height: 48,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          elevation: 4,
-                          shadowColor: AppColors.primary.withValues(alpha: 0.4),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      child: MergeSemantics(
+                        child: Semantics(
+                          identifier: 'login.submit',
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              elevation: 4,
+                              shadowColor: AppColors.primary.withValues(
+                                alpha: 0.4,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: isBusy ? null : _submit,
+                            child: isBusy
+                                ? Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        actionLabel,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        actionLabel,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.arrow_forward, size: 18),
+                                    ],
+                                  ),
                           ),
                         ),
-                        onPressed: isBusy ? null : _submit,
-                        child: isBusy
-                            ? Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    actionLabel,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    actionLabel,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  const Icon(Icons.arrow_forward, size: 18),
-                                ],
-                              ),
                       ),
                     ),
 
@@ -713,7 +802,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         runSpacing: 8,
                         children: [
                           TextButton(
-                            onPressed: isBusy ? null : () => _switchMode(AuthMode.register),
+                            onPressed: isBusy
+                                ? null
+                                : () => _switchMode(AuthMode.register),
                             child: Text(
                               l10n.createAccount,
                               style: const TextStyle(
@@ -724,7 +815,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           TextButton(
-                            onPressed: isBusy ? null : () => _switchMode(AuthMode.recover),
+                            onPressed: isBusy
+                                ? null
+                                : () => _switchMode(AuthMode.recover),
                             child: Text(
                               l10n.forgotPassword,
                               style: const TextStyle(
@@ -743,14 +836,19 @@ class _LoginScreenState extends State<LoginScreen> {
                         children: [
                           if (_mode == AuthMode.recover)
                             TextButton(
-                              onPressed: isBusy || _identifierController.text.trim().isEmpty
+                              onPressed:
+                                  isBusy ||
+                                      _identifierController.text.trim().isEmpty
                                   ? null
                                   : _requestResetCode,
                               child: Text(
                                 l10n.sendResetCode,
                                 style: TextStyle(
-                                  color: _identifierController.text.trim().isEmpty
-                                      ? AppColors.textMuted.withValues(alpha: 0.5)
+                                  color:
+                                      _identifierController.text.trim().isEmpty
+                                      ? AppColors.textMuted.withValues(
+                                          alpha: 0.5,
+                                        )
                                       : AppColors.accent,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -758,7 +856,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           TextButton(
-                            onPressed: isBusy ? null : () => _switchMode(AuthMode.signIn),
+                            onPressed: isBusy
+                                ? null
+                                : () => _switchMode(AuthMode.signIn),
                             child: Text(
                               l10n.backToSignIn,
                               style: const TextStyle(
@@ -776,23 +876,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     const Divider(color: AppColors.border, height: 1),
                     const SizedBox(height: 16),
 
-                    // Guest / Demo exploration button
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textMuted,
-                        side: const BorderSide(color: AppColors.border),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    // Guest / Demo exploration button. The identifier is what the E2E layer addresses it by
+                    // (docs/04-quality/05 §7); MergeSemantics keeps the id and the button role on one node.
+                    MergeSemantics(
+                      child: Semantics(
+                        identifier: 'login.guest',
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textMuted,
+                            side: const BorderSide(color: AppColors.border),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () {
+                            context.read<SessionProvider>().enterGuestMode();
+                          },
+                          icon: const Icon(Icons.explore_outlined, size: 18),
+                          label: const Text(
+                            'Khám phá bản thử nghiệm (Khách)',
+                            style: TextStyle(fontSize: 13),
+                          ),
                         ),
-                      ),
-                      onPressed: () {
-                        context.read<SessionProvider>().enterGuestMode();
-                      },
-                      icon: const Icon(Icons.explore_outlined, size: 18),
-                      label: const Text(
-                        'Khám phá bản thử nghiệm (Khách)',
-                        style: TextStyle(fontSize: 13),
                       ),
                     ),
                   ],
@@ -808,6 +914,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
 class _FormField extends StatelessWidget {
   const _FormField({
+    required this.identifier,
     required this.label,
     required this.icon,
     required this.controller,
@@ -818,6 +925,12 @@ class _FormField extends StatelessWidget {
     this.textInputAction,
     this.onSubmitted,
   });
+
+  /// The `Semantics` identifier the E2E layer addresses this field by (`docs/04-quality/05` §7).
+  ///
+  /// Required rather than optional: a field without one is a field no test can fill, and the failure would only
+  /// show up as "the suite cannot reach this screen". It also gives TalkBack/VoiceOver an identity for the input.
+  final String identifier;
 
   final String label;
   final IconData icon;
@@ -844,39 +957,48 @@ class _FormField extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        TextFormField(
-          controller: controller,
-          obscureText: obscureText,
-          keyboardType: keyboardType,
-          textInputAction: textInputAction,
-          onFieldSubmitted: onSubmitted,
-          style: const TextStyle(
-            color: AppColors.textMain,
-            fontSize: 14,
-          ),
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: hintText,
-            hintStyle: TextStyle(
-              color: AppColors.textMuted.withValues(alpha: 0.5),
-              fontSize: 13,
-            ),
-            prefixIcon: Icon(icon, color: AppColors.textMuted, size: 20),
-            suffixIcon: suffixIcon,
-            filled: true,
-            fillColor: AppColors.bgInput,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+        // `label` as well as `identifier`: without a semantic name the field reads as an unnamed textbox to a
+        // screen reader, and the drawn label above it is a separate node.
+        Semantics(
+          identifier: identifier,
+          label: label,
+          child: TextFormField(
+            controller: controller,
+            obscureText: obscureText,
+            keyboardType: keyboardType,
+            textInputAction: textInputAction,
+            onFieldSubmitted: onSubmitted,
+            style: const TextStyle(color: AppColors.textMain, fontSize: 14),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: hintText,
+              hintStyle: TextStyle(
+                color: AppColors.textMuted.withValues(alpha: 0.5),
+                fontSize: 13,
+              ),
+              prefixIcon: Icon(icon, color: AppColors.textMuted, size: 20),
+              suffixIcon: suffixIcon,
+              filled: true,
+              fillColor: AppColors.bgInput,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 14,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: AppColors.primary,
+                  width: 1.5,
+                ),
+              ),
             ),
           ),
         ),
@@ -887,10 +1009,14 @@ class _FormField extends StatelessWidget {
 
 class _LanguagePill extends StatelessWidget {
   const _LanguagePill({
+    required this.identifier,
     required this.label,
     required this.isSelected,
     required this.onTap,
   });
+
+  /// `Semantics` identifier, so the E2E layer switches language without matching copy in either language.
+  final String identifier;
 
   final String label;
   final bool isSelected;
@@ -898,25 +1024,34 @@ class _LanguagePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : AppColors.border,
-            width: isSelected ? 1.5 : 1.0,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? AppColors.primary : AppColors.textMuted,
+    return MergeSemantics(
+      child: Semantics(
+        identifier: identifier,
+        button: true,
+        selected: isSelected,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppColors.primary.withValues(alpha: 0.15)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected ? AppColors.primary : AppColors.border,
+                width: isSelected ? 1.5 : 1.0,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? AppColors.primary : AppColors.textMuted,
+              ),
+            ),
           ),
         ),
       ),

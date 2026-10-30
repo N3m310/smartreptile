@@ -25,6 +25,7 @@ TestResults/
 *.trx
 coverage*.xml
 coverage*.json
+build/e2e/
 
 # ---- Flutter / Dart ----
 app/.dart_tool/

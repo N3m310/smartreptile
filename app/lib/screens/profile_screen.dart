@@ -59,13 +59,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) setState(() => _error = failure);
     } catch (_) {
       if (mounted) {
-        setState(() => _error =
-            const AppFailure(code: 'errorGeneric', statusCode: 500));
+        setState(
+          () =>
+              _error = const AppFailure(code: 'errorGeneric', statusCode: 500),
+        );
       }
     }
   }
 
-  InputDecoration _decoration(String label) => InputDecoration(labelText: label);
+  InputDecoration _decoration(String label) =>
+      InputDecoration(labelText: label);
 
   @override
   Widget build(BuildContext context) {
@@ -105,15 +108,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Text(user.email,
-                              style: const TextStyle(
-                                  color: AppColors.textMuted, fontSize: 13)),
+                          Text(
+                            user.email,
+                            style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 13,
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           Text(
                             '${l10n.sessionRole}: ${user.role} • '
                             '${l10n.sessionPermissions(user.permissions.length)}',
                             style: const TextStyle(
-                                color: AppColors.textMuted, fontSize: 12),
+                              color: AppColors.textMuted,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -138,13 +147,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text(
                     l10n.changePassword,
                     style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.bold),
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     l10n.changePasswordPrompt,
                     style: const TextStyle(
-                        color: AppColors.textMuted, fontSize: 12),
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -165,19 +178,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       helperText: l10n.passwordHint,
                       helperMaxLines: 2,
                     ),
-                    validator: (value) =>
-                        (value == null || value.length < 8)
-                            ? l10n.passwordHint
-                            : null,
+                    validator: (value) => (value == null || value.length < 8)
+                        ? l10n.passwordHint
+                        : null,
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: _confirmCtrl,
                     obscureText: !_showPasswords,
                     decoration: _decoration(l10n.confirmNewPassword),
-                    validator: (value) => value != _newCtrl.text
-                        ? l10n.passwordMismatch
-                        : null,
+                    validator: (value) =>
+                        value != _newCtrl.text ? l10n.passwordMismatch : null,
                   ),
                   Align(
                     alignment: Alignment.centerLeft,
@@ -185,11 +196,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       onPressed: () =>
                           setState(() => _showPasswords = !_showPasswords),
                       icon: Icon(
-                          _showPasswords
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                          size: 18),
-                      label: Text(_showPasswords ? l10n.hidePassword : l10n.showPassword),
+                        _showPasswords
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _showPasswords ? l10n.hidePassword : l10n.showPassword,
+                      ),
                     ),
                   ),
                   if (_error != null) ...[
@@ -198,7 +212,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ? l10n.wrongCurrentPassword
                           : failureMessage(l10n, _error!),
                       style: const TextStyle(
-                          color: AppColors.statusDanger, fontSize: 13),
+                        color: AppColors.statusDanger,
+                        fontSize: 13,
+                      ),
                     ),
                     for (final err in _error!.errors)
                       if (err is Map && err['message'] != null)
@@ -207,7 +223,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: Text(
                             '• ${err['message']}',
                             style: const TextStyle(
-                                color: AppColors.statusDanger, fontSize: 12),
+                              color: AppColors.statusDanger,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                     const SizedBox(height: 8),
@@ -216,7 +234,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Text(
                       l10n.passwordChanged,
                       style: const TextStyle(
-                          color: AppColors.primary, fontSize: 13),
+                        color: AppColors.primary,
+                        fontSize: 13,
+                      ),
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -233,21 +253,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: 16),
         SizedBox(
           height: 48,
-          child: OutlinedButton.icon(
-            onPressed: session.isBusy
-                ? null
-                : () async {
-                    if (!session.isSignedIn) {
-                      session.leaveGuestMode();
-                      return;
-                    }
-                    await session.signOut();
-                  },
-            icon: Icon(session.isSignedIn ? Icons.logout : Icons.login,
-                size: 18),
-            label: Text(session.isSignedIn
-                ? l10n.signOut
-                : l10n.signInOrLeaveGuest),
+          child: MergeSemantics(
+            child: Semantics(
+              identifier: 'profile.signOut',
+              child: OutlinedButton.icon(
+                onPressed: session.isBusy
+                    ? null
+                    : () async {
+                        if (!session.isSignedIn) {
+                          session.leaveGuestMode();
+                          return;
+                        }
+                        await session.signOut();
+                      },
+                icon: Icon(
+                  session.isSignedIn ? Icons.logout : Icons.login,
+                  size: 18,
+                ),
+                label: Text(
+                  session.isSignedIn ? l10n.signOut : l10n.signInOrLeaveGuest,
+                ),
+              ),
+            ),
           ),
         ),
       ],

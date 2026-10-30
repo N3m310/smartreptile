@@ -4,12 +4,19 @@ on:
   push:
     branches: ["main", "master"]
   pull_request:
+  # The E2E job needs an Android emulator and a SQL Server container, so it does not run on every push; see the
+  # `app-e2e` job below and docs/04-quality/05-e2e-ai-testing-plan.md §5 P5.
+  workflow_dispatch:
+  schedule:
+    - cron: "0 19 * * *" # 02:00 Asia/Ho_Chi_Minh
 
 # One pipeline, six gates (§03-implementation/01 §1, §04-quality/01 §7):
 #   backend     — build, formatting, unit tests, vulnerable packages
 #   integration — real SQL Server: migrations, seeding, SQL-level invariants, /health/ready
 #   web         — typecheck, locale-key parity (TC-I-15), production build
 #   app         — analyze + widget/unit tests
+#   app-e2e     — the four `integration_test` suites on an emulator against the compose stack. Nightly and on
+#                 demand, not on every push: it boots an emulator and SQL Server, and `app` already covers the UI
 #   firmware    — host unit tests (native env) + ESP32 build
 #   secret-scan — the scan that keeps .env out of the repository (NFR-04)
 #
@@ -203,6 +210,103 @@ jobs:
 
       - name: Tests
         run: flutter test --coverage
+
+  app-e2e:
+    name: Flutter app (E2E on an emulator)
+    # Nightly and on demand only. These four suites need an Android emulator and the compose stack (db + api), so a
+    # push-time run would add ~10 minutes to a pipeline that is currently ~5. `app` above still gates every change,
+    # and `smoke`+`hermetic` need no backend at all, so nothing that can run cheaply waits for this job.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The emulator needs hardware acceleration; KVM is not enabled for the `ubuntu-latest` user by default.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Compose requires these two, and generating them here keeps a literal out of the repository — the same rule the
+      # `secret-scan` job enforces. The password satisfies SQL Server's policy (upper, lower, digit, symbol).
+      - name: Environment for compose
+        working-directory: .
+        run: |
+          {
+            echo "MSSQL_SA_PASSWORD=E2e!$(openssl rand -hex 10)A9"
+            echo "JWT_SIGNING_KEY=$(openssl rand -hex 32)"
+          } > .env
+
+      - name: Start the stack and wait for readiness
+        working-directory: .
+        run: |
+          docker compose up -d --wait
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/health/ready; then exit 0; fi
+            sleep 5
+          done
+          echo "the API never reported /health/ready as 200" >&2
+          docker compose logs --no-color --tail 200 >&2
+          exit 1
+
+      - name: E2E suites
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none -camera-front none
+          script: |
+            set -e
+            flutter pub get
+            flutter gen-l10n
+            mkdir -p ../build/e2e
+            flutter test integration_test/e2e_smoke_test.dart \
+              -d emulator-5554 --file-reporter json:../build/e2e/smoke.json
+            flutter test integration_test/e2e_hermetic_test.dart -d emulator-5554 \
+              --dart-define=API_BASE=http://127.0.0.1:18999 \
+              --file-reporter json:../build/e2e/hermetic.json
+            flutter test integration_test/e2e_fullstack_test.dart -d emulator-5554 \
+              --dart-define=API_BASE=http://10.0.2.2:8080 \
+              --file-reporter json:../build/e2e/fullstack.json
+            flutter test integration_test/e2e_alerts_test.dart -d emulator-5554 \
+              --dart-define=API_BASE=http://10.0.2.2:8080 \
+              --file-reporter json:../build/e2e/alerts.json
+
+      # The reports are the verdict a person reads (docs/04-quality/05 §11): keep them even when the job passes.
+      - name: Upload E2E reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-reports
+          path: build/e2e/
+          retention-days: 14
+
+      - name: Stack logs
+        if: failure()
+        working-directory: .
+        run: docker compose logs --no-color --tail 300
+
+      - name: Tear down
+        if: always()
+        working-directory: .
+        run: docker compose down -v
 
   firmware:
     name: Firmware (native tests, ESP32 build)
