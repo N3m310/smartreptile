@@ -4,6 +4,7 @@ import * as api from '../api/endpoints';
 import { ApiError } from '../api/client';
 import type { DeviceItem, DeviceList, TerrariumList } from '../api/types';
 import { useI18n } from '../i18n';
+import { CopyButton } from '../components/CopyButton';
 import { inspectMac, macProblemMessage } from '../lib/mac';
 import { describeError } from '../lib/messages';
 import { usePolled } from '../lib/usePolled';
@@ -246,7 +247,10 @@ export const Devices: React.FC = () => {
         <div role="status" className="rounded-xl border border-warning/40 bg-warning/5 p-4 text-sm text-ink">
           <strong>Khóa thiết bị chỉ hiển thị một lần:</strong>
           <code className="ml-2 break-all font-mono">{secret}</code>
-          <button type="button" className="ml-3 text-xs text-accent underline" onClick={() => setSecret(null)}>Đã lưu</button>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <CopyButton value={secret} />
+            <button type="button" className="text-xs text-accent underline" onClick={() => setSecret(null)}>Đã lưu</button>
+          </div>
         </div>
       )}
       {error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, error)}</p>}
@@ -351,7 +355,8 @@ export const Devices: React.FC = () => {
                 <Detail label="Địa chỉ MAC" value={selected.macAddress} /><Detail label="Chip ID" value={selected.chipId} /><Detail label="Giao thức" value={selected.protocol} /><Detail label="Trạng thái thiết bị" value={selected.status} /><Detail label="Firmware" value={selected.firmwareVersion ?? '—'} /><Detail label="Chu kỳ gửi" value={`${selected.publishIntervalSec}s`} /><Detail label="Tín hiệu Wi-Fi" value={selected.signalStrengthDbm === null ? '—' : `${selected.signalStrengthDbm} dBm`} /><Detail label="Pin" value={selected.batteryPct === null ? '—' : `${selected.batteryPct}%`} />
                 <div className="col-span-2 flex flex-wrap justify-end gap-2 border-t border-hairline pt-4">
                   {canProvision && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Thu hồi khóa của thiết bị ${selected.deviceName}? Thiết bị sẽ ngừng gửi dữ liệu.`)) void runAction(async () => { await api.revokeDevice(selected.deviceId); setSelected(await api.getDevice(selected.deviceId)); }); }} className="rounded-lg border border-warning/40 px-3 py-2 text-xs text-warning">Thu hồi khóa</button>}
-                  {canWrite && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Gỡ thiết bị ${selected.deviceName} khỏi tài khoản?`)) void runAction(async () => { await api.deleteDevice(selected.deviceId); setSelected(null); }); }} className="rounded-lg border border-critical/40 px-3 py-2 text-xs text-critical">Gỡ thiết bị</button>}
+                  {canWrite && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Gỡ thiết bị ${selected.deviceName} khỏi bể nuôi? Thiết bị vẫn trong danh sách và gắn lại được.`)) void runAction(async () => { await api.deleteDevice(selected.deviceId); setSelected(await api.getDevice(selected.deviceId)); }); }} className="rounded-lg border border-critical/40 px-3 py-2 text-xs text-critical">Gỡ khỏi bể</button>}
+                  {canWrite && <button type="button" disabled={busy} onClick={() => { if (window.confirm(`Xoá vĩnh viễn ${selected.deviceName}? Chỉ xoá được khi thiết bị chưa có dữ liệu đo hay cảnh báo nào.`)) void runAction(async () => { await api.deleteDevice(selected.deviceId, true); setSelected(null); }); }} className="rounded-lg border border-critical/40 px-3 py-2 text-xs text-critical">Xoá vĩnh viễn</button>}
                 </div>
               </dl>
             )}

@@ -136,6 +136,8 @@ export const SpeciesProfiles: React.FC = () => {
   const items = profiles.data?.items ?? [];
   const usage = new Map<string, number>();
   for (const terrarium of terrariums.data?.items ?? []) {
+    // An enclosure with no species yet names no profile, so it counts towards none (2026-10-25).
+    if (terrarium.speciesProfileId === null) continue;
     usage.set(terrarium.speciesProfileId, (usage.get(terrarium.speciesProfileId) ?? 0) + 1);
   }
   const usageUnavailable = terrariums.data === null && !terrariums.loading;

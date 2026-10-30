@@ -102,16 +102,21 @@ class TerrariumProvider extends ChangeNotifier {
     return _api.getJson('/api/v1/terrariums/$id/coverage$query');
   }
 
+  /// Creates an enclosure. A species profile is optional (2026-10-25): the enclosure can be set up before the
+  /// keeper has decided what lives in it, and the server stores it with no bands to judge against until one is
+  /// assigned.
   Future<ApiTerrarium> createTerrarium({
     required String name,
-    required String speciesProfileId,
+    String? speciesProfileId,
     String? location,
   }) async {
     final payload = await _api.postJson(
       '/api/v1/terrariums',
       body: {
         'name': name.trim(),
-        'speciesProfileId': speciesProfileId,
+        // Omitted rather than sent as null: the two mean the same thing to the server, and omitting keeps the body
+        // to the members the caller actually has an opinion about.
+        'speciesProfileId': ?speciesProfileId,
         if (location != null && location.trim().isNotEmpty)
           'location': location.trim(),
       },
@@ -122,12 +127,19 @@ class TerrariumProvider extends ChangeNotifier {
     return created;
   }
 
+  /// Updates an enclosure.
+  ///
+  /// [speciesProfileId] is tri-state, because the patch is: null leaves the assignment alone, a profile id assigns
+  /// it, and [clearSpeciesProfile] detaches it — the server reads the all-zero GUID as "no species", the spelling
+  /// this record uses for an empty member that is not a string.
   Future<ApiTerrarium> updateTerrarium(
     ApiTerrarium current, {
     required String name,
     String? location,
     String? description,
     String? ownerUserId,
+    String? speciesProfileId,
+    bool clearSpeciesProfile = false,
   }) async {
     final rowVersion = current.rowVersion;
     if (rowVersion == null || rowVersion.isEmpty) {
@@ -143,12 +155,19 @@ class TerrariumProvider extends ChangeNotifier {
         // Only when it changed: the server reads an omitted member as "leave it", and an assignment is an
         // administrator-only change that also carries the bound board across (2026-10-23).
         'ownerUserId': ?ownerUserId,
+        if (clearSpeciesProfile)
+          'speciesProfileId': _noSpeciesProfileId
+        else
+          'speciesProfileId': ?speciesProfileId,
       },
     );
     final updated = ApiTerrarium.fromJson(payload);
     _replace(updated);
     return updated;
   }
+
+  /// The all-zero GUID the API reads as "this enclosure has no species" on a patch.
+  static const _noSpeciesProfileId = '00000000-0000-0000-0000-000000000000';
 
   Future<void> deleteTerrarium(ApiTerrarium terrarium) async {
     await _api.deleteJson(

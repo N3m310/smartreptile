@@ -1038,26 +1038,115 @@ public class DeviceProvisioningServiceTests
         var (deviceId, _, terrariumId) = await ClaimedAsync();
         var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
 
+        // Revoke keeps the binding, so delete is what releases the enclosure — and it no longer revokes, because
+        // "remove" means unbind since 2026-10-25.
+        await _service.RevokeAsync(deviceId, _owner, actor: _actor);
         var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor);
 
         outcome.Succeeded.Should().BeTrue();
-        outcome.Device!.Status.Should().Be("revoked");
-        outcome.Device.Runtime.Should().Be("revoked");
-        outcome.Device.TerrariumId.Should().BeNull("the DI-04 slot is free again for a replacement");
+        outcome.Device!.TerrariumId.Should().BeNull("the DI-04 slot is free again for a replacement");
         outcome.Device.ProvisionedAt.Should().BeNull();
 
+        // A revoked board stays revoked: detaching must not resurrect a credential that was killed on purpose.
         device.Status.Should().Be(DeviceStatus.Revoked);
-        device.Credentials.Should().OnlyContain(credential => credential.RevokedAt != null);
+        outcome.Device.Status.Should().Be("revoked");
         _sessions.Kicks.Should().ContainSingle().Which.DeviceId.Should().Be(deviceId);
 
-        // The claim that set this test up wrote its own row, so the delete's is the last one.
         var entry = _store.CommittedAuditEntries.Last();
-        entry.Action.Should().Be(AuditAction.DeviceRevoked);
-        entry.AfterJson.Should().Contain("\"detached\":true");
+        entry.Action.Should().Be(AuditAction.DeviceUnbound);
 
         // The row survives — the readings, health reports and audit rows that name it do too.
         _store.Devices.Should().ContainSingle(candidate => candidate.PublicId == deviceId);
         terrariumId.Should().NotBe(Guid.Empty);
+    }
+
+    [Fact]
+    public async Task Delete_only_detaches_the_board_and_keeps_it_in_the_fleet()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+        var claimsBefore = device.Credentials.Count;
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Device!.TerrariumId.Should().BeNull("the DI-04 slot is free again for a replacement");
+        outcome.Device.Status.Should().Be("provisioning", "an unbound board is waiting for an enclosure");
+        outcome.Device.ProvisionedAt.Should().BeNull();
+
+        // The credentials are untouched: "remove" is about the enclosure, and a board that kept its secret can be
+        // bound again without being claimed twice (2026-10-25).
+        device.Credentials.Should().HaveCount(claimsBefore);
+        device.Credentials.Should().OnlyContain(credential => credential.RevokedAt == null);
+        _sessions.Kicks.Should().BeEmpty("nothing was revoked, so there is no session to close");
+
+        var entry = _store.CommittedAuditEntries.Last();
+        entry.Action.Should().Be(AuditAction.DeviceUnbound);
+        entry.AfterJson.Should().Contain("\"terrariumId\":null");
+
+        // And it is still the account's board.
+        var fleet = await _service.ListAsync(_owner);
+        fleet.Devices.Should().ContainSingle(item => item.DeviceId == deviceId);
+    }
+
+    [Fact]
+    public async Task Delete_is_idempotent_for_a_board_that_is_already_unbound()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+
+        await _service.DeleteAsync(deviceId, _owner);
+        var second = await _service.DeleteAsync(deviceId, _owner);
+
+        second.Succeeded.Should().BeTrue();
+        second.Device!.TerrariumId.Should().BeNull();
+        second.Device.Status.Should().Be("provisioning");
+    }
+
+    [Fact]
+    public async Task Purge_erases_a_board_that_nothing_references()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor, purge: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.RemovedDevices.Should().Contain(device, "the row goes, not just its credentials");
+        _store.Devices.Should().NotContain(candidate => candidate.PublicId == deviceId);
+
+        // The revocation is still recorded: the audit row outlives the board it names.
+        _store.CommittedAuditEntries.Last().Action.Should().Be(AuditAction.DeviceRevoked);
+    }
+
+    [Fact]
+    public async Task Purge_is_refused_while_the_board_has_history_and_changes_nothing()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+        _store.DeviceHasHistory = true;
+        var savesBefore = _store.SaveCount;
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor, purge: true);
+
+        outcome.Problem!.Code.Should().Be("device_has_history");
+        _store.RemovedDevices.Should().BeEmpty();
+        device.Status.Should().NotBe(DeviceStatus.Revoked, "a refused purge leaves the board exactly as it was");
+        device.TerrariumId.Should().NotBeNull("the board is still bound");
+        _store.SaveCount.Should().Be(savesBefore, "a refusal writes nothing");
+    }
+
+    [Fact]
+    public async Task Purge_by_admin_succeeds_even_when_the_board_has_history()
+    {
+        var (deviceId, _, _) = await ClaimedAsync();
+        var device = _store.Devices.Single(candidate => candidate.PublicId == deviceId);
+        _store.DeviceHasHistory = true;
+
+        var outcome = await _service.DeleteAsync(deviceId, _owner, actor: _actor, mayReachAnyAccount: true, purge: true);
+
+        outcome.Succeeded.Should().BeTrue();
+        _store.RemovedDevices.Should().Contain(device);
+        _store.Devices.Should().NotContain(candidate => candidate.PublicId == deviceId);
     }
 
     [Fact]

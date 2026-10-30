@@ -3,15 +3,26 @@ import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 import { AlertTriangle, Check, Clock, Droplets, ShieldAlert, Sun, Thermometer, WifiOff } from 'lucide-react';
 import { apiBaseUrl, ApiError, readSession } from '../api/client';
 import * as api from '../api/endpoints';
-import type { AlertDetail, AlertPage, AlertTimelineEntry, MetricSilence, TerrariumList } from '../api/types';
+import type { AlertCounts, AlertDetail, AlertPage, AlertTimelineEntry, MetricSilence, TerrariumList } from '../api/types';
 import { useI18n } from '../i18n';
 import { describeError } from '../lib/messages';
 import { usePolled } from '../lib/usePolled';
 import { useSession } from '../state/session';
 
 const POLL_MS = 30_000;
-type AlertStateFilter = 'all' | 'Open' | 'Acknowledged' | 'Resolved';
+type AlertStateFilter = 'all' | 'in_progress' | 'Resolved';
 type ResolveReason = 'Recovered' | 'FalsePositive' | 'SensorFault' | 'Accepted';
+
+// The status bar, in the order the lifecycle moves: what still needs somebody, then what is done with, and the whole
+// list as the reference point. "Chưa xử lý" is open **and** acknowledged — taking ownership of an alert is not
+// closing it, so picking one up must not make it vanish from the tab that lists what needs attention.
+const STATUS_TABS: { value: AlertStateFilter; label: string; count: (counts: AlertCounts) => number }[] = [
+  { value: 'all', label: 'Tất cả', count: (counts) => counts.total },
+  { value: 'in_progress', label: 'Chưa xử lý', count: (counts) => counts.open + counts.acknowledged },
+  { value: 'Resolved', label: 'Đã xử lý', count: (counts) => counts.resolved },
+];
+
+const EMPTY_COUNTS: AlertCounts = { open: 0, acknowledged: 0, resolved: 0, total: 0 };
 
 export const Alerts: React.FC = () => {
   const { t, lang } = useI18n();
@@ -51,9 +62,24 @@ export const Alerts: React.FC = () => {
   const canWrite = hasPermission('alert.write');
   const canSilence = hasPermission('silence.write');
   const canRead = hasPermission('alert.read');
-  const items = useMemo(() => [...(list.data?.items ?? []), ...extraItems], [list.data?.items, extraItems]);
+  const items = useMemo(() => {
+    // Danger first, then warning, then the informational rows: an open critical excursion must not be pushed off the
+    // screen by the resolved noise a flapping signal leaves behind. Newest first inside one severity.
+    // De-duplicated by id first: a reload after an action returns rows the "older alerts" pages already hold, and a
+    // repeated key makes React drop or double one of them.
+    const rank: Record<string, number> = { Critical: 0, Warning: 1, Info: 2 };
+    const byId = new Map<number, AlertPage['items'][number]>();
+    for (const item of [...(list.data?.items ?? []), ...extraItems]) {
+      if (!byId.has(item.id)) byId.set(item.id, item);
+    }
+    return [...byId.values()].sort((left, right) => {
+      const bySeverity = (rank[left.severity] ?? 3) - (rank[right.severity] ?? 3);
+      return bySeverity !== 0 ? bySeverity : right.triggeredAt.localeCompare(left.triggeredAt);
+    });
+  }, [list.data?.items, extraItems]);
   const names = useMemo(() => new Map((terrariums.data?.items ?? []).map((item) => [item.id, item.name])), [terrariums.data?.items]);
-  const openCount = items.filter((item) => item.state === 'Open' || item.state === 'Acknowledged').length;
+  const counts = list.data?.counts ?? EMPTY_COUNTS;
+  const openCount = counts.open + counts.acknowledged;
 
   useEffect(() => {
     setExtraItems([]);
@@ -187,13 +213,12 @@ export const Alerts: React.FC = () => {
     }
   };
 
-  const resolve = async (event: React.FormEvent) => {
+  const resolve = async (event: React.FormEvent, alertId: number) => {
     event.preventDefault();
-    if (selectedId === null) return;
     setBusy(true);
     setPanelError(null);
     try {
-      await api.resolveAlert(selectedId, { reason: resolveReason, ...(resolveNote.trim() ? { note: resolveNote.trim() } : {}) });
+      await api.resolveAlert(alertId, { reason: resolveReason, ...(resolveNote.trim() ? { note: resolveNote.trim() } : {}) });
       setResolveOpen(false);
       setResolveNote('');
       await refreshSelected();
@@ -260,6 +285,18 @@ export const Alerts: React.FC = () => {
     }
   };
 
+  // The confirmation belongs to the row it was asked from, not to the detail panel: on a viewport narrower than
+  // `xl` that panel stacks below the whole list, so a form opened there was thousands of pixels off screen and the
+  // button looked dead.
+  const resolveFormFor = (alertId: number) => (
+    <form onSubmit={(event) => void resolve(event, alertId)} className="mt-3 space-y-3 rounded-lg border border-hairline bg-canvas p-3">
+      <h3 className="text-sm font-semibold text-ink">Xác nhận xử lý</h3>
+      <label className="block text-xs text-muted">Lý do<select required value={resolveReason} onChange={(event) => setResolveReason(event.target.value as ResolveReason)} className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm text-ink"><option value="Recovered">Đã phục hồi</option><option value="FalsePositive">Cảnh báo không chính xác</option><option value="SensorFault">Lỗi cảm biến</option><option value="Accepted">Chấp nhận rủi ro</option></select></label>
+      <label className="block text-xs text-muted">Ghi chú (không bắt buộc)<textarea maxLength={500} value={resolveNote} onChange={(event) => setResolveNote(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-sm text-ink" /></label>
+      <div className="flex justify-end gap-2"><button type="button" onClick={() => setResolveOpen(false)} className="rounded-lg border border-hairline px-3 py-2 text-xs text-muted">Huỷ</button><button disabled={busy} className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Xác nhận xử lý</button></div>
+    </form>
+  );
+
   if (!canRead) {
     return <p className="rounded-xl border border-hairline bg-surface p-5 text-sm text-muted">{t('errorForbidden')}</p>;
   }
@@ -277,8 +314,24 @@ export const Alerts: React.FC = () => {
       {list.error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, list.error)}</p>}
       {terrariums.error && <p role="alert" className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-sm text-critical">{describeError(t, terrariums.error)}</p>}
 
-      <section className="grid gap-3 rounded-xl border border-hairline bg-surface p-4 md:grid-cols-4">
-        <label className="text-xs text-muted">Trạng thái<select value={stateFilter} onChange={(event) => setStateFilter(event.target.value as AlertStateFilter)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="all">Tất cả</option><option value="Open">Đang mở</option><option value="Acknowledged">Đã tiếp nhận</option><option value="Resolved">Đã xử lý</option></select></label>
+      <nav aria-label="Trạng thái cảnh báo" className="flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-surface p-2">
+        {STATUS_TABS.map((tab) => {
+          const active = stateFilter === tab.value;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setStateFilter(tab.value)}
+              className={`rounded-lg px-3 py-2 text-sm transition ${active ? 'bg-accent font-semibold text-canvas' : 'text-muted hover:bg-raised hover:text-ink'}`}
+            >
+              {tab.label} ({tab.count(counts)})
+            </button>
+          );
+        })}
+      </nav>
+
+      <section className="grid gap-3 rounded-xl border border-hairline bg-surface p-4 md:grid-cols-3">
         <label className="text-xs text-muted">Mức độ<select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="">Tất cả mức độ</option><option value="Info">Thông tin</option><option value="Warning">Cảnh báo</option><option value="Critical">Nguy hiểm</option></select></label>
         <label className="text-xs text-muted">Từ ngày<input type="datetime-local" value={from} onChange={(event) => setFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
         <label className="text-xs text-muted">Đến ngày<input type="datetime-local" value={to} onChange={(event) => setTo(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label>
@@ -308,8 +361,9 @@ export const Alerts: React.FC = () => {
                 </button>
                 <div className="mt-3 flex justify-end gap-2">
                   {active && canWrite && alert.state === 'Open' && <button type="button" disabled={busy} onClick={() => void acknowledge(alert.id)} className="rounded-lg border border-hairline px-3 py-1.5 text-xs text-ink disabled:opacity-50">Tiếp nhận</button>}
-                  {active && canWrite && <button type="button" disabled={busy} onClick={() => { setSelectedId(alert.id); setResolveOpen(true); }} className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"><Check className="h-3.5 w-3.5" aria-hidden="true" />Xử lý</button>}
+                  {active && canWrite && <button type="button" disabled={busy} onClick={() => { setSelectedId(alert.id); setResolveOpen(selectedId === alert.id ? !resolveOpen : true); }} className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"><Check className="h-3.5 w-3.5" aria-hidden="true" />Xử lý</button>}
                 </div>
+                {canWrite && resolveOpen && selectedId === alert.id && resolveFormFor(alert.id)}
               </article>
             );
           })}
@@ -329,7 +383,6 @@ export const Alerts: React.FC = () => {
               </dl>
               {detail.series.length > 0 && <div><h3 className="mb-2 text-xs font-semibold text-ink">Diễn biến ({detail.series.length} điểm)</h3><ul className="max-h-36 space-y-1 overflow-auto text-xs text-muted">{detail.series.map((point) => <li key={point.at} className="flex justify-between gap-2"><time>{formatDate(point.at)}</time><span>{point.value}</span></li>)}</ul></div>}
               {detail.seriesTruncated && <p className="text-[11px] text-muted">Chỉ hiển thị một phần dữ liệu của sự cố.</p>}
-              {resolveOpen && canWrite && <form onSubmit={(event) => void resolve(event)} className="space-y-3 border-t border-hairline pt-3"><h3 className="text-sm font-semibold text-ink">Xác nhận xử lý</h3><label className="block text-xs text-muted">Lý do<select required value={resolveReason} onChange={(event) => setResolveReason(event.target.value as ResolveReason)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="Recovered">Đã phục hồi</option><option value="FalsePositive">Cảnh báo không chính xác</option><option value="SensorFault">Lỗi cảm biến</option><option value="Accepted">Chấp nhận rủi ro</option></select></label><label className="block text-xs text-muted">Ghi chú (không bắt buộc)<textarea maxLength={500} value={resolveNote} onChange={(event) => setResolveNote(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setResolveOpen(false)} className="rounded-lg border border-hairline px-3 py-2 text-xs text-muted">Huỷ</button><button disabled={busy} className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Xác nhận xử lý</button></div></form>}
               {canSilence && <section className="space-y-3 border-t border-hairline pt-3"><h3 className="text-sm font-semibold text-ink">Tạm tắt thông báo</h3><form onSubmit={(event) => void createSilence(event)} className="space-y-2"><label className="block text-xs text-muted">Phạm vi<select value={silenceMetric} onChange={(event) => setSilenceMetric(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink"><option value="">Tất cả chỉ số</option><option value="tempC">Nhiệt độ</option><option value="humidityPct">Độ ẩm</option><option value="lightLux">Ánh sáng</option><option value="uvIndex">UV</option><option value="surfaceTempC">Nhiệt độ bề mặt</option></select></label><label className="block text-xs text-muted">Thời lượng<select value={silenceHours} onChange={(event) => setSilenceHours(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink">{[1, 2, 4, 8, 12, 24].map((hour) => <option key={hour} value={hour}>{hour} giờ</option>)}</select></label><label className="block text-xs text-muted">Lý do<input required maxLength={200} value={silenceReason} onChange={(event) => setSilenceReason(event.target.value)} className="mt-1 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-ink" /></label><button disabled={busy} className="rounded-lg border border-hairline px-3 py-2 text-xs text-ink disabled:opacity-50">Tạo khoảng tắt</button></form>
                 {silences.map((silence) => <div key={silence.id} className="flex items-center justify-between gap-2 text-xs"><span className="text-muted">{silence.metric ?? 'Tất cả'} đến {formatDate(silence.untilUtc)}</span><button type="button" disabled={busy} onClick={() => void cancelSilence(silence)} className="text-accent hover:underline">Huỷ</button></div>)}
               </section>}

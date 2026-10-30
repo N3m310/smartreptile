@@ -6,6 +6,7 @@ import { ApiError } from '../api/client';
 import { PERMISSION_CODES } from '../api/types';
 import type { DeviceList, SpeciesProfileList, TerrariumList, TimeZoneList } from '../api/types';
 import { EmptyPanel, ErrorPanel, LoadingPanel, UnreachableBanner } from '../components/states';
+import { CopyButton } from '../components/CopyButton';
 import { useI18n } from '../i18n';
 import { formatDateTime, formatRelative } from '../lib/format';
 import { describeError, fieldHasError, fieldMessage, fieldMessages } from '../lib/messages';
@@ -174,7 +175,9 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
     try {
       const item = await api.createTerrarium({
         name,
-        speciesProfileId,
+        // An unselected species is "not given", not an empty id: the enclosure is created with no profile and no
+        // bands to judge it against (2026-10-25).
+        speciesProfileId: speciesProfileId === '' ? null : speciesProfileId,
         // An empty box is "not given", not an empty location: the contract stores null for the latter and the
         // card renders the difference. The same applies to the zone and the board.
         location: location.trim() === '' ? null : location,
@@ -240,12 +243,9 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
           id="terrarium-species"
           value={speciesProfileId}
           onChange={(event) => setSpeciesProfileId(event.target.value)}
-          required
           className={inputClass('speciesProfileId')}
         >
-          <option value="" disabled>
-            {t('speciesProfileChoose')}
-          </option>
+          <option value="">{t('terrariumNoSpeciesLong')}</option>
           {(profiles.data?.items ?? []).map((profile) => (
             <option key={profile.id} value={profile.id}>
               {profile.scientificName ? `${profile.name} â€” ${profile.scientificName}` : profile.name}
@@ -349,6 +349,7 @@ const CreatePanel: React.FC<{ onCreated: () => void }> = ({ onCreated }) => {
         >
           <p>{t('terrariumDeviceSecretOnce')}</p>
           <code className="block select-all break-all font-mono text-[11px] text-ink">{secret}</code>
+          <CopyButton value={secret} />
         </div>
       ) : null}
 

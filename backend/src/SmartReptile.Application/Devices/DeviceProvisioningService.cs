@@ -287,7 +287,17 @@ public sealed class DeviceProvisioningService(
             return DeviceOutcome.Failure("terrarium_already_bound", "That terrarium already has a device bound to it.");
         }
 
-        var secret = StageBinding(device, terrarium.Id, terrarium.UserId, now, method, actor);
+        // The board follows the enclosure's owner — except when the enclosure has none. An administrator may claim a
+        // board into an unowned enclosure (one it created and has not assigned yet), and inheriting `null` would
+        // leave the board in nobody's fleet and impossible to bind again once detached. The claimer owns it until the
+        // enclosure is assigned, and the assignment carries the board across with it (2026-10-25).
+        var secret = StageBinding(
+            device,
+            terrarium.Id,
+            terrarium.UserId ?? ownerUserId,
+            now,
+            method,
+            actor);
 
         // The pre-check gives a clear message; this is the enforcement. Two claims of one terrarium can both pass
         // it, and the filtered unique index DI-04 then refuses the second binding — which is a documented 409, not
@@ -695,12 +705,36 @@ public sealed class DeviceProvisioningService(
     /// <param name="ownerUserId">The authenticated caller, who must own the device.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="actor">Request provenance for the audit row.</param>
+    /// <summary>
+    /// Detaches a board from its enclosure, leaving it in the account's fleet.
+    /// </summary>
+    /// <remarks>
+    /// <b>"Remove" means unbind, not forget (2026-10-25).</b> The board keeps its credentials, its owner and its row,
+    /// and goes back to <c>provisioning</c> — the same state a displaced board or an enclosure delete leaves it in —
+    /// so it can be bound to another enclosure without being claimed again. Freeing the DI-04 slot is the whole
+    /// point: the enclosure's one-board rule is what the gesture is for. Killing the credentials is a different act
+    /// with its own route (<c>POST /devices/{id}/revoke</c>), and erasing the row is <c>?purge=true</c>.
+    /// </remarks>
+    /// <param name="deviceId">Public id of the board.</param>
+    /// <param name="ownerUserId">Authenticated caller, who must own the board unless they are an administrator.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="actor">Request provenance for the audit row.</param>
+    /// <param name="mayReachAnyAccount">
+    /// True when the caller holds the cross-account permission, so may detach another account's board.
+    /// </param>
+    /// <param name="purge">
+    /// True to erase the row after revoking it, for a board nobody needs to remember — a mis-registered node, a
+    /// prototype. Refused with <c>device_has_history</c> when anything still references it, because the foreign keys
+    /// from readings, alerts, health samples and events cascade: erasing a board would otherwise erase the history
+    /// that explains it.
+    /// </param>
     public async Task<DeviceOutcome> DeleteAsync(
         string deviceId,
         Guid ownerUserId,
         CancellationToken cancellationToken = default,
         AuditActor? actor = null,
-        bool mayReachAnyAccount = false)
+        bool mayReachAnyAccount = false,
+        bool purge = false)
     {
         var device = await store.FindDeviceByPublicIdAsync(deviceId, cancellationToken);
 
@@ -711,14 +745,59 @@ public sealed class DeviceProvisioningService(
 
         var now = clock.UtcNow;
 
-        // Unlike revoke, this runs even for an already-revoked board: a board revoked while still bound to an
-        // enclosure has to be detachable afterwards, and that is the one thing this route does that revoke does not.
-        if (device.Status == DeviceStatus.Revoked && device.TerrariumId is null)
+        if (purge)
+        {
+            // Checked before anything is written, so a refused purge leaves the board exactly as it was rather than
+            // half removed — a board that is revoked but still listed is the state a keeper would have to reason about.
+            // Administrators (mayReachAnyAccount) can force purge, cascading all associated readings and alerts.
+            if (!mayReachAnyAccount && await store.HasHistoryAsync(device.Id, cancellationToken).ConfigureAwait(false))
+            {
+                return DeviceOutcome.Failure(
+                    "device_has_history",
+                    "This board has readings, alerts or events against it, so its record cannot be erased. "
+                    + "Remove it from its enclosure instead, which keeps the history.");
+            }
+
+            // The revocation is written first so the audit trail says a credential died, then the row goes: the
+            // entry outlives the board it names, which is the point of an audit row.
+            await RevokeCoreAsync(device, ownerUserId, now, detach: true, actor, cancellationToken);
+
+            store.RemoveDevice(device);
+
+            await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            return DeviceOutcome.Described(Describe(device));
+        }
+
+        var previousTerrariumId = device.TerrariumId;
+
+        // Idempotent: a board that is already off every enclosure stays in the fleet as it is, and asking twice is
+        // not an error — the caller's intent is satisfied.
+        if (previousTerrariumId is null)
         {
             return DeviceOutcome.Described(Describe(device));
         }
 
-        await RevokeCoreAsync(device, ownerUserId, now, detach: true, actor, cancellationToken);
+        device.TerrariumId = null;
+        device.ProvisionedAt = null;
+
+        // Revoked is terminal and stays terminal: detaching must not resurrect a dead credential. Anything else
+        // returns to provisioning, which is the state the fleet shows as "Awaiting setup".
+        if (device.Status != DeviceStatus.Revoked)
+        {
+            device.Status = DeviceStatus.Provisioning;
+        }
+
+        store.AddAuditEntry(AuditLog.ForDevice(
+            AuditAction.DeviceUnbound,
+            device.Id,
+            device.PublicId,
+            ownerUserId,
+            actor ?? AuditActor.Unknown,
+            now,
+            afterJson: Serialize(new { terrariumId = (Guid?)null, detachedFrom = previousTerrariumId })));
+
+        await store.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return DeviceOutcome.Described(Describe(device));
     }
@@ -889,6 +968,7 @@ public sealed class DeviceProvisioningService(
     /// <param name="ownerUserId">Authenticated caller.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="mayReachAnyAccount">When true, lists every device in the deployment (data.read.any).</param>
+    /// <param name="mayReachAnyAccount">True when the caller holds the cross-account permission for this operation.</param>
     public async Task<DeviceOutcome> ListAsync(
         Guid ownerUserId,
         CancellationToken cancellationToken = default,

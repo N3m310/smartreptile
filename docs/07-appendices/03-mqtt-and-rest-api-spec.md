@@ -348,9 +348,9 @@ takes effect within one 15-minute access-token lifetime.
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/terrariums` | `terrarium.read` | list with device status summary; `?speciesProfileId=` narrows it to one profile's enclosures |
-| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound. `data.write.any` creates an **unowned** enclosure (`ownerUserId`/`ownerEmail` null) — assign it on `PATCH` |
+| POST | `/terrariums` | `terrarium.write` | `{name, speciesProfileId?, location?, description?, timeZoneId?, deviceId?, macAddress?}`; the created item carries `rowVersion`, and `deviceSecret` when a board was bound. `speciesProfileId` is **optional** (2026-10-25): omitted or null creates an enclosure with no species, which stores and shows readings but has no bands to be judged against. `data.write.any` creates an **unowned** enclosure (`ownerUserId`/`ownerEmail` null) — assign it on `PATCH` |
 | GET | `/terrariums/{id}` | `terrarium.read` (member) | includes `device`, `openAlertCount`, `latestSampleAt`, `rowVersion` |
-| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed`; the answer then names the owner (with `ownerEmail`) |
+| PATCH | `/terrariums/{id}` | `terrarium.write` | `If-Match: <rowversion>` for optimistic concurrency, required; the item answers the new `rowVersion`. `{ownerUserId}` reassigns the enclosure and is **administrator-only** (`data.write.any`), audited as `terrarium.owner_changed`; the answer then names the owner (with `ownerEmail`). `{speciesProfileId}` changes the profile, and the all-zero GUID `00000000-0000-0000-0000-000000000000` detaches it — `null`/omitted still means "leave it" (2026-10-25) |
 | DELETE | `/terrariums/{id}` | `terrarium.write` | soft delete; requires `?allowUnboundDevice=true` when a device is bound → else `409 conflict_device_bound` |
 | GET | `/terrariums/{id}/thresholds` | `terrarium.read` | returns `effectiveThresholds[]` with `source` |
 | PUT | `/terrariums/{id}/thresholds` | `terrarium.write` | upsert overrides; validates band ordering |
@@ -579,12 +579,21 @@ required ISO-8601 instants with `from < to`, otherwise `400 invalid_range`.
 `expected`, capped at 100. A terrarium with no bound device answers `409 device_not_bound`: coverage is a statement
 about a device, and there is nothing honest to say about `null`.
 
-`POST /terrariums` takes `{name, speciesProfileId, location?, description?, timeZoneId?}` and answers `201` with the
+`POST /terrariums` takes `{name, speciesProfileId?, location?, description?, timeZoneId?}` and answers `201` with the
 item shape below. It requires `terrarium.write` and exists ahead of the rest of FR-03 because every other route needs a
 terrarium to point at — `POST /devices/claim` has nothing to bind a board to until one exists. Validation is
 `400 validation_failed` with field-level `errors[]` (`terrarium_name_required`, `terrarium_location_too_long`,
 `terrarium_description_too_long`, `terrarium_timezone_invalid`, `species_profile_not_found`); `timeZoneId` falls back
-to `Defaults:TimeZoneId` when omitted.
+to `Defaults:TimeZoneId` when omitted. `speciesProfileId` is optional since 2026-10-25 — an enclosure may be set up
+before its species is chosen, and `species_profile_not_found` is answered only for an id that was actually sent.
+
+**An enclosure with no species (2026-10-25).** `speciesProfileId` and `speciesName` are null together on every answer
+whose enclosure has none, and the enclosure is otherwise ordinary: it stores and returns its readings, it can hold a
+board, and `GET /terrariums/{id}/thresholds` answers an empty `effectiveThresholds[]`. The consequence is stated
+rather than implied: with no profile bands and no overrides there is nothing to judge, so no temperature, humidity or
+UV alert opens for it until a profile is assigned. On `PATCH`, an omitted or null `speciesProfileId` leaves the
+assignment alone; the all-zero GUID detaches it, which is this contract's spelling of "empty" for a member that is not
+a string.
 
 The item shape returned by `GET /terrariums` (inside `items`), `POST /terrariums` and `GET /terrariums/{id}`:
 
@@ -687,10 +696,10 @@ not JSON, so it has routes of its own. Four readings are contract:
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/devices` | `device.read` | fleet list with status, firmware, RSSI, last seen, uptime — **as built**, see below |
+| GET | `/devices` | `device.read` | fleet list with status, firmware, RSSI, last seen, uptime — **as built**, see below. Nothing is filtered out: a detached board stays as `provisioning` and a revoked one still appears |
 | GET | `/devices/{id}` | `device.read` | one board, by public id — **as built** |
 | PATCH | `/devices/{id}` | `device.write` | rename, set sampling/publish interval — **as built**, stored rather than queued |
-| DELETE | `/devices/{id}` | `device.write` | revoke + detach; the row survives — **as built** |
+| DELETE | `/devices/{id}` | `device.write` | **detach only** (2026-10-25): unbinds the board and returns it to `provisioning`, keeping its credentials and its row. `?purge=true` erases the row instead, refused with `409 device_has_history` while anything references it — **as built** |
 | POST | `/devices/claim-by-mac` | `device.provision` | bind a self-registered board by the MAC printed on it — **as built**, §2.4 |
 | POST | `/devices/{id}/move` | `device.provision` | `{terrariumId}` — bind the board, releasing the enclosure it held and displacing the board that held the target — **as built** (2026-10-23) |
 | POST | `/devices/{id}/rotate-secret` | `device.provision` | returns a new secret once; old one valid for the 10-min grace window |
@@ -718,11 +727,17 @@ rather than implied. What the built ones settle:
   each, `errors[0].code = interval_out_of_range` otherwise). A per-device calibration write and a queued
   `set_config` remain unbuilt, so a board picks the new interval up on its next connection. `PATCH` is **not
   audited**: `BR-18.4` names the credential operations, and renaming a node is the ordinary use of a settings screen.
-- **`DELETE` is not a row delete.** It revokes every credential, closes the live session and detaches the board from
-  its enclosure — the same credential effect as `/revoke`, plus the unbinding that frees the enclosure's DI-04 slot
-  for a replacement. The readings, health reports, events and audit rows that name the board survive, and the answer
-  describes the revoked board rather than being empty. Recorded as `device.revoked` with `"detached":true`; unlike
-  `revoke`, it also finishes the job for a board that was revoked while still bound.
+- **`DELETE` unbinds, and only `?purge=true` erases (2026-10-25).** The plain call is the enclosure gesture: the
+  board leaves its enclosure — freeing the DI-04 slot for a replacement — goes back to `provisioning` and keeps its
+  credentials, owner and row, so it can be bound again without being claimed a second time. It stays in
+  `GET /devices`, because it is still the account's board. Recorded as `device.unbound` with the enclosure it left.
+  **Killing the credentials is `POST /devices/{id}/revoke`** — a different act, with a different consequence, and one
+  that leaves the binding alone; a board revoked that way stays `revoked` when it is later unbound, because detaching
+  must not resurrect a credential that was killed on purpose.
+  `?purge=true` is the only thing that removes a row: it revokes first (so the audit entry outlives the board it
+  names) and is **refused with `409 device_has_history`** while any reading, alert, health sample or event still
+  names the board. The refusal is not caution for its own sake: those foreign keys are `ON DELETE CASCADE`, so a
+  purge that were allowed would silently erase the history that explains the board.
 
 **`POST /devices/{id}/move` — added 2026-10-23.** This is the path the fleet and enclosure screens use to put a
 board somewhere, and it is what `rebind` was meant to be. Body: `{ "terrariumId": "<guid>" }`. Answer: the board as
@@ -749,10 +764,10 @@ public id of the board the move pushed out, null when the target was free).
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/alerts?family=&state=&severity=&metric=&from=&to=` | `alert.read` | paged, newest first; every row carries its own `family` |
-| GET | `/alerts/{id}` | `alert.read` | includes band, snapshot reference, value series excerpt |
-| POST | `/alerts/{id}/ack` | `alert.write` | `409 alert_not_open` if already resolved |
-| POST | `/alerts/{id}/resolve` | `alert.write` | `{reason: Recovered\|FalsePositive\|SensorFault\|Accepted, note?}` |
-| GET | `/alerts/{id}/timeline` | `alert.read` | trigger → escalation → ack → resolve with actors |
+| GET | `/alerts/{id}` | `alert.read` | includes band, snapshot reference, value series excerpt. `data.read.any` opens any account's row (2026-10-25) |
+| POST | `/alerts/{id}/ack` | `alert.write` | `409 alert_not_open` if already resolved. `data.write.any` acts on any account's row |
+| POST | `/alerts/{id}/resolve` | `alert.write` | `{reason: Recovered\|FalsePositive\|SensorFault\|Accepted, note?}`. `data.write.any` acts on any account's row |
+| GET | `/alerts/{id}/timeline` | `alert.read` | trigger → escalation → ack → resolve with actors. `data.read.any` opens any account's row |
 | GET | `/notifications?unreadOnly=true` | `notification.read` | in-app inbox |
 | POST | `/notifications/{id}/read`, `/notifications/read-all` | `notification.read` | |
 | GET | `/exports/{jobId}`, `/exports/{jobId}/download?token=` | `terrarium.read` | token valid 24 h |
@@ -771,10 +786,22 @@ because they are contract rather than implementation:
   happened, not where the system learned of it. The pair is what makes the order total; an identity alone would not
   say which of two alerts that share an instant came first.
 - **Filters are the contract's five**, and their vocabulary is the response's: `state` is `Open`, `Acknowledged` or
-  `Resolved`, `severity` is `Info`, `Warning` or `Critical` (case-insensitive), `metric` is the REST key (`tempC`),
+  `Resolved` — plus `in_progress`, which is not a lifecycle state but the question "does this still need somebody?"
+  and therefore means open and acknowledged together (2026-10-25). Acknowledgement is ownership, not closure
+  (BR-12.1), so a status tab that dropped a row the moment it was picked up would hide the rows under active work.
+  `severity` is `Info`, `Warning` or `Critical` (case-insensitive), `metric` is the REST key (`tempC`),
   `family` is `enclosure` or `species` — the row's own `family`, carried even by the device-level alerts that have no
   metric to derive it from (2026-10-17) — and `from`/`to` filter on `TriggeredAt`. An unknown value is a
   `400` naming the alternatives rather than an empty page, and an unknown `family` is `400 family_invalid`.
+- **Every page also carries `counts`** (2026-10-25): `open`, `acknowledged`, `resolved` and the `total` of the three.
+  The counts apply every filter the caller sent **except `state`**, because they are how a reader picks a state rather
+  than a report on the one already picked, and they ignore the cursor, because a total that moved with the page number
+  would be a page size. They are what the status bar's tabs are labelled with on both clients — a separate bar above
+  the severity and date filters, not a select sharing a row with them.
+- **An administrator's `GET /alerts` spans every account** (2026-10-25), matching the single-alert read and the two
+  writes of 3.4. The same widening is what reaches an alert on an **ownerless** terrarium: `Terrarium.UserId` became
+  nullable on 2026-10-23, and `<NULL> = <account>` matches nobody, so a scoped read could see no row for a terrarium
+  whose readings it was already showing.
 - **The detail carries no snapshot reference**, although the table above lists one: `Alert.ThresholdSnapshotId`
   exists in `07-appendices/02` §3.8's sketch and in no built table, so a field named after it would promise
   something the database cannot keep. The band the alert denormalises is what explains it today, and the reference
@@ -799,6 +826,27 @@ because they are contract rather than implementation:
   reason and the note. Escalation entries are absent until 3.5, exactly as the design arranges them: §02-design/05
   §6 records escalations as `NotificationLog` rows carrying the alert id, and the alert row keeps no escalation
   instant because escalation edits it in place (one row per episode is what DI-01's unique index is for).
+
+**An administrator may act on any account's alert (2026-10-25).** `GET /alerts/{id}`, `GET /alerts/{id}/timeline`,
+`POST /alerts/{id}/ack` and `POST /alerts/{id}/resolve` widen to any account's row for a caller holding
+`data.read.any`/`data.write.any`. The reason is that the widening already existed where it could not be used:
+`GET /admin/alerts` lists every account's incidents, and until this date a row named there could not be opened,
+acknowledged or resolved — 404, because the owner-scoped lookup found nothing. The scope now follows the permission
+rather than the enclosure, and two limits stay deliberate:
+
+- **`GET /alerts` (the list) is still owner-scoped.** It answers the caller's own enclosures even for an
+  administrator, because the cross-account view has its own route with its own paging, its own filters and the owner
+  and enclosure names a list of unknown rows needs to be readable. A single list that silently changed shape for one
+  account would make every client's empty-state untrustworthy.
+- **An alert of a soft-deleted enclosure stays out of reach.** The cross-account lookup keeps the join that applies
+  `Terrarium`'s query filter, so the rows the administrator's audit list still shows are a record of what happened
+  rather than a queue of things to close.
+
+The audit row of a cross-account acknowledgement or resolution names the administrator as the actor — the alert
+already names its enclosure, so "who acted, and on what" is complete without a second column. Two readings for a
+client: a refusal for an alert that exists but belongs to another account is still `404 not_found` for anyone
+without the cross-account permission (BR-02.2's id-probing rule), and `alert.write` alone is not the cross-account
+grant — a Technician holds it and still answers `404` for another account's row.
 
 **Silences as built.** `POST` answers `200` with the created window rather than `201` with a `Location`, because
 there is no read-by-id route to point at; `GET` returns only the windows that are still in force, since an expired
@@ -920,7 +968,7 @@ enumerate.
 | GET | `/admin/terrariums?search=&skip=&take=` | `data.read.any` | every account's enclosures, newest first, paged with `total`; `search` matches the enclosure's name or its owner's username |
 | DELETE | `/admin/terrariums/{id}` | `data.write.any` | hard delete; boards are unbound (not revoked) and their broker sessions closed; `terrarium.deleted` plus one `device.unbound` per board; `404 not_found` for an unknown or already-deleted id |
 | GET | `/admin/devices?search=&skip=&take=` | `data.read.any` | every board, bound or not, last seen first with the never-published last; `search` matches the public id, the name or the owner's username |
-| GET | `/admin/alerts?family=&state=&skip=&take=` | `data.read.any` | every account's alerts, both families, newest first; `400 family_invalid` / `state_invalid` on an unknown key |
+| GET | `/admin/alerts?family=&state=&skip=&take=` | `data.read.any` | every account's alerts, both families, newest first; `400 family_invalid` / `state_invalid` on an unknown key. A row here is actionable through `POST /alerts/{id}/ack` and `/resolve`, which take the same cross-account permission (2026-10-25) |
 | GET | `/admin/roles`, `/admin/roles/{id}` | `user.read` | the matrix: each role with its codes, whether the product ships it, how many accounts hold it, and which of its codes cross accounts |
 | POST | `/admin/roles` | `user.manage` | `{code, name, description?, permissions?, rank?}` → `201` with the role |
 | PATCH | `/admin/roles/{id}` | `user.manage` | `{name?, description?, permissions?, rank?}`; `permissions` **replaces** the set |

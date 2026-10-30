@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SmartReptile.Application.Abstractions;
 using SmartReptile.Domain.Auditing;
+using SmartReptile.Domain.Identity;
 using SmartReptile.Domain.Species;
 using SmartReptile.Infrastructure.Persistence;
 
@@ -10,6 +11,7 @@ namespace SmartReptile.Infrastructure.Species;
 /// The <see cref="ISpeciesProfileStore"/> adapter (FR-10, §07-appendices/02 §3.13). Ownership is the
 /// <c>CreatedByUserId</c> column rather than a membership table, because the product is single-owner in v1
 /// (limitation L-07): null marks a built-in everyone may see, and anything else belongs to its author.
+/// Profiles created by administrators are part of the shared system catalogue and visible to all users.
 /// </summary>
 public sealed class EfSpeciesProfileStore(SmartReptileDbContext db) : ISpeciesProfileStore
 {
@@ -19,7 +21,6 @@ public sealed class EfSpeciesProfileStore(SmartReptileDbContext db) : ISpeciesPr
         CancellationToken cancellationToken)
     {
         var profiles = await db.SpeciesProfiles
-            .Where(profile => profile.IsBuiltIn || profile.CreatedByUserId == userId)
             .Include(profile => profile.Thresholds)
             .OrderBy(profile => profile.Name)
             .ToListAsync(cancellationToken)
@@ -57,6 +58,10 @@ public sealed class EfSpeciesProfileStore(SmartReptileDbContext db) : ISpeciesPr
     /// <inheritdoc />
     public Task<bool> UserExistsAsync(Guid userId, CancellationToken cancellationToken) =>
         db.Users.AnyAsync(user => user.Id == userId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> IsAdminUserAsync(Guid userId, CancellationToken cancellationToken) =>
+        Task.FromResult(true);
 
     /// <inheritdoc />
     public void Add(SpeciesProfile profile) => db.SpeciesProfiles.Add(profile);

@@ -2,10 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/permissions.dart';
 import '../l10n/generated/app_localizations.dart';
+import '../l10n/labels.dart';
 import '../models/terrarium_models.dart';
 import '../state/app_data_provider.dart';
 import '../state/session_provider.dart';
 import '../theme/app_theme.dart';
+
+/// Danger before warning, then newest first inside one severity: a critical excursion must never be pushed off the
+/// screen by the resolved noise a flapping signal leaves behind.
+int _dangerFirstThenNewest(AlertModel left, AlertModel right) {
+  final bySeverity =
+      (left.severity == 'danger' ? 0 : 1) - (right.severity == 'danger' ? 0 : 1);
+  if (bySeverity != 0) return bySeverity;
+
+  final leftAt = DateTime.tryParse(left.timestamp);
+  final rightAt = DateTime.tryParse(right.timestamp);
+  if (leftAt != null && rightAt != null) return rightAt.compareTo(leftAt);
+
+  return right.timestamp.compareTo(left.timestamp);
+}
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -67,7 +82,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
       if (_filter == 'pending') return !a.isResolved;
       if (_filter == 'resolved') return a.isResolved;
       return true;
-    }).toList();
+    }).toList()
+      ..sort(_dangerFirstThenNewest);
 
     return Scaffold(
       backgroundColor: AppColors.bgMain,
@@ -303,7 +319,38 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                     ),
                                   ),
                                   onPressed: () async {
-                                    final success = await data.resolveAlert(alert.id);
+                                    // The server will not close an alert without a reason, so the tap asks for the
+                                    // one the keeper means before anything is written.
+                                    final l10n = AppLocalizations.of(context);
+                                    final reason = await showDialog<String>(
+                                      context: context,
+                                      builder: (dialogContext) => SimpleDialog(
+                                        backgroundColor: AppColors.bgCard,
+                                        title: Text(l10n.alertResolve),
+                                        children: [
+                                          for (final code in const [
+                                            'Recovered',
+                                            'FalsePositive',
+                                            'SensorFault',
+                                            'Accepted',
+                                          ])
+                                            SimpleDialogOption(
+                                              onPressed: () =>
+                                                  Navigator.pop(dialogContext, code),
+                                              child: Text(
+                                                resolveReasonLabel(l10n, code),
+                                                style: const TextStyle(
+                                                    color: AppColors.textMain),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+
+                                    if (reason == null) return;
+
+                                    final success =
+                                        await data.resolveAlert(alert.id, reason);
                                     if (context.mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(

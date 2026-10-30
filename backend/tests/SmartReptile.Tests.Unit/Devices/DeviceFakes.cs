@@ -184,7 +184,9 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
             device => device.TerrariumId == terrariumId && device.Status != DeviceStatus.Revoked));
 
     /// <summary>The caller's boards, ordered by display name — the same shape the adapter returns.</summary>
-    public Task<IReadOnlyList<Device>> ListOwnedAsync(Guid ownerUserId, CancellationToken cancellationToken) =>
+    public Task<IReadOnlyList<Device>> ListOwnedAsync(
+        Guid ownerUserId,
+        CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<Device>>(
             [.. _devices
                 .Where(device => device.UserId == ownerUserId)
@@ -197,6 +199,26 @@ internal sealed class FakeProvisioningStore : IProvisioningStore
             [.. _devices
                 .OrderBy(device => device.DeviceName)
                 .ThenBy(device => device.PublicId)]);
+
+    /// <summary>
+    /// Whether the board has history the purge would take with it. The fake models "has history" as a flag the test
+    /// sets, because the tables that hold it are the database's own answer.
+    /// </summary>
+    public bool DeviceHasHistory { get; set; }
+
+    /// <inheritdoc />
+    public Task<bool> HasHistoryAsync(Guid deviceId, CancellationToken cancellationToken) =>
+        Task.FromResult(DeviceHasHistory);
+
+    /// <inheritdoc />
+    public List<Device> RemovedDevices { get; } = [];
+
+    /// <inheritdoc />
+    public void RemoveDevice(Device device)
+    {
+        RemovedDevices.Add(device);
+        _devices.Remove(device);
+    }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {

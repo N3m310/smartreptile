@@ -293,6 +293,22 @@ public class TerrariumServiceTests
     }
 
     [Fact]
+    public async Task Create_without_a_species_profile_leaves_the_enclosure_profileless()
+    {
+        // 2026-10-25: a keeper may set the enclosure up before deciding what lives in it. The row is valid — no
+        // bands to evaluate against, which is a state the evaluation layer already handles.
+        var outcome = await _service.CreateAsync(
+            new CreateTerrariumRequest("Empty tub", null, null, null, null),
+            _owner,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        outcome.Terrarium!.SpeciesProfileId.Should().BeNull();
+        outcome.Terrarium.SpeciesName.Should().BeNull("the name is resolved from the profile, so it is null with it");
+        _store.Terrariums.Should().ContainSingle().Which.SpeciesProfileId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Create_refuses_an_unknown_species_profile()
     {
         var outcome = await _service.CreateAsync(
@@ -970,7 +986,7 @@ public class TerrariumServiceTests
             CancellationToken.None);
 
         var stored = terrarium.ThresholdOverrides.Single();
-        stored.DwellWarnMinutes.Should().Be(5);
+        stored.DwellWarnMinutes.Should().Be(2);
         stored.DwellCritMinutes.Should().Be(2);
         stored.RecoveryMargin.Should().Be(0.5m);
         stored.Enabled.Should().BeTrue();
@@ -1707,6 +1723,72 @@ public class TerrariumServiceTests
         outcome.Succeeded.Should().BeTrue();
         outcome.Terrarium!.OwnerUserId.Should().BeNull();
         _store.Terrariums.Should().ContainSingle().Which.UserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Update_reassigns_the_species_profile_and_can_clear_it()
+    {
+        var profile = _store.AddProfile("Arid (desert)");
+        var tropical = _store.AddProfile("Tropical (humid forest)");
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var changed = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, tropical.Id, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        changed.Succeeded.Should().BeTrue();
+        changed.Terrarium!.SpeciesProfileId.Should().Be(tropical.Id);
+        changed.Terrarium.SpeciesName.Should().Be("Tropical (humid forest)");
+
+        // The all-zero GUID is this patch's "empty": null would mean "leave it", which is unexpressible as a clear.
+        var cleared = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, Guid.Empty, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        cleared.Succeeded.Should().BeTrue();
+        terrarium.SpeciesProfileId.Should().BeNull("an enclosure may be left without a species");
+        cleared.Terrarium!.SpeciesName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Update_leaves_the_species_profile_alone_when_the_member_is_omitted()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest("Renamed", null, null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue();
+        terrarium.SpeciesProfileId.Should().Be(profile.Id);
+    }
+
+    [Fact]
+    public async Task Update_refuses_an_unknown_species_profile()
+    {
+        var profile = _store.AddProfile();
+        var terrarium = _store.AddTerrarium(_owner, "Alpha", profile);
+
+        var outcome = await _service.UpdateAsync(
+            terrarium.Id,
+            new UpdateTerrariumRequest(null, Guid.NewGuid(), null, null, null),
+            _owner,
+            terrarium.RowVersion!,
+            CancellationToken.None);
+
+        outcome.Problem!.Code.Should().Be("validation_failed");
+        outcome.Problem.Errors!.Should().ContainSingle().Which.Code.Should().Be("species_profile_not_found");
+        terrarium.SpeciesProfileId.Should().Be(profile.Id);
     }
 
     [Fact]

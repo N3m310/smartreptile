@@ -294,7 +294,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Quản trị'), findsOneWidget);
-    expect(find.text('Thiết bị\nIoT'), findsOneWidget);
+    expect(find.text('Thiết bị'), findsOneWidget);
 
     await tester.tap(find.text('Quản trị'));
     await tester.pumpAndSettle();

@@ -4,12 +4,74 @@ import 'package:provider/provider.dart';
 
 import '../core/permissions.dart';
 import '../core/mac_address.dart';
+import '../core/problem.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/device_model.dart';
 import '../state/device_provider.dart';
 import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
+
+/// Translates backend and device-related errors into user-friendly Vietnamese messages.
+String _translateDeviceError(dynamic error) {
+  if (error is AppFailure) {
+    if (error.isNetworkFailure) {
+      return 'Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại mạng.';
+    }
+    switch (error.code) {
+      case 'device_already_bound':
+      case 'device_already_registered':
+        return 'Địa chỉ MAC này đã tồn tại và đã được liên kết với một chuồng nuôi khác.';
+      case 'terrarium_already_bound':
+        return 'Chuồng nuôi này đã có thiết bị kết nối. Vui lòng chọn chuồng nuôi khác hoặc gỡ thiết bị hiện tại trước.';
+      case 'claim_code_invalid':
+      case 'claim_invalid':
+        return 'Mã nhận thiết bị không chính xác hoặc không hợp lệ.';
+      case 'claim_code_expired':
+        return 'Mã nhận thiết bị đã hết hạn. Vui lòng lấy mã mới trên bo mạch.';
+      case 'device_not_found':
+        return 'Không tìm thấy thiết bị tương ứng với thông tin đã nhập.';
+      case 'device_revoked':
+        return 'Thiết bị này đã bị thu hồi và không thể liên kết.';
+      case 'device_has_history':
+        return 'Thiết bị đã có dữ liệu đo hoặc cảnh báo. Không thể xóa nếu không phải quản trị viên.';
+      case 'not_found':
+        return 'Không tìm thấy chuồng nuôi hoặc thiết bị tương ứng.';
+      case 'rate_limited':
+        return 'Thao tác quá nhanh. Vui lòng chờ giây lát rồi thử lại.';
+      default:
+        if (error.detail != null && error.detail!.isNotEmpty) {
+          return error.detail!;
+        }
+        if (error.title != null && error.title!.isNotEmpty) {
+          return error.title!;
+        }
+        return 'Lỗi thao tác thiết bị (${error.code}).';
+    }
+  }
+
+  final errStr = error.toString();
+  if (errStr.contains('device_already_bound') || errStr.contains('device_already_registered')) {
+    return 'Địa chỉ MAC này đã tồn tại và đã được liên kết với một chuồng nuôi khác.';
+  }
+  if (errStr.contains('terrarium_already_bound')) {
+    return 'Chuồng nuôi này đã có thiết bị kết nối. Vui lòng chọn chuồng nuôi khác hoặc gỡ thiết bị hiện tại trước.';
+  }
+  if (errStr.contains('claim_code_invalid') || errStr.contains('claim_invalid')) {
+    return 'Mã nhận thiết bị không chính xác hoặc không hợp lệ.';
+  }
+  if (errStr.contains('claim_code_expired')) {
+    return 'Mã nhận thiết bị đã hết hạn. Vui lòng lấy mã mới trên bo mạch.';
+  }
+  if (errStr.contains('device_not_found')) {
+    return 'Không tìm thấy thiết bị tương ứng với thông tin đã nhập.';
+  }
+  if (errStr.contains('device_revoked')) {
+    return 'Thiết bị này đã bị thu hồi và không thể liên kết.';
+  }
+
+  return errStr.replaceFirst(RegExp(r'^Exception:\s*'), '');
+}
 
 /// Screen managing IoT devices fleet (matching Web `/devices` functionality).
 class DevicesScreen extends StatefulWidget {
@@ -264,6 +326,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   onRotateSecret: () => _rotateSecret(context, device),
                   onRevoke: () => _revokeDevice(context, device),
                   onDelete: () => _deleteDevice(context, device),
+                  onPurge: () => _purgeDevice(context, device),
                   onTap: () => _showDetailDialog(context, device),
                 ),
                 const SizedBox(height: 12),
@@ -337,7 +400,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi đổi khóa: $e')),
+          SnackBar(content: Text('Lỗi đổi khóa: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -382,7 +445,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi thu hồi khóa: $e')),
+          SnackBar(content: Text('Lỗi thu hồi khóa: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -393,9 +456,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.bgCard,
-        title: const Text('Gỡ thiết bị', style: TextStyle(color: AppColors.statusDanger)),
+        title: const Text('Gỡ khỏi bể nuôi', style: TextStyle(color: AppColors.statusDanger)),
         content: Text(
-          'Gỡ thiết bị "${device.deviceName}" khỏi bể nuôi và tài khoản? Thiết bị sẽ bị huỷ liên kết để có thể gán cho bể khác.',
+          'Gỡ thiết bị "${device.deviceName}" khỏi bể nuôi? Thiết bị vẫn nằm trong danh sách và giữ nguyên khoá, '
+          'nên có thể gắn lại vào bể khác mà không cần nhận lại.',
           style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
         ),
         actions: [
@@ -409,7 +473,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Gỡ thiết bị'),
+            child: const Text('Gỡ khỏi bể'),
           ),
         ],
       ),
@@ -421,13 +485,87 @@ class _DevicesScreenState extends State<DevicesScreen> {
       await context.read<DeviceProvider>().deleteDevice(device.deviceId);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gỡ thiết bị thành công.')),
+          const SnackBar(content: Text('Đã gỡ thiết bị khỏi bể nuôi.')),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi gỡ thiết bị: $e')),
+          SnackBar(content: Text('Lỗi gỡ thiết bị: ${_translateDeviceError(e)}')),
+        );
+      }
+    }
+  }
+
+  /// Erases a board for good (`DELETE /devices/{id}?purge=true`).
+  ///
+  /// For administrators, this purges the device and cascades the deletion of associated history (alerts, readings).
+  /// For keepers, this only succeeds while nothing references it.
+  Future<void> _purgeDevice(BuildContext context, DeviceItem device) async {
+    final session = context.read<SessionProvider>();
+    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+        (session.user?.role.toLowerCase() == 'admin') ||
+        session.hasPermission(Permissions.dataReadAny) ||
+        session.hasPermission(Permissions.userRead);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgCard,
+        title: Text(
+          isAdmin ? 'Xác nhận xóa thiết bị' : 'Xoá vĩnh viễn',
+          style: const TextStyle(color: AppColors.statusDanger, fontWeight: FontWeight.w600),
+        ),
+        content: Text(
+          isAdmin
+              ? 'Bạn có chắc chắn muốn xóa thiết bị "${device.deviceName}" khỏi hệ thống không?\n\n'
+                'Lưu ý: Khi xóa thiết bị, các dữ liệu liên quan như cảnh báo và dữ liệu đo sẽ biến mất hoàn toàn.'
+              : 'Xoá hẳn "${device.deviceName}" khỏi hệ thống? Chỉ xoá được khi thiết bị chưa có dữ liệu đo hay cảnh báo nào. '
+                'Nếu đã có, hãy dùng "Gỡ khỏi bể nuôi" để giữ lại lịch sử.',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Huỷ', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.statusDanger,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(isAdmin ? 'Xác nhận xóa' : 'Xoá vĩnh viễn'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      await context.read<DeviceProvider>().purgeDevice(device.deviceId);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã xoá thiết bị khỏi hệ thống.')),
+        );
+      }
+    } on AppFailure catch (failure) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              failure.code == 'device_has_history'
+                  ? 'Không xoá được: thiết bị đã có dữ liệu đo hoặc cảnh báo. Hãy dùng "Gỡ khỏi bể nuôi".'
+                  : 'Lỗi xoá thiết bị: ${_translateDeviceError(failure)}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi xoá thiết bị: ${_translateDeviceError(e)}')),
         );
       }
     }
@@ -547,6 +685,7 @@ class _DeviceCard extends StatelessWidget {
     required this.onRotateSecret,
     required this.onRevoke,
     required this.onDelete,
+    required this.onPurge,
     required this.onTap,
   });
 
@@ -557,6 +696,7 @@ class _DeviceCard extends StatelessWidget {
   final VoidCallback onRotateSecret;
   final VoidCallback onRevoke;
   final VoidCallback onDelete;
+  final VoidCallback onPurge;
   final VoidCallback onTap;
 
   @override
@@ -766,9 +906,19 @@ class _DeviceCard extends StatelessWidget {
                           value: 'delete',
                           child: Row(
                             children: [
-                              Icon(Icons.delete_outline, size: 16, color: AppColors.statusDanger),
+                              Icon(Icons.link_off, size: 16, color: AppColors.statusDanger),
                               SizedBox(width: 8),
-                              Text('Gỡ thiết bị', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
+                              Text('Gỡ khỏi bể nuôi', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'purge',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_forever_outlined, size: 16, color: AppColors.statusDanger),
+                              SizedBox(width: 8),
+                              Text('Xoá thiết bị', style: TextStyle(color: AppColors.statusDanger, fontSize: 13)),
                             ],
                           ),
                         ),
@@ -777,6 +927,7 @@ class _DeviceCard extends StatelessWidget {
                         if (action == 'rotate') onRotateSecret();
                         if (action == 'revoke') onRevoke();
                         if (action == 'delete') onDelete();
+                        if (action == 'purge') onPurge();
                       },
                     ),
                 ],
@@ -881,7 +1032,7 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Nhận thiết bị IoT',
+                'Nhận thiết bị',
                 style: TextStyle(
                   color: AppColors.textMain,
                   fontWeight: FontWeight.bold,
@@ -1090,7 +1241,7 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
     } catch (e) {
       setState(() {
         _busy = false;
-        _error = 'Không thể nhận thiết bị: $e';
+        _error = _translateDeviceError(e);
       });
     }
   }
@@ -1284,7 +1435,7 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Lỗi gắn thiết bị: $e';
+        _error = _translateDeviceError(e);
       });
     }
   }
@@ -1324,7 +1475,7 @@ class _EditDeviceDialogState extends State<_EditDeviceDialog> {
     } catch (e) {
       setState(() {
         _busy = false;
-        _error = 'Lỗi lưu cấu hình: $e';
+        _error = _translateDeviceError(e);
       });
     }
   }

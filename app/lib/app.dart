@@ -53,7 +53,11 @@ class SmartReptileApp extends StatelessWidget {
     return MaterialApp(
       title: 'VIVARIUMGUARD',
       debugShowCheckedModeBanner: false,
-      locale: settings.locale,
+      // Vietnamese unless the keeper picked another language. Deliberately not "follow the device": every screen in
+      // this shell is written in Vietnamese, so an `en-US` handset only mixed English catalogue strings into
+      // Vietnamese copy — an English dialog title over a Vietnamese alert, which is what this used to produce. The
+      // prototype keeps the provider's own "follow the device" default, because its screens are English by design.
+      locale: settings.locale ?? const Locale('vi'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: AppTheme.darkTheme,
@@ -145,13 +149,10 @@ class _RootShellState extends State<_RootShell> with WidgetsBindingObserver {
       if (!isOwner)
         _ShellTab(
           destination: isAdmin
-              ? DefaultTextStyle.merge(
-                  textAlign: TextAlign.center,
-                  child: const NavigationDestination(
-                    icon: Icon(Icons.developer_board_outlined),
-                    selectedIcon: Icon(Icons.developer_board),
-                    label: 'Thiết bị\nIoT',
-                  ),
+              ? const NavigationDestination(
+                  icon: Icon(Icons.developer_board_outlined),
+                  selectedIcon: Icon(Icons.developer_board),
+                  label: 'Thiết bị',
                 )
               : const NavigationDestination(
                   icon: Icon(Icons.developer_board_outlined),

@@ -61,7 +61,7 @@ public sealed class TerrariumService(
     private const int LocationMaxLength = 120;
     private const int DescriptionMaxLength = 1000;
     private const int NoteMaxLength = 300;
-    private const int DefaultDwellWarnMinutes = 5;
+    private const int DefaultDwellWarnMinutes = 2;
     private const int DefaultDwellCritMinutes = 2;
     private const decimal DefaultRecoveryMargin = 0.5m;
 
@@ -435,10 +435,12 @@ public sealed class TerrariumService(
             return TerrariumOutcome.Invalid(violations);
         }
 
-        if (!await store.SpeciesProfileExistsAsync(request.SpeciesProfileId, cancellationToken))
+        if (request.SpeciesProfileId is { } profileId
+            && !await store.SpeciesProfileExistsAsync(profileId, cancellationToken))
         {
             // A 400, not a 404: the profile is part of the body the caller sent, so this is a field the client got
-            // wrong rather than a resource someone else owns.
+            // wrong rather than a resource someone else owns. A null profile is not that mistake — an enclosure
+            // without a species is a valid enclosure (2026-10-25).
             return TerrariumOutcome.Invalid(
                 [new IdentityViolation("speciesProfileId", "species_profile_not_found", "No such species profile.")]);
         }
@@ -482,7 +484,9 @@ public sealed class TerrariumService(
             : provisioning.StageBinding(
                 device,
                 terrarium.Id,
-                terrarium.UserId,
+                // An administrator's enclosure starts unowned, so the board falls back to the claimer rather than
+                // inheriting `null` and landing in nobody's fleet (2026-10-25).
+                terrarium.UserId ?? ownerUserId,
                 now,
                 method: request.DeviceId is { Length: > 0 } ? "device_id" : "mac_address",
                 actor);
@@ -613,6 +617,7 @@ public sealed class TerrariumService(
         }
 
         if (request.SpeciesProfileId is { } profileId
+            && profileId != Guid.Empty
             && !await store.SpeciesProfileExistsAsync(profileId, cancellationToken))
         {
             violations.Add(new IdentityViolation(
@@ -651,7 +656,20 @@ public sealed class TerrariumService(
 
         if (request.SpeciesProfileId is { } newProfileId)
         {
-            terrarium.SpeciesProfileId = newProfileId;
+            // The all-zero GUID is this record's "empty": it detaches the profile so the enclosure can be set up
+            // before its species is known (2026-10-25). Null still means "leave the current one alone", which is
+            // what every other omitted member of a patch means.
+            var resolvedProfileId = newProfileId == Guid.Empty ? (Guid?)null : newProfileId;
+
+            if (terrarium.SpeciesProfileId != resolvedProfileId)
+            {
+                terrarium.SpeciesProfileId = resolvedProfileId;
+
+                // The loaded navigation is dropped on purpose: it still points at the profile the enclosure no
+                // longer uses, and an already-loaded navigation is not overwritten by the re-read's `Include`, so
+                // the answer would name the previous species (BUG-20).
+                terrarium.SpeciesProfile = null;
+            }
         }
 
         // Present means "set this", and an empty string is how a client clears a free-text field — the one thing
@@ -1380,8 +1398,9 @@ public sealed class TerrariumService(
         var local = clock.InZone(atUtc, terrarium.TimeZoneId);
 
         // A profile-less terrarium has no photoperiod, so the schedule defaults to "always day" rather than to a
-        // window nobody configured. Unreachable in practice — SpeciesProfileId is a required foreign key — but
-        // stated instead of left to whatever the default happened to be.
+        // window nobody configured. That is a real state since 2026-10-25 — an enclosure may be created before its
+        // species is chosen — and the price is stated: with no profile bands and no overrides, the resolver finds
+        // nothing to judge against, so no threshold alert can open until a profile is assigned.
         return ThresholdResolver.Resolve(
             metric,
             terrarium.ThresholdOverrides,
@@ -1453,7 +1472,7 @@ public sealed class TerrariumService(
             terrarium.Id,
             terrarium.Name,
             terrarium.SpeciesProfileId,
-            terrarium.SpeciesProfile?.Name ?? string.Empty,
+            terrarium.SpeciesProfile?.Name,
             terrarium.Location,
             terrarium.Description,
             terrarium.TimeZoneId,

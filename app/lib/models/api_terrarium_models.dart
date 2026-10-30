@@ -17,8 +17,13 @@ class ApiTerrarium {
 
   final String id;
   final String name;
-  final String speciesProfileId;
-  final String speciesName;
+
+  /// Profile assigned to the enclosure, or null for one that has none yet (2026-10-25). Both this and
+  /// [speciesName] are null together: the name is resolved from the profile by the server.
+  final String? speciesProfileId;
+
+  /// Profile name for display, null exactly when [speciesProfileId] is.
+  final String? speciesName;
   final String? location;
   final String? description;
   final String timeZoneId;
@@ -38,8 +43,8 @@ class ApiTerrarium {
   factory ApiTerrarium.fromJson(Map<String, dynamic> json) => ApiTerrarium(
     id: json['id'] as String,
     name: json['name'] as String,
-    speciesProfileId: json['speciesProfileId'] as String,
-    speciesName: json['speciesName'] as String,
+    speciesProfileId: json['speciesProfileId'] as String?,
+    speciesName: json['speciesName'] as String?,
     location: json['location'] as String?,
     description: json['description'] as String?,
     timeZoneId: json['timeZoneId'] as String? ?? '',

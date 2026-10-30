@@ -45,6 +45,7 @@ import type {
   UpdateRoleBody,
   UpdateProfileBody,
   UpdateSpeciesProfileBody,
+  UpdateTerrariumBody,
   UserPage,
   UserProfile,
   UserSummary,
@@ -130,6 +131,23 @@ export async function createTerrarium(body: CreateTerrariumBody): Promise<Terrar
   return apiRequest('/api/v1/terrariums', { method: 'POST', body });
 }
 
+/**
+ * `PATCH /terrariums/{id}` — requires `terrarium.write` and the version the caller read, sent as `If-Match`
+ * (`07-appendices/03` §4.2). Omitted members are left unchanged, so a caller sends only what it edited; the
+ * all-zero GUID detaches the species profile, which is what "no species" has to be spelled as.
+ */
+export async function updateTerrarium(
+  id: string,
+  body: UpdateTerrariumBody,
+  rowVersion: string
+): Promise<TerrariumItem> {
+  return apiRequest(`/api/v1/terrariums/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'If-Match': rowVersion },
+    body,
+  });
+}
+
 /** `GET /species-profiles` — the built-ins plus this account's own, each with its bands (roadmap 3.9). */
 export async function listSpeciesProfiles(): Promise<SpeciesProfileList> {
   return apiRequest('/api/v1/species-profiles');
@@ -165,12 +183,13 @@ export async function patchDevice(
 }
 
 /**
- * `DELETE /devices/{id}` — remove a board from the account's fleet (item 9b). Revokes every credential, closes the
- * live session and detaches the board from its enclosure; **not** a row delete, so the answer describes the revoked
- * board and its readings and audit history survive.
+ * `DELETE /devices/{id}` — detach a board from its enclosure (item 9b, changed 2026-10-25). The board keeps its
+ * credentials and stays in the fleet as `provisioning`, so it can be bound again; `purge` erases the row instead and
+ * is refused with `device_has_history` while anything still references the board.
  */
-export async function deleteDevice(deviceId: string): Promise<DeviceItem> {
-  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+export async function deleteDevice(deviceId: string, purge = false): Promise<DeviceItem> {
+  const query = purge ? '?purge=true' : '';
+  return apiRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}${query}`, { method: 'DELETE' });
 }
 
 /**
