@@ -7,8 +7,11 @@
     "dev": "vite --port 8081 --host",
     "build": "tsc && vite build",
     "preview": "vite preview --port 8081",
-    "typecheck": "tsc --noEmit",
-    "check:strings": "node scripts/check-strings.mjs"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit",
+    "check:strings": "node scripts/check-strings.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:list": "playwright test --list",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.11",
@@ -21,6 +24,7 @@
     "tailwind-merge": "^3.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.0.9",
     "@types/node": "^22.13.9",
     "@types/react": "^19.0.10",
