@@ -7,18 +7,18 @@ import '../models/terrarium_models.dart';
 class AppDataProvider extends ChangeNotifier {
   AppDataProvider({ApiClient? api}) {
     _api = api;
-    _terrariums = List.from(mockTerrariums);
-    _devices = List.from(mockDevices);
-    _alerts = List.from(mockAlerts);
-    _selectedTerrariumId = _terrariums.first.id;
   }
 
   ApiClient? _api;
 
-  late List<TerrariumModel> _terrariums;
-  late List<DeviceModel> _devices;
-  late List<AlertModel> _alerts;
-  late String _selectedTerrariumId;
+  // Nothing is seeded here. This provider used to start on the mock models and only replace them when the API
+  // answered with a non-empty list, so an account that owns no enclosures was shown three invented ones on the
+  // dashboard while the Terrarium tab — which reads the API directly — said it had none. Until a read succeeds the
+  // collections are empty, and the screens say so.
+  List<TerrariumModel> _terrariums = [];
+  List<DeviceModel> _devices = [];
+  List<AlertModel> _alerts = [];
+  String _selectedTerrariumId = '';
 
   bool _isLive = false;
   bool _isLoading = false;
@@ -44,7 +44,9 @@ class AppDataProvider extends ChangeNotifier {
     _api = api;
   }
 
-  TerrariumModel get selectedTerrarium {
+  /// The enclosure the dashboard is showing, or null when the account has none.
+  TerrariumModel? get selectedTerrarium {
+    if (_terrariums.isEmpty) return null;
     return _terrariums.firstWhere(
       (t) => t.id == _selectedTerrariumId,
       orElse: () => _terrariums.first,
@@ -58,6 +60,7 @@ class AppDataProvider extends ChangeNotifier {
   List<HistoryPoint> get currentHistory => historyFor(_selectedTerrariumId);
 
   List<HistoryPoint> historyFor(String terrariumId) {
+    if (_terrariums.isEmpty) return const [];
     if (_isLive) {
       final stored = _historyByTerrarium[terrariumId];
       if (stored != null && stored.isNotEmpty) {
@@ -141,15 +144,20 @@ class AppDataProvider extends ChangeNotifier {
     }
   }
 
-  /// Reset to simulated/mock models (e.g. on sign-out or offline test)
-  void resetToMocks() {
-    _terrariums = List.from(mockTerrariums);
-    _devices = List.from(mockDevices);
-    _alerts = List.from(mockAlerts);
-    _resolveAlertTerrariumNames();
+  /// Drops everything the previous session left behind (sign-out).
+  ///
+  /// The shell is then empty until the next session loads its own data: nothing here invents numbers to fill the
+  /// gap, which is what the previous mock reset did and what made a signed-out sign-in look populated.
+  void clear() {
+    _terrariums = [];
+    _devices = [];
+    _alerts = [];
+    _speciesProfiles = [];
+    _timeZones = [];
     _historyByTerrarium.clear();
-    _selectedTerrariumId = _terrariums.first.id;
+    _selectedTerrariumId = '';
     _isLive = false;
+    _isLoading = false;
     _errorMessage = null;
     notifyListeners();
   }
@@ -174,7 +182,6 @@ class AppDataProvider extends ChangeNotifier {
         fetchTimeZones(),
       ]);
       _resolveAlertTerrariumNames();
-      _isLive = true;
       _errorMessage = null;
     } on AppFailure catch (failure) {
       _errorMessage = failure.detail ?? failure.code;
@@ -195,32 +202,33 @@ class AppDataProvider extends ChangeNotifier {
       final payload = await client.getJson('/api/v1/terrariums');
       final items = payload['items'] as List<dynamic>? ?? [];
 
-      if (items.isNotEmpty) {
-        final List<TerrariumModel> list = [];
-        for (final item in items) {
-          if (item is Map<String, dynamic>) {
-            final t = TerrariumModel.fromApi(item);
-            list.add(t);
-          }
-        }
-
-        if (list.isNotEmpty) {
-          _terrariums = list;
-          if (!_terrariums.any((t) => t.id == _selectedTerrariumId)) {
-            _selectedTerrariumId = _terrariums.first.id;
-          }
-          _isLive = true;
-
-          // Hydrate readings, thresholds, and 24h history for all loaded terrariums
-          final hydration = <Future<void>>[];
-          for (final t in _terrariums) {
-            hydration.add(fetchLatestReadings(t.id).then((_) => fetchHistory(t.id)));
-            hydration.add(fetchThresholds(t.id));
-          }
-          await Future.wait(hydration);
-          _resolveAlertTerrariumNames();
+      final list = <TerrariumModel>[];
+      for (final item in items) {
+        if (item is Map<String, dynamic>) {
+          list.add(TerrariumModel.fromApi(item));
         }
       }
+
+      // Assigned even when the answer is empty: an account with no enclosures has none, and a list kept from an
+      // earlier read (or from the mock models this provider used to start on) would report enclosures that are not
+      // there. A read that fails is a different matter and keeps what is already on screen.
+      _terrariums = list;
+      _isLive = true;
+      if (!_terrariums.any((t) => t.id == _selectedTerrariumId)) {
+        _selectedTerrariumId = _terrariums.isEmpty ? '' : _terrariums.first.id;
+      }
+
+      if (list.isNotEmpty) {
+        // Hydrate readings, thresholds, and 24h history for all loaded terrariums
+        final hydration = <Future<void>>[];
+        for (final t in _terrariums) {
+          hydration.add(fetchLatestReadings(t.id).then((_) => fetchHistory(t.id)));
+          hydration.add(fetchThresholds(t.id));
+        }
+        await Future.wait(hydration);
+      }
+      _resolveAlertTerrariumNames();
+      notifyListeners();
     } catch (_) {
       // Retain existing state on failure
     }
@@ -465,15 +473,14 @@ class AppDataProvider extends ChangeNotifier {
       final payload = await client.getJson('/api/v1/devices');
       final items = payload['items'] as List<dynamic>? ?? [];
 
-      if (items.isNotEmpty) {
-        final list = <DeviceModel>[];
-        for (final item in items) {
-          if (item is Map<String, dynamic>) {
-            list.add(DeviceModel.fromApi(item));
-          }
+      final list = <DeviceModel>[];
+      for (final item in items) {
+        if (item is Map<String, dynamic>) {
+          list.add(DeviceModel.fromApi(item));
         }
-        _devices = list;
       }
+      // Same rule as the enclosure list: an account with no boards has none.
+      _devices = list;
     } catch (_) {}
   }
 

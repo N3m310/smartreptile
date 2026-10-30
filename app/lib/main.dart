@@ -91,7 +91,7 @@ Future<void> main() async {
       terrariums.clear();
       species.clear();
       devices.clear();
-      appData.resetToMocks();
+      appData.clear();
     } else {
       appData.loadAll();
       species.fetchProfiles();

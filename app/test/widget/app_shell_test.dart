@@ -25,17 +25,17 @@ import 'package:smart_reptile/theme/app_theme.dart';
 
 /// Widget tests for the app shell (`lib/app.dart`) — the surface a keeper sees.
 ///
-/// Three things are asserted, and all three are honesty rules rather than layout. The shell carries the simulated-data
-/// notice from 2026-10-14, when the app stopped opening on the prototype: the keeper's screens are still the M1
-/// models, so the app says so on every one of them. An action that changes nothing but this screen says *that* rather
-/// than reporting a success — the defect the web client fixed by deleting its mock threshold editor (task 4.20). And
-/// the administration tab exists only while the session holds a permission that can open something behind it: the
-/// screens are gated on permission codes, never on a role name (FR-18).
+/// Two things are asserted, and both are honesty rules rather than layout. An action that changes nothing but this
+/// screen says *that* rather than reporting a success — the defect the web client fixed by deleting its mock
+/// threshold editor (task 4.20). And the administration tab exists only while the session holds a permission that can
+/// open something behind it: the screens are gated on permission codes, never on a role name (FR-18).
+///
+/// The simulated-data notice these tests used to assert is gone with the mock models it described: the keeper's tabs
+/// read the API now, so a notice claiming otherwise would be the lie it was there to prevent.
 ///
 /// The locale is pinned in every case. The test binding runs under `en_US` and the app deliberately follows the
 /// device locale when nothing is stored, so without this the assertions would be about the machine running the
-/// suite — and the notice case exists precisely because the copy comes from the shared deck rather than being a
-/// literal in a widget.
+/// suite.
 void main() {
   late SettingsProvider settings;
   late SessionProvider session;
@@ -137,56 +137,6 @@ void main() {
         : await sessionHolding(permissions, role: role);
   }
 
-  testWidgets('the shell carries the simulated-data notice on the first tab', (tester) async {
-    await useLocale('vi');
-    useTallSurface(tester);
-    await tester.pumpWidget(app());
-    await tester.pumpAndSettle();
-
-    // `findRichText` because the notice is one styled paragraph: its title is a span inside it, not its own widget.
-    expect(find.textContaining('Dữ liệu mô phỏng', findRichText: true), findsOneWidget);
-    expect(
-      find.textContaining('chưa gửi lên máy chủ', findRichText: true),
-      findsOneWidget,
-      reason: 'the notice has to say the actions do not reach the server',
-    );
-  });
-
-  testWidgets('the same notice reads English when the app is in English', (tester) async {
-    await useLocale('en');
-    useTallSurface(tester);
-    await tester.pumpWidget(app());
-    await tester.pumpAndSettle();
-
-    expect(
-      find.textContaining('Simulated data', findRichText: true),
-      findsOneWidget,
-      reason: 'the copy is a deck key, not a literal in a widget',
-    );
-    expect(find.textContaining('Dữ liệu mô phỏng', findRichText: true), findsNothing);
-  });
-
-  testWidgets('the notice stays while the tabs change', (tester) async {
-    await useLocale('vi');
-    useTallSurface(tester);
-    await tester.pumpWidget(app());
-    await tester.pumpAndSettle();
-
-    await tester.tap(
-      find.descendant(
-        of: find.byType(NavigationBar),
-        matching: find.text('Cảnh báo'),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.textContaining('Dữ liệu mô phỏng', findRichText: true),
-      findsOneWidget,
-      reason: 'every keeper tab is still on the mock models, so the notice is about them rather than one screen',
-    );
-  });
-
   testWidgets('saving the mock thresholds says what happened instead of reporting a success', (tester) async {
     await useLocale('vi');
     useTallSurface(tester);
@@ -287,7 +237,7 @@ void main() {
     );
   });
 
-  testWidgets('holding data.read.any adds the administration tab and drops the mock notice there', (tester) async {
+  testWidgets('holding data.read.any adds the administration tab', (tester) async {
     await useLocale('vi', permissions: [Permissions.dataReadAny]);
     useTallSurface(tester);
     await tester.pumpWidget(app());
@@ -299,11 +249,6 @@ void main() {
     await tester.tap(find.text('Quản trị'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('Dữ liệu mô phỏng', findRichText: true),
-      findsNothing,
-      reason: 'the administration screens read the API, so the simulated-data notice would be untrue over them',
-    );
     expect(
       find.text('Toàn cảnh hệ thống'),
       findsOneWidget,
