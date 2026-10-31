@@ -1,0 +1,111 @@
+@startuml
+title SmartReptile — Use Case Diagram (source: origin/dev)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam usecase {
+  BackgroundColor #F7FBF7
+  BorderColor #39734A
+  ArrowColor #526B58
+}
+
+actor "Khách" as Guest
+actor "Tài khoản đã đăng nhập" as Account
+actor "Owner" as Owner
+actor "Technician" as Technician
+actor "Viewer" as Viewer
+actor "Administrator" as Admin
+actor "Thiết bị IoT\n(ESP32)" as Device
+actor "Backend workers" as Workers
+actor "FCM / Email" as MessageService
+
+Owner --|> Account
+Technician --|> Account
+Viewer --|> Account
+Admin --|> Account
+
+rectangle "SmartReptile — Web, Mobile và API" {
+  usecase "Đăng ký / đăng nhập" as Auth
+  usecase "Khôi phục / đặt lại mật khẩu" as Recovery
+  usecase "Đổi mật khẩu / đăng xuất" as Session
+  usecase "Cập nhật cài đặt cá nhân\n(ngôn ngữ, múi giờ, thông báo)" as Preferences
+
+  usecase "Xem dashboard và danh sách bể nuôi" as ReadTerrariums
+  usecase "Tạo / sửa / xóa bể nuôi" as ManageTerrariums
+  usecase "Xem dữ liệu hiện tại,\nlịch sử và độ phủ dữ liệu" as ReadEnvironment
+  usecase "Tải lịch sử dạng CSV" as DownloadCsv
+  usecase "Xem hồ sơ loài" as ReadSpecies
+  usecase "Tạo / nhân bản / sửa / xóa\nhồ sơ loài" as ManageSpecies
+
+  usecase "Xem và cấu hình thiết bị" as ReadDevices
+  usecase "Nhận / ghép thiết bị\n(mã nhận hoặc MAC)" as ClaimDevice
+  usecase "Đổi tên / chu kỳ lấy mẫu /\nchu kỳ gửi" as ConfigureDevice
+  usecase "Chuyển thiết bị sang bể khác" as MoveDevice
+  usecase "Gỡ thiết bị / thu hồi khóa /\nđổi khóa" as UnbindDevice
+
+  usecase "Xem cảnh báo và dòng thời gian" as ReadAlerts
+  usecase "Tiếp nhận / xử lý cảnh báo" as HandleAlerts
+  usecase "Tạo / hủy khoảng tạm im lặng" as SilenceAlerts
+  usecase "Đọc hộp thư thông báo" as ReadNotifications
+
+  usecase "Xem dữ liệu toàn hệ thống" as ReadAllData
+  usecase "Quản lý tài khoản" as ManageAccounts
+  usecase "Quản lý vai trò và quyền" as ManageRoles
+
+  usecase "Tự đăng ký thiết bị" as SelfRegister
+  usecase "Gửi telemetry / trạng thái thiết bị" as SendTelemetry
+  usecase "Đánh giá dữ liệu,\ntạo / cập nhật cảnh báo" as EvaluateData
+  usecase "Phát thông báo" as DispatchNotification
+}
+
+Guest --> Auth
+Guest --> Recovery
+Account --> Session
+Account --> Preferences
+
+Account --> ReadTerrariums
+Account --> ReadEnvironment
+Account --> ReadSpecies
+Account --> ReadDevices
+Account --> ReadAlerts
+Account --> ReadNotifications
+
+Owner --> ManageTerrariums
+Owner --> ClaimDevice
+Owner --> ConfigureDevice
+Owner --> MoveDevice
+Owner --> UnbindDevice
+Owner --> HandleAlerts
+Owner --> SilenceAlerts
+
+Technician --> HandleAlerts
+Technician --> SilenceAlerts
+Admin --> ReadAllData
+Admin --> ManageAccounts
+Admin --> ManageRoles
+Admin --> ManageSpecies
+Admin --> ManageTerrariums
+Admin --> ClaimDevice
+Admin --> ConfigureDevice
+Admin --> MoveDevice
+Admin --> UnbindDevice
+
+Account --> DownloadCsv
+
+Device --> SelfRegister
+Device --> SendTelemetry
+Workers --> EvaluateData
+Workers --> DispatchNotification
+MessageService --> DispatchNotification
+
+ManageTerrariums ..> ReadSpecies : <<include>>
+DownloadCsv ..> ReadEnvironment : <<extend>>
+EvaluateData ..> DispatchNotification : <<include>>
+
+note bottom of Account
+  Các thao tác được giới hạn bởi permission trong API.
+  Administrator có quyền trên dữ liệu toàn hệ thống;
+  Owner, Technician và Viewer chỉ truy cập dữ liệu
+  theo quyền được cấp và phạm vi tài khoản.
+end note
+@enduml
