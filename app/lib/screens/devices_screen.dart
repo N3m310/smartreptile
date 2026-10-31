@@ -341,6 +341,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppColors.bgCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -1024,15 +1025,16 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
         top: 20,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Nhận thiết bị',
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Nhận thiết bị',
                 style: TextStyle(
                   color: AppColors.textMain,
                   fontWeight: FontWeight.bold,
@@ -1173,8 +1175,9 @@ class _ClaimDeviceSheetState extends State<_ClaimDeviceSheet> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Future<void> _submitClaim() async {
     if (_selectedTerrariumId == null) {
