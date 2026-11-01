@@ -7,6 +7,7 @@ import 'package:smart_reptile/screens/login_screen.dart';
 
 import 'helpers/fake_api.dart';
 import 'helpers/fixtures.dart';
+import 'helpers/hud.dart';
 import 'helpers/pump.dart';
 import 'helpers/session.dart';
 
@@ -56,28 +57,32 @@ void main() {
 
   setUp(clearStoredState);
 
-  testWidgets('E2E-AI-02 a guest reaches the shell without a single API call', (
+  e2eCase(
+    'hermetic',
+    'E2E-AI-02 a guest reaches the shell without a single API call',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await app.main();
+        await pumpUntilFound(tester, find.bySemanticsIdentifier('login.guest'));
+
+        await tester.tap(find.bySemanticsIdentifier('login.guest'));
+        await pumpUntilGone(tester, find.byType(LoginScreen));
+        await pumpUntilFound(tester, find.byType(NavigationBar));
+
+        expect(find.byType(NavigationBar), findsOneWidget);
+        // Guest mode is offline by construction: no access token, so `loadAll` returns before it builds a request.
+        expect(api.callsTo('GET', '/api/v1/terrariums'), 0);
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
+
+  e2eCase('hermetic', 'E2E-AI-03 signing in reaches the dashboard', (
     tester,
   ) async {
-    final semantics = tester.ensureSemantics();
-    try {
-      await app.main();
-      await pumpUntilFound(tester, find.bySemanticsIdentifier('login.guest'));
-
-      await tester.tap(find.bySemanticsIdentifier('login.guest'));
-      await pumpUntilGone(tester, find.byType(LoginScreen));
-      await pumpUntilFound(tester, find.byType(NavigationBar));
-
-      expect(find.byType(NavigationBar), findsOneWidget);
-      // Guest mode is offline by construction: no access token, so `loadAll` returns before it builds a request.
-      expect(api.callsTo('GET', '/api/v1/terrariums'), 0);
-      expect(tester.takeException(), isNull);
-    } finally {
-      semantics.dispose();
-    }
-  });
-
-  testWidgets('E2E-AI-03 signing in reaches the dashboard', (tester) async {
     api.on('POST', '/api/v1/auth/login', (_) => loginPayload());
     final semantics = tester.ensureSemantics();
     try {
@@ -108,43 +113,46 @@ void main() {
     }
   });
 
-  testWidgets('E2E-AI-04 a refused credential says so and stays on the form', (
-    tester,
-  ) async {
-    api.on(
-      'POST',
-      '/api/v1/auth/login',
-      (_) => StubReply(401, invalidCredentialsBody()),
-    );
-    final semantics = tester.ensureSemantics();
-    try {
-      await app.main();
-      await pumpUntilFound(
-        tester,
-        find.bySemanticsIdentifier('login.identifier'),
+  e2eCase(
+    'hermetic',
+    'E2E-AI-04 a refused credential says so and stays on the form',
+    (tester) async {
+      api.on(
+        'POST',
+        '/api/v1/auth/login',
+        (_) => StubReply(401, invalidCredentialsBody()),
       );
+      final semantics = tester.ensureSemantics();
+      try {
+        await app.main();
+        await pumpUntilFound(
+          tester,
+          find.bySemanticsIdentifier('login.identifier'),
+        );
 
-      await tester.enterText(
-        find.bySemanticsIdentifier('login.identifier'),
-        'keeper',
-      );
-      await tester.enterText(
-        find.bySemanticsIdentifier('login.password'),
-        'wrong-password',
-      );
-      await tester.tap(find.bySemanticsIdentifier('login.submit'));
+        await tester.enterText(
+          find.bySemanticsIdentifier('login.identifier'),
+          'keeper',
+        );
+        await tester.enterText(
+          find.bySemanticsIdentifier('login.password'),
+          'wrong-password',
+        );
+        await tester.tap(find.bySemanticsIdentifier('login.submit'));
 
-      await pumpUntilFound(tester, find.bySemanticsIdentifier('login.error'));
+        await pumpUntilFound(tester, find.bySemanticsIdentifier('login.error'));
 
-      expect(find.byType(LoginScreen), findsOneWidget);
-      expect(find.byType(NavigationBar), findsNothing);
-      expect(tester.takeException(), isNull);
-    } finally {
-      semantics.dispose();
-    }
-  });
+        expect(find.byType(LoginScreen), findsOneWidget);
+        expect(find.byType(NavigationBar), findsNothing);
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
 
-  testWidgets(
+  e2eCase(
+    'hermetic',
     'E2E-AI-05 registration issues a recovery code and returns to sign-in',
     (tester) async {
       api.on('POST', '/api/v1/auth/register', (_) => registerPayload());
@@ -153,6 +161,7 @@ void main() {
         await app.main();
         await pumpUntilFound(tester, find.bySemanticsIdentifier('login.guest'));
 
+        hudStep('opening the registration form');
         await tester.tap(find.text('Tạo tài khoản'));
         await pumpUntilFound(
           tester,
@@ -187,44 +196,47 @@ void main() {
     },
   );
 
-  testWidgets('E2E-AI-06 an empty catalogue renders the shell, not an error', (
-    tester,
-  ) async {
-    api.on('POST', '/api/v1/auth/login', (_) => loginPayload());
-    final semantics = tester.ensureSemantics();
-    try {
-      await app.main();
-      await pumpUntilFound(
-        tester,
-        find.bySemanticsIdentifier('login.identifier'),
-      );
-
-      await tester.enterText(
-        find.bySemanticsIdentifier('login.identifier'),
-        'keeper',
-      );
-      await tester.enterText(
-        find.bySemanticsIdentifier('login.password'),
-        'Demo!Reptile1',
-      );
-      await tester.tap(find.bySemanticsIdentifier('login.submit'));
-      await pumpUntilFound(tester, find.byType(DashboardScreen));
-
-      // Every one of the five reads was answered with an empty list, and none of them was an error.
-      for (final path in shellReadPaths) {
-        expect(
-          api.callsTo('GET', path),
-          greaterThanOrEqualTo(1),
-          reason: '$path was never requested after sign-in',
+  e2eCase(
+    'hermetic',
+    'E2E-AI-06 an empty catalogue renders the shell, not an error',
+    (tester) async {
+      api.on('POST', '/api/v1/auth/login', (_) => loginPayload());
+      final semantics = tester.ensureSemantics();
+      try {
+        await app.main();
+        await pumpUntilFound(
+          tester,
+          find.bySemanticsIdentifier('login.identifier'),
         );
-      }
-      expect(tester.takeException(), isNull);
-    } finally {
-      semantics.dispose();
-    }
-  });
 
-  testWidgets(
+        await tester.enterText(
+          find.bySemanticsIdentifier('login.identifier'),
+          'keeper',
+        );
+        await tester.enterText(
+          find.bySemanticsIdentifier('login.password'),
+          'Demo!Reptile1',
+        );
+        await tester.tap(find.bySemanticsIdentifier('login.submit'));
+        await pumpUntilFound(tester, find.byType(DashboardScreen));
+
+        // Every one of the five reads was answered with an empty list, and none of them was an error.
+        for (final path in shellReadPaths) {
+          expect(
+            api.callsTo('GET', path),
+            greaterThanOrEqualTo(1),
+            reason: '$path was never requested after sign-in',
+          );
+        }
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
+
+  e2eCase(
+    'hermetic',
     'E2E-AI-07 the language pill switches the whole form to English',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -235,6 +247,7 @@ void main() {
           find.bySemanticsIdentifier('login.lang.en'),
         );
 
+        hudStep('switching the language to English');
         await tester.tap(find.bySemanticsIdentifier('login.lang.en'));
         await tester.pump(const Duration(milliseconds: 600));
 
@@ -249,7 +262,8 @@ void main() {
     },
   );
 
-  testWidgets(
+  e2eCase(
+    'hermetic',
     'E2E-AI-08 signing out clears the keychain, not just the screen',
     (tester) async {
       api.on('POST', '/api/v1/auth/login', (_) => loginPayload());
@@ -285,6 +299,7 @@ void main() {
           find.bySemanticsIdentifier('profile.signOut'),
         );
 
+        hudStep('signing out');
         await tester.tap(find.bySemanticsIdentifier('profile.signOut'));
         await pumpUntilFound(tester, find.byType(LoginScreen));
 

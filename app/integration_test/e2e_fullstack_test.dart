@@ -6,6 +6,7 @@ import 'package:smart_reptile/screens/dashboard_screen.dart';
 import 'package:smart_reptile/screens/login_screen.dart';
 import 'package:smart_reptile/screens/terrarium_detail_screen.dart';
 
+import 'helpers/hud.dart';
 import 'helpers/live_api.dart';
 import 'helpers/pump.dart';
 import 'helpers/session.dart';
@@ -65,6 +66,7 @@ void main() {
   });
 
   Future<void> signIn(WidgetTester tester) async {
+    hudStep('signing in against the compose stack');
     await app.main();
     await pumpUntilFound(
       tester,
@@ -83,63 +85,69 @@ void main() {
     await pumpUntilFound(tester, find.byType(DashboardScreen));
   }
 
-  testWidgets('E2E-AI-09 a real sign-in shows the account its own enclosure', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    try {
-      await signIn(tester);
+  e2eCase(
+    'fullstack',
+    'E2E-AI-09 a real sign-in shows the account its own enclosure',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await signIn(tester);
 
-      // The Terrarium destination, addressed by its icon rather than its label: the label is copy.
-      await tapDestination(tester, Icons.pets_outlined);
-      await pumpUntilFound(tester, find.text(terrariumName));
+        // The Terrarium destination, addressed by its icon rather than its label: the label is copy.
+        await tapDestination(tester, Icons.pets_outlined);
+        await pumpUntilFound(tester, find.text(terrariumName));
 
-      expect(find.text(terrariumName), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    } finally {
-      semantics.dispose();
-    }
-  });
+        expect(find.text(terrariumName), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
 
-  testWidgets('E2E-AI-10 the enclosure detail opens on that enclosure', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    try {
-      await signIn(tester);
+  e2eCase(
+    'fullstack',
+    'E2E-AI-10 the enclosure detail opens on that enclosure',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await signIn(tester);
 
-      await tapDestination(tester, Icons.pets_outlined);
-      await pumpUntilFound(tester, find.text(terrariumName));
+        await tapDestination(tester, Icons.pets_outlined);
+        await pumpUntilFound(tester, find.text(terrariumName));
 
-      await tester.tap(find.text(terrariumName));
-      await pumpUntilFound(tester, find.byType(TerrariumDetailScreen));
+        await tester.tap(find.text(terrariumName));
+        await pumpUntilFound(tester, find.byType(TerrariumDetailScreen));
 
-      expect(find.byType(TerrariumDetailScreen), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    } finally {
-      semantics.dispose();
-    }
-  });
+        expect(find.byType(TerrariumDetailScreen), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
 
-  testWidgets('E2E-AI-11 history opens for an enclosure with no readings', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    try {
-      await signIn(tester);
+  e2eCase(
+    'fullstack',
+    'E2E-AI-11 history opens for an enclosure with no readings',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await signIn(tester);
 
-      await tapDestination(tester, Icons.show_chart_outlined);
-      // An enclosure with a board and no samples is the ordinary first-run state; it must render, not throw.
-      await tester.pump(const Duration(seconds: 2));
+        await tapDestination(tester, Icons.show_chart_outlined);
+        // An enclosure with a board and no samples is the ordinary first-run state; it must render, not throw.
+        await tester.pump(const Duration(seconds: 2));
 
-      expect(tester.takeException(), isNull);
-      expect(find.byType(LoginScreen), findsNothing);
-    } finally {
-      semantics.dispose();
-    }
-  });
+        expect(tester.takeException(), isNull);
+        expect(find.byType(LoginScreen), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
+    },
+  );
 
-  testWidgets('E2E-AI-12 signing out lands back on the sign-in form', (
+  e2eCase('fullstack', 'E2E-AI-12 signing out lands back on the sign-in form', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();

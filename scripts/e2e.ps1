@@ -3,6 +3,12 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1 -Suite smoke
 #   powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1 -Avd fcm_pixel_36
+#   powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1 -Headless      (unattended: no emulator window)
+#   powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1 -RestartDevice (a stale windowless AVD is in the way)
+#
+# By default the AVD is booted with a visible window, so the suite can be watched the way a Playwright run is: the
+# phone shows the app being driven, and `app/lib/core/e2e_hud.dart` paints the suite, the case and the current step
+# over it. `CI` set (any value) makes the run headless, which is what an unattended job wants.
 #
 # Exit codes: 0 = every selected suite passed, 1 = a test failed, 2 = a prerequisite failed.
 # Artifacts : build\e2e\<suite>.json and <suite>.log always; <suite>-fail.png and <suite>-logcat.txt on failure.
@@ -13,6 +19,12 @@
 param(
     [ValidateSet('smoke', 'hermetic', 'fullstack', 'all')][string]$Suite = 'all',
     [string]$Avd = 'focus_study',
+    # Boot the AVD without a window. The default is a window on a workstation, because a run you can watch is the
+    # point of the emulator: `CI` (any value) or -Headless keeps it invisible for an unattended run.
+    [switch]$Headless,
+    # Kill and boot the AVD again. Use it when a headless emulator from an earlier run is still up and hides the
+    # suite that is about to run on it.
+    [switch]$RestartDevice,
     [switch]$StopDeviceAtEnd
 )
 
@@ -69,6 +81,10 @@ foreach ($name in $suites) {
 # ---- 2. Device --------------------------------------------------------------------------------------------------
 Write-Host '== device' -ForegroundColor Cyan
 
+# A visible emulator is the mobile half of "you can see what the test is doing": Playwright opens the page, and this
+# opens the handset. `CI` wins, because there is no display there to open it on.
+$windowed = -not $Headless -and -not $env:CI
+
 function Get-DeviceSerial {
     foreach ($line in (& $adb devices)) {
         if ($line -match '^(emulator-\d+)\s+device') { return $matches[1] }
@@ -76,12 +92,33 @@ function Get-DeviceSerial {
     return $null
 }
 
+# An AVD booted by an earlier `-Headless` run is still running: reusing it would show nothing at all, which is the
+# problem a window is there to fix.
+function Test-EmulatorWindowed {
+    $processes = Get-Process -Name 'qemu-system*', 'emulator' -ErrorAction SilentlyContinue
+    return @($processes | Where-Object { $_.MainWindowHandle -ne 0 }).Count -gt 0
+}
+
 $serial = Get-DeviceSerial
+if ($serial -and $RestartDevice) {
+    Write-Host "  restarting $serial ..."
+    & $adb -s $serial emu kill | Out-Null
+    Wait-Until { -not (Get-DeviceSerial) } 60 'the emulator to exit' | Out-Null
+    $serial = $null
+}
+
 if (-not $serial) {
-    Write-Host "  booting $Avd headless ..."
-    Start-Process -FilePath $emu -ArgumentList @(
-        '-avd', $Avd, '-no-window', '-no-audio', '-no-snapshot-save', '-gpu', 'swiftshader_indirect'
-    ) | Out-Null
+    # Software rendering in both modes on purpose: `-gpu auto` picks the host GPU, and on this workstation it left
+    # the AVD `offline` past the 300 s boot budget, while swiftshader boots the same AVD in about a minute.
+    $emulatorArguments = @('-avd', $Avd, '-no-audio', '-no-snapshot-save', '-no-boot-anim', '-gpu', 'swiftshader_indirect')
+    if ($windowed) {
+        Write-Host "  booting $Avd with a window - watch it drive the suite"
+    }
+    else {
+        $emulatorArguments += @('-no-window')
+        Write-Host "  booting $Avd headless (nothing will be visible; drop -Headless and CI to watch it)"
+    }
+    Start-Process -FilePath $emu -ArgumentList $emulatorArguments | Out-Null
     if (-not (Wait-Until { (& $adb shell getprop sys.boot_completed 2>$null) -match '1' } 300 "boot of $Avd")) {
         Fail-Prerequisite "emulator $Avd did not finish booting within 300 s"
     }
@@ -90,8 +127,28 @@ if (-not $serial) {
 }
 else {
     Wait-Until { (& $adb shell getprop sys.boot_completed 2>$null) -match '1' } 120 'sys.boot_completed' | Out-Null
+    if ($windowed -and -not (Test-EmulatorWindowed)) {
+        Write-Host "  [!] $serial was already up without a window: the suite runs, but you will see none of it." -ForegroundColor Yellow
+        Write-Host '      Re-run with -RestartDevice to boot the AVD with a window.' -ForegroundColor Yellow
+    }
 }
 Write-Host "  device  : $serial"
+
+# Keep the picture alive and unobstructed. A stock AVD dims after ~30 s, and a black window is indistinguishable
+# from a hung run. Animations are switched off because this renderer is software (`swiftshader_indirect`): the
+# transitions cost the CPU the app itself needs, and a starved app gets killed for not answering input.
+#
+# Deliberately *not* `hide_error_dialogs`: that makes the system dismiss an ANR dialog by force-finishing the top
+# activity, so a slow moment turns into "the app died" instead of a dialog a person can wait out. It is a persisted
+# setting, so it is reset here rather than merely not set: a run that turns it on changes the AVD for later runs.
+& $adb -s $serial shell settings put global hide_error_dialogs 0 | Out-Null
+& $adb -s $serial shell svc power stayon true | Out-Null
+& $adb -s $serial shell input keyevent KEYCODE_WAKEUP | Out-Null
+& $adb -s $serial shell wm dismiss-keyguard | Out-Null
+& $adb -s $serial shell settings put system screen_off_timeout 2147483647 | Out-Null
+foreach ($scale in @('window_animation_scale', 'transition_animation_scale', 'animator_duration_scale')) {
+    & $adb -s $serial shell settings put global $scale 0 | Out-Null
+}
 
 # ---- 2b. Backend, for the fullstack suite only ------------------------------------------------------------------
 $stackStartedHere = $false
@@ -128,6 +185,32 @@ if ($suites -contains 'fullstack') {
 
 # ---- 3. Suites --------------------------------------------------------------------------------------------------
 $results = @()
+
+# The dart-test JSON report is one event per line (plan section 8). Replaying the verdicts after the run keeps the
+# console readable where the live reporter has already scrolled away, and names every case rather than a count.
+function Write-CaseVerdicts([string]$ReportPath) {
+    if (-not (Test-Path $ReportPath)) { return }
+    $names = @{}
+    $started = @{}
+    foreach ($line in Get-Content -Path $ReportPath) {
+        if (-not $line.StartsWith('{')) { continue }
+        try { $event = $line | ConvertFrom-Json } catch { continue }
+        if ($event.type -eq 'testStart') {
+            $names[[string]$event.test.id] = $event.test.name
+            # `time` is milliseconds since the run began, not a duration: the delta is the case's own time.
+            $started[[string]$event.test.id] = $event.time
+        }
+        elseif ($event.type -eq 'testDone' -and -not $event.hidden) {
+            $passed = $event.result -eq 'success'
+            $verdict = $(if ($passed) { 'PASS' } else { 'FAIL' })
+            $milliseconds = $event.time - $started[[string]$event.testID]
+            $seconds = '{0,6:n1}s' -f ($milliseconds / 1000)
+            Write-Host ('    {0} {1}  {2}' -f $verdict.PadRight(5), $seconds, $names[[string]$event.testID]) `
+                -ForegroundColor $(if ($passed) { 'Green' } else { 'Red' })
+        }
+    }
+}
+
 Push-Location $app
 
 & flutter pub get | Out-Host
@@ -137,7 +220,9 @@ foreach ($name in $suites) {
     Write-Host "== suite: $name" -ForegroundColor Cyan
 
     # The refresh token lives in the keychain, so a previous run's session would skip the login screen.
-    & $adb -s $serial shell pm clear com.smartreptile.smart_reptile | Out-Null
+    # stderr is swallowed too: `pm clear` answers "Failed" on the first run of a fresh build, when the package is not
+    # installed yet, and that word next to a green suite reads like a test failure.
+    & $adb -s $serial shell pm clear com.smartreptile.smart_reptile 2>&1 | Out-Null
 
     # Each suite's defines are declared here so a reader can see what it runs against (plan section 3).
     $defines = @()
@@ -169,9 +254,11 @@ foreach ($name in $suites) {
         $arguments += @('--file-reporter', "json:$fileReport")
 
         $started = Get-Date
+        Write-Host "  -- $target (watching $serial)" -ForegroundColor DarkGray
         & flutter @arguments 2>&1 | Tee-Object -FilePath $fileLog | Out-Host
         $code = $LASTEXITCODE
         $duration = [int]((Get-Date) - $started).TotalSeconds
+        Write-CaseVerdicts $fileReport
 
         if ($code -ne 0) {
             & $adb -s $serial exec-out screencap -p > (Join-Path $out "$slug-fail.png")
@@ -205,4 +292,10 @@ if ($failed.Count -gt 0) {
 }
 
 Write-Host 'OK' -ForegroundColor Green
+if ($windowed) {
+    Write-Host "  the $serial window is still open: it shows the last screen the suite reached." -ForegroundColor DarkGray
+}
+else {
+    Write-Host '  ran headless: drop -Headless (and CI) to watch the next run on the emulator.' -ForegroundColor DarkGray
+}
 exit 0

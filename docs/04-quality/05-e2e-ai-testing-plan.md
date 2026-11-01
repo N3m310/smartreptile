@@ -392,29 +392,55 @@ Implemented 2026-10-30 for the `smoke` suite; the table is the contract the late
 
 | Aspect | Contract |
 |---|---|
-| Invocation | `powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1 [-Suite smoke\|hermetic\|fullstack\|all] [-Avd focus_study] [-StopDeviceAtEnd]` |
+| Invocation | `powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1 [-Suite smoke\|hermetic\|fullstack\|all] [-Avd focus_study] [-Headless] [-RestartDevice] [-StopDeviceAtEnd]` |
 | Default | `-Suite all` runs `smoke` then `hermetic` (~2 min each including the Gradle build); `-Suite fullstack` runs the two backend suites and needs Docker; `-Suite web` is refused with `2` until §15 is built |
+| Watching | the AVD boots **with a window** so the suite can be watched running on the handset (§8.1). `-Headless`, or `CI` set to any value, boots `-no-window` for an unattended job |
 | Web suites | `-Suite web` will run `npx playwright test` for both projects (§15); not wired yet |
 | Exit codes | `0` all selected suites passed · `1` a test failed · `2` a prerequisite failed (no Flutter, no SDK path, no AVD, a suite that is not built yet) |
 | Artifacts | `build/e2e/<suite>.json` (dart-test JSON reporter, **one event per line**, verdict in `{"type":"done","success":…}`) and `<suite>.log` always; `<suite>-fail.png` + `<suite>-logcat.txt` (last 2 000 lines) on failure, removed again before the next run of that suite |
-| Side effects | boots the AVD headless when none is running; for `fullstack`, `docker compose up -d --wait` **only when the stack is not already up**, and a teardown only of what it started; `flutter pub get` + `flutter gen-l10n`; `adb shell pm clear com.smartreptile.smart_reptile` before each suite; leaves the emulator up unless `-StopDeviceAtEnd` |
+| Side effects | boots the AVD when none is running (windowed, unless `-Headless` or `CI`); keeps that screen awake, unlocked and free of system dialogs (`svc power stayon`, `input keyevent KEYCODE_WAKEUP`, `wm dismiss-keyguard`, `hide_error_dialogs`), because a black or dialog-covered window passes for a hung run; for `fullstack`, `docker compose up -d --wait` **only when the stack is not already up**, and a teardown only of what it started; `flutter pub get` + `flutter gen-l10n`; `adb shell pm clear com.smartreptile.smart_reptile` before each suite; leaves the emulator up unless `-StopDeviceAtEnd` |
 | Idempotent | a second run produces the same verdict; stale failure evidence never survives a green run |
 | Suite selection | `-Suite smoke` · `hermetic` · `fullstack` · `all`; `fullstack` runs two files (`e2e_fullstack_test.dart`, `e2e_alerts_test.dart`), each with its own report |
-| Output | one summary row per file: name, exit code, seconds, report path |
+| Output | one summary row per file: name, exit code, seconds, report path; plus one `PASS`/`FAIL <seconds> <case>` line per case, replayed from that file's JSON report |
 
-Two traps the first implementation hit, both now encoded in the script:
+Three traps the first implementations hit, all now encoded in the script:
 
 1. **`$ErrorActionPreference = 'Stop'` aborts on a Gradle warning.** `flutter test` writes JVM warnings to stderr,
    and PowerShell 5.1 turns a native command's stderr into a terminating error under `Stop`. The script sets
    `Continue` and reads `$LASTEXITCODE` instead.
 2. **`"$Suite_test"` is not `"$Suite" + "_test"`.** `_` is a valid identifier character, so the interpolated name
    must be written `"integration_test/e2e_${name}_test.dart"`.
+3. **A headless run looks like a hung run.** The first version always booted `-no-window`: searchable evidence,
+   nothing to watch, and no way to tell "the emulator is driving the app" from "the harness died" (§8.1).
 
 The implementation lives in `scripts/e2e.ps1`; it is the thing to read, not a copy of it in prose. What it
 does, in order: preflight (flutter on PATH, `adb`/`emulator` resolved from `%LOCALAPPDATA%\Android\Sdk` when
-`PATH` lacks them, the requested suite must exist) → device (boot the AVD headless and wait for
-`sys.boot_completed`, or reuse a running one) → per suite (drop stale evidence, `pm clear`, `flutter test` with
-`--file-reporter json:`, capture screenshot + bounded logcat on failure) → summary table and an exit code.
+`PATH` lacks them, the requested suite must exist) → device (boot the AVD with a window, or headless under
+`-Headless`/`CI`; wait for `sys.boot_completed`, or reuse a running one and warn when that one is windowless;
+wake it and keep the screen on) → per suite (drop stale evidence, `pm clear`, `flutter test` with
+`--file-reporter json:`, replay the case verdicts, capture screenshot + bounded logcat on failure) → summary table
+and an exit code.
+
+### 8.1 Watching a run
+
+The web track watches itself: Playwright runs headed, so the browser shows the page being driven (§15). Mobile now
+has the same, in two pieces:
+
+| Piece | What it does |
+|---|---|
+| Emulator window | `scripts/e2e.ps1` boots the AVD **with a window** (`-gpu auto`) unless `-Headless` or `CI` is set, so the app the suite is driving is on screen. `-RestartDevice` re-boots an AVD that an earlier headless run left behind; reusing it silently would show nothing |
+| On-device banner | `app/lib/core/e2e_hud.dart` paints `E2E RUNNING · <suite>` + the case name + the step in flight + an elapsed clock above the app, and turns green/red when the case ends. Suites publish through `integration_test/helpers/hud.dart` (`e2eCase` replaces `testWidgets`) and `helpers/pump.dart`, which reports every `pumpUntilFound` / `pumpUntilGone` / `tapDestination` on its own |
+
+Two properties the banner has to keep, and both are why it is built the way it is:
+
+1. **Invisible outside a run.** Nothing publishes unless a suite calls `E2eHud.begin`, so `E2eHud.status` stays
+   `null`, the overlay returns its child untouched, and a keeper never sees a banner in the shipped app.
+2. **Invisible to the finders.** It paints with a `CustomPainter`, not `Text`. A `Text` overlay would answer
+   `find.text` / `find.textContaining` too, and the suites assert with both — `E2E-AI-09` would have found the
+   enclosure name in the banner instead of the list.
+
+The console carries the same information in a form that survives the run: one `PASS`/`FAIL <seconds> <case>` line
+per case, replayed from the JSON report after each file.
 
 ---
 

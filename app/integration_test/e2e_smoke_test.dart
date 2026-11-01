@@ -4,6 +4,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:smart_reptile/main.dart' as app;
 import 'package:smart_reptile/screens/login_screen.dart';
 
+import 'helpers/hud.dart';
 import 'helpers/pump.dart';
 
 /// Suite `smoke` (docs/04-quality/05-e2e-ai-testing-plan.md §3, §6): the app boots, a keeper can enter the
@@ -14,18 +15,20 @@ import 'helpers/pump.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('a guest reaches the shell and opens every destination', (
+  e2eCase('smoke', 'a guest reaches the shell and opens every destination', (
     tester,
   ) async {
     // Identifiers live in the semantics tree, which a test only builds on request. The handle must be disposed
     // inside the test body: the binding verifies that before `addTearDown` callbacks run.
     final semantics = tester.ensureSemantics();
     try {
+      hudStep('booting the app');
       await app.main();
 
       await pumpUntilFound(tester, find.bySemanticsIdentifier('login.guest'));
       expect(find.byType(LoginScreen), findsOneWidget);
 
+      hudStep('tapping "continue as guest"');
       await tester.tap(find.bySemanticsIdentifier('login.guest'));
       await pumpUntilGone(tester, find.byType(LoginScreen));
       await pumpUntilFound(tester, find.byType(NavigationBar));
@@ -40,6 +43,7 @@ void main() {
       );
 
       for (var index = 0; index < count; index++) {
+        hudStep('opening destination ${index + 1} of $count');
         await tester.tap(destinations.at(index));
         await tester.pump(const Duration(milliseconds: 600));
         expect(

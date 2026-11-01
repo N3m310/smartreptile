@@ -5,6 +5,7 @@ import 'package:smart_reptile/main.dart' as app;
 import 'package:smart_reptile/screens/dashboard_screen.dart';
 import 'package:smart_reptile/screens/login_screen.dart';
 
+import 'helpers/hud.dart';
 import 'helpers/live_api.dart';
 import 'helpers/pump.dart';
 import 'helpers/session.dart';
@@ -79,7 +80,8 @@ void main() {
 
   setUp(clearStoredState);
 
-  testWidgets(
+  e2eCase(
+    'alerts',
     'E2E-AI-14 an excursion ingested from the device reaches the app',
     (tester) async {
       final semantics = tester.ensureSemantics();
@@ -102,6 +104,7 @@ void main() {
         await pumpUntilFound(tester, find.byType(DashboardScreen));
 
         // Before the excursion: the alerts destination has nothing for this enclosure.
+        hudStep('opening Alerts before the excursion');
         await tapDestination(tester, Icons.warning_amber_rounded);
         await tester.pump(const Duration(seconds: 2));
         expect(
@@ -111,6 +114,7 @@ void main() {
         );
 
         // The excursion itself: four samples over three minutes, all above the 30 Â°C target maximum.
+        hudStep('ingesting an over-temperature batch through the device route');
         final status = await api.ingestHotBatch(
           deviceId: deviceId,
           secret: deviceSecret,
