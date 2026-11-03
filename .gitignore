@@ -57,3 +57,5 @@ node_modules/
 Thumbs.db
 __pycache__/
 .venv/
+web/playwright-report/
+web/test-results/
