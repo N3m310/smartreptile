@@ -8,6 +8,18 @@ Report section codes: `R1` Introduction · `R2` Case study & business analysis �
 `R8` Security · `R9` Performance & reliability · `R10` Deployment & release · `R11` Results, limitations,
 future work · `R12` Conclusion · `R13` References · `R14` Appendices.
 
+**Reading the `E2E-AI` ids.** Where a row cites `TC-E2E-0n`, that case is a scripted **manual** run against the real
+node. The part of it a machine can do — the app, against a stub and against the compose stack — is automated as
+`E2E-AI-*` (`02-test-cases.md` §E.1, `05-e2e-ai-testing-plan.md` §6) and runs unattended:
+
+| Manual case | Automated counterpart | What stays manual |
+|---|---|---|
+| `TC-E2E-01` cold-start happy path | `E2E-AI-01`, `E2E-AI-03`, `E2E-AI-09` | flashing, provisioning over USB, claim through the app |
+| `TC-E2E-03` induced excursion | `E2E-AI-14` | heating the sensor; real push delivery |
+| `TC-E2E-05` silent device | `E2E-AI-15` (written, not gated — needs at least 3 min of wall clock) | unplugging the node |
+| `TC-E2E-06` release-mode ops | none yet | the release APK on a real handset |
+| `TC-E2E-02` 24 h soak, `TC-E2E-04` sensor accuracy | — | the whole case |
+
 ---
 
 ## 1. Functional requirements
@@ -40,11 +52,11 @@ future work · `R12` Conclusion · `R13` References · `R14` Appendices.
 | NFR | Budget | Design / mechanism | Verification | Report § | Status |
 |---|---|---|---|---|---|
 | NFR-01 API performance | p95 ≤ 300 ms, payload ≤ 200 KB | Rollup-first bucketing, covering indexes (`03-implementation/03` §10) | TC-I-11, k6 50 RPS | R9 | ☐ |
-| NFR-02 Freshness/latency | ≤ 5 s to screen; ≤ 90 s to notify | SignalR push, post-commit broadcast, dwell timing | TC-E2E-03, TC-I-11 | R9 | ☐ |
-| NFR-03 Availability/offline | 0 loss ≤ 12 h outage | Device ring buffer (720), broker back-pressure, idempotent ingest | TC-I-08, TC-E2E-02, drill 5.1/5.2 | R9 | ☐ |
+| NFR-02 Freshness/latency | ≤ 5 s to screen; ≤ 90 s to notify | SignalR push, post-commit broadcast, dwell timing | TC-I-11, E2E-AI-14, TC-E2E-03 | R9 | ☐ |
+| NFR-03 Availability/offline | 0 loss ≤ 12 h outage | Device ring buffer (720), broker back-pressure, idempotent ingest | TC-I-08, E2E-AI-13, TC-E2E-02, drill 5.1/5.2 | R9 | ☐ |
 | NFR-04 Security | TLS everywhere, hashed secrets, scoped data | `02-design/06` §2–7, OWASP IoT review §7 | Security checklist §9, TC-I-13, secret scan | R8 | ☐ |
 | NFR-05 Measurement accuracy | ±0.5 °C / ±3 %RH / ±10% lux | SHT31+BH1750 (ADR-014), filter chain, offset calibration | TC-E2E-04, QA log §2 | R5, R11 | ☐ |
-| NFR-06 Usability/accessibility | ≤ 3 taps, ≥ 4.5:1, vi+en | `02-design/04` §6–8, `core/status.dart`, Semantics labels | TC-W-01…18, QA log §4 | R6, R11 | ☐ |
+| NFR-06 Usability/accessibility | ≤ 3 taps, ≥ 4.5:1, vi+en | `02-design/04` §6–8, `core/status.dart`, Semantics labels | TC-W-01…18, E2E-AI-07, QA log §4 | R6, R11 | ☐ |
 | NFR-07 Maintainability | ≥ 70% core coverage, clean analyzers | Layered architecture with enforced dependency rules, `Result` pattern | CI gates, coverage reports | R7 | ☐ |
 | NFR-08 Deployability | Compose up ≤ 5 min, pinned versions | `docker-compose.yml`, `platformio.ini`, `pubspec.lock` | M6 drill 6.2, clean-clone CI job | R10 | ☐ |
 | NFR-09 Cost | BOM ≤ 1.5 M VND | `07-appendices/04` §1 BOM with prices | BOM total, receipts recorded | R5, R11 | ☐ |

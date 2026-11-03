@@ -42,8 +42,12 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
 
   void _load() {
     final provider = context.read<TerrariumProvider>();
-    _terrariumFuture = provider.loadTerrarium(widget.terrariumId);
-    _latestFuture = provider.loadLatest(widget.terrariumId);
+    // `ignore()` on each future: the `FutureBuilder`s below subscribe on the next build, and a future that fails
+    // before that — or after the screen is popped — has no listener, so its error arrives as an unhandled async
+    // error. An enclosure with no board answers 409 `device_not_bound` on every readings route, which is exactly
+    // that case. The builders still render the failure; `ignore()` only stops the duplicate crash report.
+    _terrariumFuture = provider.loadTerrarium(widget.terrariumId)..ignore();
+    _latestFuture = provider.loadLatest(widget.terrariumId)..ignore();
     _loadHistory();
   }
 
@@ -55,12 +59,12 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
       metric: _metric,
       from: from,
       to: _to,
-    );
+    )..ignore();
     _coverageFuture = provider.loadCoverage(
       id: widget.terrariumId,
       from: from,
       to: _to,
-    );
+    )..ignore();
   }
 
   Future<void> _edit(ApiTerrarium current) async {

@@ -62,6 +62,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .take(2)
         .toList();
 
+    // An account with no enclosures has nothing to plot; inventing one is what this dashboard used to do.
+    if (current == null) {
+      return Scaffold(
+        backgroundColor: AppColors.bgMain,
+        body: RefreshIndicator(
+          color: AppColors.primary,
+          onRefresh: () => data.loadAll(),
+          child: const _NoTerrariumState(),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.bgMain,
       body: RefreshIndicator(
@@ -102,12 +114,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       children: [
                         Row(
                           children: [
-                            Text(
-                              current.name,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textMain,
+                            // Flexible so a long enclosure name ellipsises instead of pushing the status chip past
+                            // the card edge (the fullstack E2E caught this at 411 dp).
+                            Flexible(
+                              child: Text(
+                                current.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textMain,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -192,7 +210,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: _StatCard(
                     title: 'Terrarium',
                     value: '${data.terrariums.length}',
-                    subtext: '3 chuồng đang chạy',
+                    subtext:
+                        '${data.terrariums.where((t) => t.status != 'offline').length} chuồng đang chạy',
                     icon: Icons.grid_view,
                     iconColor: AppColors.primary,
                   ),
@@ -202,7 +221,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: _StatCard(
                     title: 'Thiết bị IoT',
                     value: '${data.onlineDevicesCount}/${data.devices.length}',
-                    subtext: '1 node offline',
+                    subtext: data.devices.isEmpty
+                        ? 'Chưa có thiết bị'
+                        : data.onlineDevicesCount == data.devices.length
+                        ? 'Tất cả trực tuyến'
+                        : '${data.devices.length - data.onlineDevicesCount} node offline',
                     icon: Icons.memory,
                     iconColor: AppColors.accent,
                   ),
@@ -225,8 +248,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Expanded(
                   child: _StatCard(
                     title: 'Hệ thống',
-                    value: 'Ổn định',
-                    subtext: 'MQTT: ~15ms',
+                    value: data.onlineDevicesCount > 0
+                        ? 'Ổn định'
+                        : 'Chờ thiết bị',
+                    subtext: data.onlineDevicesCount > 0
+                        ? 'MQTT đã kết nối'
+                        : 'Chưa có node trực tuyến',
                     icon: Icons.check_circle_outline,
                     iconColor: AppColors.primary,
                   ),
@@ -438,8 +465,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       final maxLightVal = history.isEmpty
                           ? 1000.0
                           : history
-                              .map((h) => h.light.toDouble())
-                              .reduce((a, b) => a > b ? a : b);
+                                .map((h) => h.light.toDouble())
+                                .reduce((a, b) => a > b ? a : b);
                       final lightScale = onlyLight
                           ? 1.0
                           : (maxLightVal > 1600.0 ? maxLightVal / 80.0 : 20.0);
@@ -456,8 +483,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       double? minY;
                       double? maxY;
                       if (plottedYs.isNotEmpty) {
-                        final rawMin = plottedYs.reduce((a, b) => a < b ? a : b);
-                        final rawMax = plottedYs.reduce((a, b) => a > b ? a : b);
+                        final rawMin = plottedYs.reduce(
+                          (a, b) => a < b ? a : b,
+                        );
+                        final rawMax = plottedYs.reduce(
+                          (a, b) => a > b ? a : b,
+                        );
                         if ((rawMax - rawMin).abs() < 4.0) {
                           final pad = (rawMax.abs() * 0.1).clamp(3.0, 5000.0);
                           minY = (rawMin - pad).clamp(0.0, double.infinity);
@@ -668,6 +699,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _NoTerrariumState extends StatelessWidget {
+  const _NoTerrariumState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(32),
+      children: const [
+        SizedBox(height: 120),
+        Icon(Icons.pets_outlined, size: 48, color: AppColors.textMuted),
+        SizedBox(height: 16),
+        Text(
+          'Chưa có bể nuôi',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textMain,
+          ),
+        ),
+        SizedBox(height: 8),
+        Text(
+          'Tạo bể nuôi, kết nối thiết bị cảm biến, dữ liệu sẽ hiển thị tại đây.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+        ),
+      ],
     );
   }
 }

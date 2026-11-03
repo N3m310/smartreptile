@@ -22,8 +22,12 @@ path get the most tests**, not the CRUD endpoints.
 | Backend unit | TC-U-01…50 | xUnit + FluentAssertions, `Clock.Fake`, fakes for all ports | Validators, calibration, `ThresholdDecision` matrix, band resolution, exposure maths, notification policy matrix | < 20 s total |
 | Backend integration | TC-I-01…15 | xUnit + Testcontainers (SQL Server) + in-process MQTT client + `WireMock.Net` | Ingest → persist → evaluate → notify, retention, exports, coverage, SignalR, auth | < 3 min total |
 | App widget/unit | TC-W-01…18 | `flutter_test` + `mocktail` | Providers, metric cards, staleness, claim flow, threshold validation, permission gating, navigation, a11y labels | < 60 s total |
-| End-to-end | TC-E2E-01…06 | Real ESP32 + Docker host + real phone/browser, scripted manual runs | The whole chain including hardware and push delivery | One 30 min session per milestone |
+| App end-to-end (automated) | E2E-AI-01…15 | `integration_test` on an emulator: `smoke` (no backend), `hermetic` (in-process `HttpServer` stub), `fullstack` (compose), `alerts` (telemetry through the device-facing ingest route) | What a person would do **in the app**: sign-in, refusal, registration, language, empty states, enclosure list/detail, history, sign-out, and an excursion appearing as an alert. Runs unattended: `scripts/e2e.ps1` | ~8 min for all four on one emulator |
+| End-to-end (hardware) | TC-E2E-01…06 | Real ESP32 + Docker host + real phone/browser, scripted manual runs | The whole chain including hardware and push delivery — the half no software test can reach | One 30 min session per milestone |
 | Exploratory / chaos | (unscripted) | Human | Kill broker/DB, unplug node, wrong clock, Wi-Fi change | M5 |
+
+The two E2E rows are one case set split by what each half can honestly assert: `docs/04-quality/05-e2e-ai-testing-plan.md`
+§1.1 draws the boundary case by case, and `02-test-cases.md` §E.1 records which ids are green.
 
 Coverage gates (NFR-07): **≥ 70% line coverage** on `SmartReptile.Domain` + `SmartReptile.Application`,
 `app/lib/core` + `app/lib/state`, and `firmware/lib`. Coverage on `Infrastructure` and screens is reported
@@ -93,6 +97,8 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 | Real push delivery to a device | Needs a real Google Play services device and is flaky in CI | The FCM channel is faked in `TC-I-12`; a real push is checked manually in `TC-E2E-03` |
 | Sensor accuracy | Physics, not software | Manual reference comparison in `TC-E2E-04` with recorded numbers |
 | 24 h soak | Time | Manual soak with an incident log (`TC-E2E-02`) |
+| A **real** ESP32 in the alert chain | The node is the only thing that can cause the excursion physically; the pipeline behind it is not the part being doubted | `E2E-AI-14` injects a batch through the device-facing ingest route (`POST /api/v1/ingest/http`), which runs the same `IngestPipeline` as MQTT; the hardware run of `TC-E2E-03` stays in the QA log |
+| The offline/silence presentation, timed | The watchdog needs `3 × interval` of wall clock (≥ 3 min) | `E2E-AI-15` is written but not gated; `TC-I-09` covers the decision itself |
 | Capacitive/wear behaviour of NVS writes | Requires a long-term hardware study | Documented as an assumption with the measured write rate |
 | Usability with a real keeper | No test participants guaranteed | Heuristic review against the UX rules + accessibility checks |
 | Load beyond 50 RPS | Out of scope for a single-host demo | Trend recorded, no claim made (NFR-01 note) |
@@ -124,6 +130,13 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 > planned. One caveat worth stating rather than letting a green check imply otherwise: the integration tests run
 > against a single SQL Server instance that is already up, so they say nothing about behaviour when the database is
 > unreachable mid-run — that is what the M5 drills are for.
+>
+> **Corrected 2026-10-30.** The E2E script set is no longer missing: a seventh job, `app-e2e`, runs the four
+> `integration_test` suites on an Android emulator against `docker compose`, nightly and by `workflow_dispatch`
+> (never on a push, where the `app` job already covers the UI). Locally it is one command —
+> `powershell -File scripts\e2e.ps1` — and it exits `0`/`1`/`2` with a JSON report per suite. Measured on the
+> development machine that day: `smoke` + `hermetic` + `fullstack` + `alerts` green, 13 cases, ~8 minutes for all
+> four including the Gradle build. What remains manual is unchanged and listed in §6.
 
 ## 8. Defect management
 
@@ -141,6 +154,7 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 |---|---|
 | `dotnet test` summary with pass counts | Report §Testing, appendix screenshots |
 | `flutter test` summary | Report §Testing |
+| `powershell -File scripts\e2e.ps1` summary + `build/e2e/*.json` | Report §Testing — the "runs without a person" evidence |
 | `pio test -e native` + `pio run -t size` output | Report §Firmware |
 | Coverage reports (backend + app core) | Report §Testing, with the gate values |
 | k6 latency results against NFR-01/02 | Report §Performance |

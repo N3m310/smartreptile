@@ -44,7 +44,7 @@ flowchart LR
 | Building the backend | `01-product/03-functional-requirements.md` → `02-design/01-architecture.md` → `02-design/03-telemetry-ingest-and-threshold-engine.md` → `03-implementation/03-backend-api-and-data-layer.md` |
 | Building the app / dashboard | `02-design/04-ui-ux-and-navigation.md` → `03-implementation/05-app-state-management-and-realtime.md` |
 | Writing the report | `06-report/01-report-outline.md` → `01-product/*` → `02-design/*` → `04-quality/04-requirements-traceability-matrix.md` |
-| Testing / QA | `04-quality/01-test-strategy-and-plan.md` → `04-quality/02-test-cases.md` → `04-quality/03-manual-qa-checklist.md` |
+| Testing / QA | `04-quality/01-test-strategy-and-plan.md` → `04-quality/02-test-cases.md` → `04-quality/03-manual-qa-checklist.md` → `04-quality/05-e2e-ai-testing-plan.md` |
 | Releasing / demoing | `05-release/01-build-and-release.md` → `05-release/02-performance-and-reliability.md` |
 | Reviewing scope or defending a decision | `01-product/01-vision-and-scope.md` → `07-appendices/01-adr-log.md` → `05-release/03-risks-assumptions-decisions.md` |
 
@@ -96,9 +96,10 @@ flowchart LR
 | File | Purpose |
 |---|---|
 | `04-quality/01-test-strategy-and-plan.md` | Test pyramid, tooling, coverage targets, FR → test-type mapping, test data strategy |
-| `04-quality/02-test-cases.md` | TC-U-FW-01…12, TC-U-01…50, TC-I-01…15, TC-W-01…18, TC-E2E-01…06 with reference skeletons (101 cases) |
+| `04-quality/02-test-cases.md` | TC-U-FW-01…12, TC-U-01…50, TC-I-01…15, TC-W-01…18, TC-E2E-01…06 with reference skeletons, plus the automated `E2E-AI-01…15` register (§E.1) — 131 cases |
 | `04-quality/03-manual-qa-checklist.md` | Hardware bring-up, soak test, device matrix, bug report template |
-| `04-quality/04-requirements-traceability-matrix.md` | FR/NFR → design doc → code module → test → report section |
+| `04-quality/04-requirements-traceability-matrix.md` | FR/NFR → design doc → code module → test → report section, and the manual-case → `E2E-AI` counterpart table |
+| `04-quality/05-e2e-ai-testing-plan.md` | How the software half of `TC-E2E-01…06` becomes AI-run — app and web: four mobile suites (`smoke`/`hermetic`/`fullstack`/`alerts`, implemented and green), `Semantics(identifier:)` locator inventory, Playwright `web-smoke`/`web-fullstack` (§15, not built), `scripts/e2e.ps1` contract, phases P0…P6, `integration_test` vs `tester-army/e2e` pilot decision (§14), what stays manual (2026-10-30) |
 
 ### 05 — Release
 | File | Purpose |

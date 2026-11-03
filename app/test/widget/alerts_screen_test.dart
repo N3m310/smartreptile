@@ -112,6 +112,19 @@ void main() {
       addTearDown(tester.view.reset);
 
       final appData = AppDataProvider();
+      appData.alerts.addAll([
+        AlertModel(
+          id: '1',
+          title: 'Cảnh báo nhiệt độ',
+          message: 'Nhiệt độ vượt ngưỡng.',
+          terrariumId: 't-1',
+          terrariumName: 'Chuồng nuôi: Hộp Rồng Úc',
+          type: 'temp_high',
+          severity: 'danger',
+          isResolved: false,
+          timestamp: '2026-10-24T10:00:00Z',
+        ),
+      ]);
       final ownerSession = await buildSession(role: 'Owner');
       await tester.pumpWidget(buildScreen(session: ownerSession, appData: appData));
       await tester.pumpAndSettle();
