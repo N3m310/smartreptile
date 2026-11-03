@@ -73,8 +73,14 @@ class TerrariumProvider extends ChangeNotifier {
     return ApiTerrarium.fromJson(payload);
   }
 
-  Future<Map<String, dynamic>> loadLatest(String id) =>
-      _api.getJson('/api/v1/terrariums/$id/readings/latest');
+  Future<Map<String, dynamic>> loadLatest(String id) async {
+    try {
+      return await _api.getJson('/api/v1/terrariums/$id/readings/latest');
+    } on AppFailure catch (failure) {
+      if (failure.code != 'device_not_bound') rethrow;
+      return <String, dynamic>{'metrics': const <dynamic>[]};
+    }
+  }
 
   Future<Map<String, dynamic>> loadReadings({
     required String id,
@@ -87,7 +93,14 @@ class TerrariumProvider extends ChangeNotifier {
       'from': from.toUtc().toIso8601String(),
       'to': to.toUtc().toIso8601String(),
     });
-    return _api.getJson('/api/v1/terrariums/$id/readings$query');
+    return _api.getJson('/api/v1/terrariums/$id/readings$query').catchError((
+      Object error,
+    ) {
+      if (error is AppFailure && error.code == 'device_not_bound') {
+        return <String, dynamic>{'points': const <dynamic>[]};
+      }
+      throw error;
+    });
   }
 
   Future<Map<String, dynamic>> loadCoverage({
@@ -99,7 +112,14 @@ class TerrariumProvider extends ChangeNotifier {
       'from': from.toUtc().toIso8601String(),
       'to': to.toUtc().toIso8601String(),
     });
-    return _api.getJson('/api/v1/terrariums/$id/coverage$query');
+    return _api.getJson('/api/v1/terrariums/$id/coverage$query').catchError((
+      Object error,
+    ) {
+      if (error is AppFailure && error.code == 'device_not_bound') {
+        return <String, dynamic>{'coveragePct': 0};
+      }
+      throw error;
+    });
   }
 
   /// Creates an enclosure. A species profile is optional (2026-10-25): the enclosure can be set up before the
