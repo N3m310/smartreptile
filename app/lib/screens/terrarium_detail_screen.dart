@@ -14,6 +14,7 @@ import '../state/device_provider.dart';
 import '../state/session_provider.dart';
 import '../state/terrarium_provider.dart';
 import '../theme/app_theme.dart';
+import 'camera_screen.dart';
 
 class TerrariumDetailScreen extends StatefulWidget {
   const TerrariumDetailScreen({super.key, required this.terrariumId});
@@ -359,6 +360,24 @@ class _TerrariumDetailScreenState extends State<TerrariumDetailScreen> {
                           : null,
                     ),
                   ),
+                // The camera is an optional second node (FR-17): the backend still has no camera binding, so the
+                // screen opens on whatever stream address the keeper saved instead of hiding the entry point.
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.videocam_outlined),
+                    title: const Text('Camera trực tiếp'),
+                    subtitle: const Text(
+                      'Xem bể nuôi theo thời gian thực từ camera MJPEG',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CameraScreen(terrariumId: widget.terrariumId),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           );

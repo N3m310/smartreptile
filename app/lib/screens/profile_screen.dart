@@ -6,6 +6,7 @@ import '../l10n/generated/app_localizations.dart';
 import '../l10n/labels.dart';
 import '../state/session_provider.dart';
 import '../theme/app_theme.dart';
+import 'camera_screen.dart';
 
 /// The account tab every role sees: who is signed in, the password change, and the way out. It is not behind a
 /// permission because signing out and changing one's own password must be reachable by the owner, the technician
@@ -128,6 +129,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.videocam_outlined),
+            title: const Text('Camera trực tiếp'),
+            subtitle: const Text('Xem bể nuôi, hoặc dùng chính máy này làm camera'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const CameraScreen()),
+            ),
           ),
         ),
         if (session.isSignedIn) ...[

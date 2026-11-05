@@ -61,4 +61,24 @@ class Env {
 
   /// Number of missed intervals after which a value is considered stale (FR-07 / BR-07.2).
   static const int staleAfterIntervals = 3;
+
+  /// Optional default camera endpoint for the live view (`--dart-define=CAMERA_URL=http://192.168.1.20:8080/video`).
+  ///
+  /// Empty by default: the demo camera is a phone or an ESP32-CAM on a LAN address nobody can guess, and a wrong
+  /// default would look like a broken feature rather than an unconfigured one.
+  static const String cameraStreamUrl = String.fromEnvironment('CAMERA_URL');
+
+  /// Optional TURN relay (`--dart-define=TURN_URL=turn:192.168.1.20:3478`).
+  ///
+  /// STUN only discovers a peer's public address; it cannot make two peers reachable when neither can dial the other.
+  /// An Android emulator is exactly that case — its only IPv4 candidate is the host's public address, so the other
+  /// side would have to hairpin off its own NAT — and so is any pair on different networks. A TURN server the API
+  /// already reaches gives ICE a candidate pair that always works.
+  static const String turnUrl = String.fromEnvironment('TURN_URL');
+
+  /// TURN long-term credential; supply it together with [turnUrl].
+  static const String turnUsername = String.fromEnvironment('TURN_USERNAME');
+
+  /// TURN password for [turnUsername].
+  static const String turnPassword = String.fromEnvironment('TURN_PASSWORD');
 }

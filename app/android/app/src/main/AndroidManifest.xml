@@ -2,6 +2,10 @@
     <!-- The app is an API client. The debug/profile manifests declare this too, for the Dart VM service, but a
          release build inherits only this manifest and would otherwise have no network at all. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- The phone can act as a terrarium's camera (WebRTC publisher). Declared but not required: an install on a
+         device without a camera is still a valid viewer, and Play would otherwise hide the app from those devices. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="smart_reptile"
         android:name="${applicationName}"

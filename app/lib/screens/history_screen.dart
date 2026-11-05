@@ -33,7 +33,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     // Post-frame on purpose: `loadTerrariums` sets `_loading` and notifies synchronously before its first
     // `await`, and calling it from `initState` marks the `TerrariumProvider` scope dirty while the shell is
     // still building this screen ("setState() or markNeedsBuild() called during build").
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _initialize();
+    });
   }
 
   Future<void> _initialize() async {
@@ -78,7 +80,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final session = context.watch<SessionProvider>();
-    final isAdmin = (session.user?.role.toLowerCase() == 'administrator') ||
+    final isAdmin =
+        (session.user?.role.toLowerCase() == 'administrator') ||
         (session.user?.role.toLowerCase() == 'admin') ||
         session.hasPermission(Permissions.dataReadAny) ||
         session.hasPermission(Permissions.userRead);

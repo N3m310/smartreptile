@@ -44,11 +44,12 @@ dependencies:
     sdk: flutter
   firebase_core: ^5.0.0
   firebase_messaging: ^17.0.0
+  flutter_webrtc: ^1.6.3
 
 dev_dependencies:
-  flutter_test:
-    sdk: flutter
   integration_test:
+    sdk: flutter
+  flutter_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
