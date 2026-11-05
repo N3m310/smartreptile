@@ -130,6 +130,26 @@ flutter build apk --release --split-per-abi
 wrong for an emulator — `10.0.2.2` is the host from inside the emulator — and a phone on the LAN needs the host's
 address. No secrets are compiled into the app.
 
+#### Live camera over WebRTC (optional)
+
+The camera screen's WebRTC mode is peer-to-peer: the API only relays offer/answer/ICE. STUN alone covers two peers
+that can already dial each other; when they cannot — the Android emulator is the standard example, because its only
+IPv4 candidate is the host's *public* address, so the phone would have to hairpin off its own NAT — ICE never
+completes: signalling succeeds, `onTrack` fires, and the picture stays black. Point both devices at a TURN server
+they can each reach:
+
+```bash
+flutter run -d android \
+  --dart-define=API_BASE=http://10.0.2.2:8080 \
+  --dart-define=TURN_URL=turn:192.168.1.20:3478 \
+  --dart-define=TURN_USERNAME=<user> \
+  --dart-define=TURN_PASSWORD=<password>
+```
+
+`lib/services/ice_servers.dart` merges that entry into one ICE configuration used by both the publishing phone and
+the viewer, so the two roles cannot drift apart. The credentials are development-only TURN credentials and are
+passed like any other `--dart-define`; a deployment issues short-lived ones rather than baking them in.
+
 #### Android push notifications (optional)
 
 Create a Firebase project, register the Android app with package name

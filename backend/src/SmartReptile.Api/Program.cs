@@ -16,6 +16,7 @@ using SmartReptile.Api.Middleware;
 using SmartReptile.Api.OpenApi;
 using SmartReptile.Api.Security;
 using SmartReptile.Application.Admin;
+using SmartReptile.Application.Camera;
 using SmartReptile.Application.Devices;
 using SmartReptile.Application.Identity;
 using SmartReptile.Application.Ingest;
@@ -46,6 +47,10 @@ builder.Services.AddSignalR();
 // The live push of FR-09: an Application port implemented here, because the hub it broadcasts through belongs to
 // this project. A singleton like the hub context it holds, and resolved by the ingest pipeline's fan-out.
 builder.Services.AddSingleton<ITelemetryBroadcaster, SignalRTelemetryBroadcaster>();
+
+// The live camera's signalling rooms (FR-17 used as a feed). One process-wide registry, because a room is a set of
+// sockets, not data: a second instance would split the same terrarium across two rooms.
+builder.Services.AddSingleton<CameraRoomRegistry>();
 
 builder.Services.AddSmartReptileInfrastructure(builder.Configuration);
 
@@ -139,7 +144,8 @@ builder.Services
                 var accessToken = context.Request.Query["access_token"];
 
                 if (!string.IsNullOrEmpty(accessToken) &&
-                    context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                    (context.HttpContext.Request.Path.StartsWithSegments("/hubs") ||
+                     context.HttpContext.Request.Path.StartsWithSegments("/ws")))
                 {
                     context.Token = accessToken;
                 }
@@ -431,6 +437,10 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// The camera signalling socket. WebSockets are not part of the default middleware set, and the upgrade has to be
+// accepted before the endpoint runs.
+app.UseWebSockets();
+
 var applicationVersion = app.Configuration["Version"]
     ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
     ?? "0.1.0";
@@ -448,6 +458,7 @@ app.MapUserEndpoints();
 app.MapRoleEndpoints();
 app.MapAdminEndpoints();
 app.MapIngestEndpoints();
+app.MapCameraEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
 
 app.MapGet("/", () => Results.Ok(new

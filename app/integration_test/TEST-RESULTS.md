@@ -1,9 +1,9 @@
 # Mobile integration-test report
 
-## Latest run — 2026-11-01
+## Latest run — 2026-11-03
 
 - **Status:** Passed; 13 of 13 E2E scenarios.
-- **Target:** Pixel 9a Android emulator (Android 17 / API 37, `emulator-5554`).
+- **Target:** Android 16 / API 36 emulator (`emulator-5554`).
 - **Command:** `flutter test integration_test --device-id emulator-5554 --reporter expanded`
 - **Backend:** Local .NET API at `http://localhost:8080`; the suite's `/health/ready` check passed.
 - **App build/install:** Passed.
