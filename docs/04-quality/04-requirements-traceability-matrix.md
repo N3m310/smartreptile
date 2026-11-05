@@ -9,8 +9,9 @@ Report section codes: `R1` Introduction · `R2` Case study & business analysis �
 future work · `R12` Conclusion · `R13` References · `R14` Appendices.
 
 **Reading the `E2E-AI` ids.** Where a row cites `TC-E2E-0n`, that case is a scripted **manual** run against the real
-node. The part of it a machine can do — the app, against a stub and against the compose stack — is automated as
-`E2E-AI-*` (`02-test-cases.md` §E.1, `05-e2e-ai-testing-plan.md` §6) and runs unattended:
+node. The part of it a machine can do — the app, against the real API — is automated by the single mobile suite
+`app/integration_test/app_e2e_test.dart` and registered as `E2E-AI-*` (`02-test-cases.md` §E.1,
+`05-e2e-ai-testing-plan.md`):
 
 | Manual case | Automated counterpart | What stays manual |
 |---|---|---|

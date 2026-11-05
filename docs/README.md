@@ -99,7 +99,7 @@ flowchart LR
 | `04-quality/02-test-cases.md` | TC-U-FW-01…12, TC-U-01…50, TC-I-01…15, TC-W-01…18, TC-E2E-01…06 with reference skeletons, plus the automated `E2E-AI-01…15` register (§E.1) — 131 cases |
 | `04-quality/03-manual-qa-checklist.md` | Hardware bring-up, soak test, device matrix, bug report template |
 | `04-quality/04-requirements-traceability-matrix.md` | FR/NFR → design doc → code module → test → report section, and the manual-case → `E2E-AI` counterpart table |
-| `04-quality/05-e2e-ai-testing-plan.md` | How the software half of `TC-E2E-01…06` becomes AI-run — app and web: four mobile suites (`smoke`/`hermetic`/`fullstack`/`alerts`, implemented and green), `Semantics(identifier:)` locator inventory, Playwright `web-smoke`/`web-fullstack` (§15, not built), `scripts/e2e.ps1` contract, phases P0…P6, `integration_test` vs `tester-army/e2e` pilot decision (§14), what stays manual (2026-10-30) |
+| `04-quality/05-e2e-ai-testing-plan.md` | The one mobile end-to-end suite (`app/integration_test/app_e2e_test.dart`): what it covers, what it deliberately leaves to widget tests and the manual checklist, how to run it on an emulator or a USB phone, and the determinism/locator rules that keep it trustworthy (2026-11-05) |
 
 ### 05 — Release
 | File | Purpose |

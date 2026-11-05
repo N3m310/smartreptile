@@ -491,32 +491,37 @@ testWidgets('MetricCard renders value, band, status and its own timestamp', (tes
 | TC-E2E-06 | Release-mode ops check | release APK on a real phone + dashboard + admin page | release build proof captured; `/health`/`/ready`/`/metrics` correct; audit log complete for the session; retention status visible | 2 |
 
 > **Every case in the table above needs a person at the bench.** The software half of `TC-E2E-01/03/05/06` is
-> automated separately — `integration_test` suites that drive the real app against a stubbed API and against the
-> compose stack — and is tracked as `E2E-AI-*` in `05-e2e-ai-testing-plan.md` §6. Those ids are the ones that count
-> for "runs without a person"; the table above stays the record of what still needs hardware.
+> automated separately — one `integration_test` suite that drives the real app against the real API — and is tracked
+> as `E2E-AI-*` in `05-e2e-ai-testing-plan.md` and §E.1. Those ids are the ones that count for "runs without a
+> person"; the table above stays the record of what still needs hardware.
 
 ### E.1 Automated end-to-end (`E2E-AI-*`, app)
 
-Run with `powershell -File scripts\e2e.ps1` (see `05-e2e-ai-testing-plan.md` §8). Reports land in
-`build/e2e/<suite>.json`; the nightly CI job `app-e2e` uploads them as the `e2e-reports` artifact.
+One suite: `app/integration_test/app_e2e_test.dart`, run with
+`flutter test integration_test/app_e2e_test.dart --device-id <device>`. It needs the real API and a device; the
+nightly CI job `app-e2e` uploads its JSON report as the `e2e-reports` artifact. See
+`05-e2e-ai-testing-plan.md` for the run procedure and the rules that keep it honest.
 
-| Id | Case | Suite | Covers | Status |
+Four suites (`smoke`, `hermetic`, `fullstack`, `alerts`) and their `scripts/e2e.ps1` wrapper were removed on
+2026-11-05 — the "Suite" column below records where each case is answered now.
+
+| Id | Case | Where it is answered | Covers | Status |
 |---|---|---|---|---|
-| E2E-AI-01 | The app boots, a guest enters the shell, every destination opens | smoke | `TC-E2E-01` (app half), `TC-W-01` | ✅ 2026-10-30 |
-| E2E-AI-02 | Guest mode enters the shell without a single API call | hermetic | `TC-W-01` | ✅ |
-| E2E-AI-03 | Successful sign-in reaches the dashboard | hermetic | `TC-W-01` | ✅ |
-| E2E-AI-04 | A refused credential shows the error and stays on the form | hermetic | `TC-W-02` | ✅ |
-| E2E-AI-05 | Registration issues a recovery code and returns to sign-in | hermetic | `TC-W-03` | ✅ |
-| E2E-AI-06 | An empty catalogue renders the shell, not an error | hermetic | `TC-W-05` | ✅ |
-| E2E-AI-07 | The language pill switches the whole form to English | hermetic | `NFR-06` | ✅ |
-| E2E-AI-08 | Signing out clears the keychain, not just the screen | hermetic | `FR-01` | ✅ |
-| E2E-AI-09 | A real sign-in shows the account its own enclosure | fullstack | `TC-E2E-01` (app half) | ✅ |
-| E2E-AI-10 | The enclosure detail opens on that enclosure | fullstack | `FR-03` | ✅ |
-| E2E-AI-11 | History opens for an enclosure with no readings | fullstack | `FR-09` | ✅ |
-| E2E-AI-12 | Signing out against the real backend lands on the sign-in form | fullstack | `FR-01` | ✅ |
-| E2E-AI-13 | API outage degrades, does not crash | fullstack | `NFR-03` | ☐ needs a container stop mid-run |
-| E2E-AI-14 | An excursion ingested from the device reaches the app | alerts | `TC-E2E-03` (app half), `FR-11`, `FR-12` | ✅ |
-| E2E-AI-15 | Silence is presented as silence | fullstack | `TC-E2E-05` (app half), `FR-07` | ☐ needs ≥ 3 min of wall clock |
+| E2E-AI-01 | The app boots and every destination opens | `app_e2e_test.dart` (signed in, not guest) | `TC-E2E-01` (app half), `TC-W-01` | ✅ |
+| E2E-AI-02 | Guest mode enters the shell without a single API call | widget test (`app_shell_test.dart`) | `TC-W-01` | moved |
+| E2E-AI-03 | Successful sign-in reaches the dashboard | `app_e2e_test.dart` | `TC-W-01` | ✅ |
+| E2E-AI-04 | A refused credential shows the error and stays on the form | `app_e2e_test.dart` | `TC-W-02` | ✅ |
+| E2E-AI-05 | Registration creates the account and returns to sign-in | `app_e2e_test.dart` | `TC-W-03` | ✅ |
+| E2E-AI-06 | An empty catalogue renders the shell, not an error | widget test | `TC-W-05` | moved |
+| E2E-AI-07 | The language pill switches the whole form to English | `app_e2e_test.dart` | `NFR-06` | ✅ |
+| E2E-AI-08 | Signing out clears the keychain, not just the screen | `app_e2e_test.dart` (sign-out) + unit test on `token_store` (keychain) | `FR-01` | split |
+| E2E-AI-09 | A real sign-in shows the account its own enclosure | `app_e2e_test.dart` | `TC-E2E-01` (app half) | ✅ |
+| E2E-AI-10 | The enclosure detail opens on that enclosure | `app_e2e_test.dart` | `FR-03` | ✅ |
+| E2E-AI-11 | History opens for an enclosure with no readings | `app_e2e_test.dart` | `FR-09` | ✅ |
+| E2E-AI-12 | Signing out against the real backend lands on the sign-in form | `app_e2e_test.dart` | `FR-01` | ✅ |
+| E2E-AI-13 | API outage degrades, does not crash | manual (`03-manual-qa-checklist.md`) | `NFR-03` | manual |
+| E2E-AI-14 | An excursion ingested from the device reaches the app | `app_e2e_test.dart` (alert filters only); the ingest half is manual | `TC-E2E-03` (app half), `FR-11`, `FR-12` | partial |
+| E2E-AI-15 | Silence is presented as silence | manual (`03-manual-qa-checklist.md`) — needs ≥ 3 min of wall clock | `TC-E2E-05` (app half), `FR-07` | manual |
 
 What the automated half deliberately does **not** claim: `TC-E2E-02` (24 h soak), `TC-E2E-04` (sensor accuracy),
 real FCM delivery, and the release-APK photograph — all still manual, and all still in §E above and in
@@ -533,5 +538,5 @@ real FCM delivery, and the release-APK photograph — all still manual, and all 
 | Backend integration | 19 | all green in CI |
 | Widget/provider | 18 | ≥ 70% line coverage on `core` + `state` |
 | E2E (manual, §E) | 6 | executed per milestone, results recorded |
-| E2E-AI (automated, §E.1) | 15 | 13 green as of 2026-10-30; 2 outstanding (`E2E-AI-13/15`) |
+| E2E-AI (automated, §E.1) | 15 | 11 answered by `app_e2e_test.dart`, 2 moved to widget tests, 2 manual |
 | **Total** | **131** | |

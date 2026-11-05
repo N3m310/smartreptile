@@ -22,12 +22,12 @@ path get the most tests**, not the CRUD endpoints.
 | Backend unit | TC-U-01…50 | xUnit + FluentAssertions, `Clock.Fake`, fakes for all ports | Validators, calibration, `ThresholdDecision` matrix, band resolution, exposure maths, notification policy matrix | < 20 s total |
 | Backend integration | TC-I-01…15 | xUnit + Testcontainers (SQL Server) + in-process MQTT client + `WireMock.Net` | Ingest → persist → evaluate → notify, retention, exports, coverage, SignalR, auth | < 3 min total |
 | App widget/unit | TC-W-01…18 | `flutter_test` + `mocktail` | Providers, metric cards, staleness, claim flow, threshold validation, permission gating, navigation, a11y labels | < 60 s total |
-| App end-to-end (automated) | E2E-AI-01…15 | `integration_test` on an emulator: `smoke` (no backend), `hermetic` (in-process `HttpServer` stub), `fullstack` (compose), `alerts` (telemetry through the device-facing ingest route) | What a person would do **in the app**: sign-in, refusal, registration, language, empty states, enclosure list/detail, history, sign-out, and an excursion appearing as an alert. Runs unattended: `scripts/e2e.ps1` | ~8 min for all four on one emulator |
+| App end-to-end (automated) | E2E-AI-01…15 | `integration_test` on an emulator or a USB phone, against the real API: `app/integration_test/app_e2e_test.dart` | What a person would do **in the app**: sign-in, refusal, registration, language, enclosure list/detail, history, alerts, species, password validation, sign-out. Runs unattended: one `flutter test` on a device | ~2 min on one emulator |
 | End-to-end (hardware) | TC-E2E-01…06 | Real ESP32 + Docker host + real phone/browser, scripted manual runs | The whole chain including hardware and push delivery — the half no software test can reach | One 30 min session per milestone |
 | Exploratory / chaos | (unscripted) | Human | Kill broker/DB, unplug node, wrong clock, Wi-Fi change | M5 |
 
 The two E2E rows are one case set split by what each half can honestly assert: `docs/04-quality/05-e2e-ai-testing-plan.md`
-§1.1 draws the boundary case by case, and `02-test-cases.md` §E.1 records which ids are green.
+§1.1 draws the boundary case by case, and `02-test-cases.md` §E.1 records where each id is answered.
 
 Coverage gates (NFR-07): **≥ 70% line coverage** on `SmartReptile.Domain` + `SmartReptile.Application`,
 `app/lib/core` + `app/lib/state`, and `firmware/lib`. Coverage on `Infrastructure` and screens is reported
@@ -131,12 +131,12 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 > against a single SQL Server instance that is already up, so they say nothing about behaviour when the database is
 > unreachable mid-run — that is what the M5 drills are for.
 >
-> **Corrected 2026-10-30.** The E2E script set is no longer missing: a seventh job, `app-e2e`, runs the four
-> `integration_test` suites on an Android emulator against `docker compose`, nightly and by `workflow_dispatch`
-> (never on a push, where the `app` job already covers the UI). Locally it is one command —
-> `powershell -File scripts\e2e.ps1` — and it exits `0`/`1`/`2` with a JSON report per suite. Measured on the
-> development machine that day: `smoke` + `hermetic` + `fullstack` + `alerts` green, 13 cases, ~8 minutes for all
-> four including the Gradle build. What remains manual is unchanged and listed in §6.
+> **Corrected 2026-10-30, revised 2026-11-05.** A seventh job, `app-e2e`, runs the mobile end-to-end suite on an
+> Android emulator against `docker compose`, nightly and by `workflow_dispatch` (never on a push, where the `app` job
+> already covers the UI). It is one suite — `app/integration_test/app_e2e_test.dart` — run with a single
+> `flutter test` on a device; the earlier four-suite harness (`smoke`/`hermetic`/`fullstack`/`alerts`) and its
+> `scripts/e2e.ps1` wrapper were removed on 2026-11-05 as more machinery than the coverage justified. What remains
+> manual is unchanged and listed in §6.
 
 ## 8. Defect management
 
@@ -154,7 +154,7 @@ the test comment (`// target 26–32, 34.0 for 40 min → 1.33 °C·h hot`).
 |---|---|
 | `dotnet test` summary with pass counts | Report §Testing, appendix screenshots |
 | `flutter test` summary | Report §Testing |
-| `powershell -File scripts\e2e.ps1` summary + `build/e2e/*.json` | Report §Testing — the "runs without a person" evidence |
+| `flutter test integration_test/app_e2e_test.dart` summary + its JSON report | Report §Testing — the "runs without a person" evidence |
 | `pio test -e native` + `pio run -t size` output | Report §Firmware |
 | Coverage reports (backend + app core) | Report §Testing, with the gate values |
 | k6 latency results against NFR-01/02 | Report §Performance |

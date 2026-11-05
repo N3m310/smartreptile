@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'core/e2e_hud.dart';
 import 'core/env.dart';
 import 'core/permissions.dart';
 import 'l10n/generated/app_localizations.dart';
@@ -59,10 +58,6 @@ class SmartReptileApp extends StatelessWidget {
       home: session.isSignedIn || session.isGuestMode
           ? const _RootShell()
           : const LoginScreen(),
-      // Draws the E2E banner only while a suite in `app/integration_test/` is publishing to it, so a keeper
-      // never sees it.
-      builder: (context, child) =>
-          E2eHudOverlay(child: child ?? const SizedBox.shrink()),
     );
   }
 }
