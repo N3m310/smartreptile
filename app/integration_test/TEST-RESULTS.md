@@ -1,34 +1,25 @@
-# Mobile integration-test report
+# Flutter mobile E2E test results
 
-## Latest run — 2026-11-03
+- Run at (UTC): 2026-11-06T17:47:03.471077Z
+- Overall status: **passed**
+- Runtime: Dart 3.13.3 (windows)
+- Tests: 13 total; 13 passed; 0 failed; 0 skipped
 
-- **Status:** Passed; 13 of 13 E2E scenarios.
-- **Target:** Android 16 / API 36 emulator (`emulator-5554`).
-- **Command:** `flutter test integration_test --device-id emulator-5554 --reporter expanded`
-- **Backend:** Local .NET API at `http://localhost:8080`; the suite's `/health/ready` check passed.
-- **App build/install:** Passed.
-- **Dart analysis:** `flutter analyze integration_test/app_e2e_test.dart` passed.
-- **FCM:** Disabled for this build; unrelated to the tested scenarios.
+| Result | Test | Duration | Details |
+|---|---|---:|---|
+| passed | SmartReptile mobile E2E rejects invalid credentials without leaving sign-in | 3.32s |  |
+| passed | SmartReptile mobile E2E changes the sign-in language and restores Vietnamese | 0.76s |  |
+| passed | SmartReptile mobile E2E registers an Owner, signs in and signs out | 5.04s |  |
+| passed | SmartReptile mobile E2E Owner can navigate to each primary mobile surface | 8.05s |  |
+| passed | SmartReptile mobile E2E requires a terrarium name before creating | 1.85s |  |
+| passed | SmartReptile mobile E2E creates a terrarium and shows its detail and empty history | 3.56s |  |
+| passed | SmartReptile mobile E2E edits a terrarium name from its detail screen | 4.31s |  |
+| passed | SmartReptile mobile E2E cancels terrarium deletion without removing the terrarium | 3.88s |  |
+| passed | SmartReptile mobile E2E deletes a terrarium after confirmation | 3.89s |  |
+| passed | SmartReptile mobile E2E changes history metric and time range | 4.25s |  |
+| passed | SmartReptile mobile E2E filters alerts by pending and resolved state | 2.17s |  |
+| passed | SmartReptile mobile E2E searches the species catalogue and opens profile details | 2.37s |  |
+| passed | SmartReptile mobile E2E validates mismatched password confirmation in profile | 1.95s |  |
 
-## Covered scenarios
+Generated automatically from the `--file-reporter json` output by [`tool/e2e_report.dart`](../tool/e2e_report.dart). See [README](./README.md) for setup and run instructions.
 
-| ID | Scenario | Assertions |
-|---|---|---|
-| MOB-E2E-01 | Invalid login | Invalid credentials show an error and keep the user on sign-in. |
-| MOB-E2E-02 | Language selection | Switches sign-in to English and restores Vietnamese. |
-| MOB-E2E-03 | Registration and session | Registers an Owner through the UI, signs in, and signs out. |
-| MOB-E2E-04 | Primary navigation | Owner can navigate to each primary mobile surface. |
-| MOB-E2E-05 | Terrarium validation | A terrarium cannot be created without a name. |
-| MOB-E2E-06 | Create and view terrarium | Creates a terrarium and opens its detail and empty-history states. |
-| MOB-E2E-07 | Edit terrarium | Updates a terrarium name from its detail screen. |
-| MOB-E2E-08 | Cancel deletion | Cancels confirmation and verifies the terrarium remains. |
-| MOB-E2E-09 | Confirm deletion | Confirms deletion and verifies the terrarium is removed. |
-| MOB-E2E-10 | History controls | Changes the history metric and time range. |
-| MOB-E2E-11 | Alert filters | Selects pending, resolved, and all alert states. |
-| MOB-E2E-12 | Species catalogue | Searches the catalogue and opens a species profile. |
-| MOB-E2E-13 | Password validation | Mismatched password confirmation is rejected in profile. |
-
-## Cleanup and data safety
-
-The suite creates a unique Owner fixture and unique terrarium names for the run. Teardown deletes only a
-terrarium whose name exactly matches the current run. Test accounts use the `mobile_e2e_` prefix.

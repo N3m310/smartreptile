@@ -8,16 +8,19 @@ A new Flutter project.
 flutter test                      # widget + unit (no device)
 flutter gen-l10n                  # the ARB deck is generated, not committed
 
-# E2E: needs the local API and an Android emulator or device
+# E2E: needs the local API and an Android emulator or device; also writes both reports
 dotnet run --project ../backend/src/SmartReptile.Api
-flutter test integration_test/app_e2e_test.dart --device-id emulator-5554 --reporter expanded
+.\tool\run_e2e.cmd                # builds both reports, then opens the dashboard
 ```
+
+A double-clickable `e2e.bat` at the repository root does the same from any directory.
 
 `integration_test/app_e2e_test.dart` is the only end-to-end suite: it drives the real app against the real API
 (login, registration, navigation, terrarium CRUD, history, alerts, species, password validation) and tears its own
 fixtures down. Its requirements — backend, emulator, `--dart-define=API_BASE=…` — are in
 [integration_test/README.md](integration_test/README.md), and the last run is recorded in
-[integration_test/TEST-RESULTS.md](integration_test/TEST-RESULTS.md).
+[integration_test/TEST-RESULTS.md](integration_test/TEST-RESULTS.md), which the suite regenerates on every run from
+`--file-reporter json` (see that README's **Report** section).
 
 `flutter test` must not pick it up: `integration_test` needs a device, so the suite is run by name rather than by
 directory.

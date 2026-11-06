@@ -282,6 +282,19 @@ jobs:
               --dart-define=API_BASE=http://10.0.2.2:8080 \
               --file-reporter json:../build/e2e/app.json
 
+      # `flutter test` has no `show-report`; the JSON reporter is its only machine-readable output, so the Markdown
+      # the web suite gets from its Playwright reporter is generated here from that JSON — and published as the run
+      # summary, which is where a person actually reads it. Runs on failure too: that is when the table matters.
+      - name: E2E report
+        if: always()
+        run: |
+          if [ -f ../build/e2e/app.json ]; then
+            dart run tool/e2e_report.dart ../build/e2e/app.json --out ../build/e2e/TEST-RESULTS.md --html ../build/e2e/report.html
+            cat ../build/e2e/TEST-RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No `--file-reporter json` output: the suite did not start.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # The reports are the verdict a person reads (docs/04-quality/05 §11): keep them even when the job passes.
       - name: Upload E2E reports
         if: always()

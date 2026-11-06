@@ -10,8 +10,10 @@ this layer in the overall plan; `02-test-cases.md` §E holds the cases it answer
 It drives the real app (`app.main()`) against the real API — no stub, no fixture server — on an Android emulator or a
 USB-connected phone. The 13 scenarios cover invalid login, language selection, registration and session handling,
 primary navigation, terrarium validation and CRUD, history controls, alert filters, species search and details, and
-password validation. Scenario ids and the last result are in
-[`app/integration_test/TEST-RESULTS.md`](../../app/integration_test/TEST-RESULTS.md).
+password validation. Scenario ids are in
+[`app/integration_test/README.md`](../../app/integration_test/README.md); the last run is
+[`app/integration_test/TEST-RESULTS.md`](../../app/integration_test/TEST-RESULTS.md), which the suite writes itself
+(§2.1).
 
 ### 1.1 What this layer does not cover
 
@@ -30,13 +32,30 @@ password validation. Scenario ids and the last result are in
 dotnet run --project backend/src/SmartReptile.Api
 curl.exe http://localhost:8080/health/ready
 
-# 2. The suite, from app/
-flutter test integration_test/app_e2e_test.dart --device-id emulator-5554 --reporter expanded
+# 2. The suite, from the repository root — runs it and writes both reports
+e2e.bat            # opens the dashboard when it finishes; -NoOpen to skip
 ```
 
 `API_BASE` defaults to `http://10.0.2.2:8080`, which is the host as seen from an emulator. A phone on USB needs
 `adb reverse tcp:8080 tcp:8080` and `--dart-define=API_BASE=http://127.0.0.1:8080`; the whole procedure, TURN
 included, is in [`app/README.md`](../../app/README.md).
+
+### 2.1 The report
+
+`flutter test` has no `show-report`: the JSON reporter (`--reporter json`, `--file-reporter json:<file>`) is its only
+machine-readable output, and `--reporter github` only turns failures into annotations. The Markdown report the web
+suite gets from its Playwright reporter is therefore generated from that JSON —
+[`app/tool/e2e_report.dart`](../../app/tool/e2e_report.dart) — in the same shape as `web/e2e/TEST-RESULTS.md`: one
+row per scenario with status and duration, written even when the suite fails.
+
+`e2e.bat` (root) and `app\tool\run_e2e.cmd` both do it, and both pass `-ExecutionPolicy Bypass` — Windows
+blocks a bare `.ps1` under the default policy, which is why the implementation
+[`app/tool/run_e2e.ps1`](../../app/tool/run_e2e.ps1) is reached through them. Besides the Markdown they write
+`build/e2e/report.html` — the dashboard, and the closest thing Flutter has to `playwright show-report`: status,
+counts, wall time, per-scenario durations and All/Passed/Failed/Skipped filters, in one self-contained file that opens
+offline (it opens by itself when the run ends; `-NoOpen` skips that). In CI the same conversion runs after the emulator
+step, appends the table to the job summary and leaves both files in the `e2e-reports` artifact. An `xunit-viewer` page
+would need JSON → JUnit → HTML; nothing in the repository needs that.
 
 The run is gated in CI on a nightly schedule and on demand (`.github/workflows/ci.yml`, job `app-e2e`): it needs an
 emulator and the compose stack, so it does not run on every push. `flutter analyze` and `flutter test` gate pushes.

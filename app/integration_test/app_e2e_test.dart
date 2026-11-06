@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
+import 'package:smart_reptile/data/token_store.dart';
 import 'package:smart_reptile/main.dart' as app;
 import 'package:smart_reptile/screens/login_screen.dart';
 import 'package:smart_reptile/screens/species_screen.dart';
@@ -24,6 +25,11 @@ void main() {
     late _DisposableOwner owner;
 
     setUpAll(() async {
+      // The app restores a stored session before the first frame, so a device left signed in by a manual run
+      // (or by a previous suite that failed midway) opens on the dashboard and every LoginScreen finder below
+      // indexes nothing. E2E starts from the same place a fresh install does.
+      await TokenStore.secure().write(null);
+
       try {
         final response = await http
             .get(Uri.parse('$_apiBase/health/ready'))
@@ -132,15 +138,15 @@ void main() {
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Tổng quan'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.pets_outlined));
+      await tester.tap(_navDestination(Icons.pets_outlined));
       await _waitFor(tester, find.text('New terrarium'));
-      await tester.tap(find.byIcon(Icons.biotech_outlined));
+      await tester.tap(_navDestination(Icons.biotech_outlined));
       await _waitFor(tester, find.byType(SpeciesScreen));
-      await tester.tap(find.byIcon(Icons.warning_amber_rounded));
+      await tester.tap(_navDestination(Icons.warning_amber_rounded));
       await _waitFor(tester, find.textContaining('Chưa xử lý'));
-      await tester.tap(find.byIcon(Icons.show_chart_outlined));
+      await tester.tap(_navDestination(Icons.show_chart_outlined));
       await _waitFor(tester, find.text('History'));
-      await tester.tap(find.byIcon(Icons.person_outline));
+      await tester.tap(_navDestination(Icons.person_outline));
       await _waitFor(tester, find.text(owner.username));
     });
 
@@ -234,7 +240,7 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
       await _waitFor(tester, find.text('New terrarium'));
-      await tester.tap(find.byIcon(Icons.show_chart_outlined));
+      await tester.tap(_navDestination(Icons.show_chart_outlined));
       await tester.pumpAndSettle();
       await _waitFor(tester, find.text('History'));
       expect(find.byType(BackButton), findsNothing);
@@ -291,7 +297,7 @@ void main() {
       tester,
     ) async {
       await _startOwnerApp(tester, owner);
-      await tester.tap(find.byIcon(Icons.biotech_outlined));
+      await tester.tap(_navDestination(Icons.biotech_outlined));
       await _waitFor(tester, find.byType(SpeciesScreen));
       await _waitFor(tester, find.byType(Card));
       final search = find.byType(TextField).first;
@@ -313,7 +319,7 @@ void main() {
       tester,
     ) async {
       await _startOwnerApp(tester, owner);
-      await tester.tap(find.byIcon(Icons.person_outline));
+      await tester.tap(_navDestination(Icons.person_outline));
       await _waitFor(tester, find.text(owner.username));
       final currentPassword = find.byType(TextFormField).at(0);
       final newPassword = find.byType(TextFormField).at(1);
@@ -352,7 +358,7 @@ String _newTerrariumName() =>
     'Mobile E2E ${DateTime.now().microsecondsSinceEpoch}';
 
 Future<void> _openTerrariumCreation(WidgetTester tester) async {
-  await tester.tap(find.byIcon(Icons.pets_outlined));
+  await tester.tap(_navDestination(Icons.pets_outlined));
   await _waitFor(tester, find.text('New terrarium'));
   await tester.tap(find.text('New terrarium'));
   await _waitForEnabled(tester, find.widgetWithText(ElevatedButton, 'Create'));
@@ -410,6 +416,13 @@ Future<void> _useEnglish(WidgetTester tester) async {
   }
 }
 
+/// A destination in the shell's bottom bar.
+///
+/// The bare icon is not unique: an empty list draws the same glyph at 48 px, so `find.byIcon` starts tapping
+/// ambiguously the moment the signed-in owner has no terrariums yet.
+Finder _navDestination(IconData icon) =>
+    find.descendant(of: find.byType(NavigationBar), matching: find.byIcon(icon));
+
 Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder);
   await tester.tap(finder);
@@ -417,7 +430,7 @@ Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
 }
 
 Future<void> _signOut(WidgetTester tester) async {
-  await tester.tap(find.byIcon(Icons.person_outline));
+  await tester.tap(_navDestination(Icons.person_outline));
   await tester.pumpAndSettle();
   await _tapVisible(tester, find.text('Sign out'));
   await _waitFor(tester, find.byType(LoginScreen));

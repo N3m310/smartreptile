@@ -2,6 +2,11 @@
 # difference between a Windows checkout and a Linux runner.
 * text=auto eol=lf
 
+# cmd.exe reads a batch file line by line and mis-parses a parenthesised block (`if ... (` / `for ... do (`) that
+# arrives without CRLF — the launchers exit 9009 with a mangled command instead of running. Keep them CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 *.png binary
 *.jpg binary
 *.pdf binary
