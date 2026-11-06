@@ -92,6 +92,14 @@ prototype instead — fake data with the real rule kernel, the Rule Lab and the 
 (`app/PROTOTYPE.md`); the two are one binary with a compile-time switch, and the release build passes neither
 define, so the artifact a keeper installs is the app.
 
+For a phone on the cable and the emulator together, `setup-mobile.ps1` (driven by `run-mobile.bat`) resolves the SDK
+from `app/android/local.properties`, starts the AVD with `-StartEmulator`, applies `adb reverse tcp:8080` to every
+attached device — so the phone and the emulator both reach the API on `http://127.0.0.1:8080` — and prints the
+`flutter run` commands. `-Run phone`, `-Run emulator` start one device with hot reload; `-Run both` builds a single
+APK and installs it everywhere (no hot reload). `-Backend` starts the compose database and `dotnet run` first.
+`run-camera-demo.bat` is the one-click camera demo: it asks whether to start the backend and for a TURN server, then
+runs `-StartEmulator -Run both` and prints the on-device steps.
+
 ### 5. Web (`web/` — one surface since 2026-10-07: the VIVARIUMGUARD client, see `ADR-019`)
 
 Compose serves the committed build from one nginx (`web/nginx.conf`): `http://127.0.0.1:8081/` is the wired

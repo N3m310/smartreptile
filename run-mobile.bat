@@ -1,20 +1,18 @@
 @echo off
-title TERRAGUARD Mobile (Flutter)
-echo =======================================================
-echo   TERRAGUARD / SmartReptile - Khoi dong Mobile Flutter
-echo =======================================================
+setlocal
+cd /d "%~dp0"
+echo ============================================================
+echo   SmartReptile - Mobile setup (dien thoai USB + emulator)
+echo ============================================================
 echo.
-echo [1/3] Dang khoi dong Android Emulator (Pixel 8)...
-start "Android Emulator" "D:\Android\Sdk\emulator\emulator.exe" -avd SmartReptile_Pixel8
-
+echo   Chay khong tham so  : xem thiet bi + adb reverse
+echo   -StartEmulator      : bat emulator (mac dinh focus_study)
+echo   -Run phone          : chay app tren dien thoai (hot reload)
+echo   -Run emulator       : chay app tren emulator (hot reload)
+echo   -Run both           : build 1 lan, cai len ca hai may
+echo   -Backend            : tu bat docker db + dotnet run
 echo.
-echo [2/3] Dang cho may ao khoi dong xong (adb wait-for-device)...
-adb wait-for-device
-echo May ao da san sang!
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup-mobile.ps1" %*
 echo.
-
-echo [3/3] Dang khoi chay ung dung Flutter len may ao...
-cd app
-flutter run -d emulator-5554
-
 pause
+exit /b 0

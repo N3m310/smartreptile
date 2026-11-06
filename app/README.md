@@ -47,6 +47,7 @@ Points that decide whether it works:
 |---|---|
 | Phone and PC on the same Wi-Fi | ICE uses host candidates; STUN `stun.l.google.com:19302` is configured for anything less direct. Two peers that cannot dial each other — an emulator, whose only IPv4 candidate is the host's public address, or two different networks — need a relay: `--dart-define=TURN_URL=turn:<host>:3478 --dart-define=TURN_USERNAME=… --dart-define=TURN_PASSWORD=…`, shared by both roles through `lib/services/ice_servers.dart` |
 | Camera permission | Declared in `android/app/src/main/AndroidManifest.xml` as optional; Android asks on first publish |
+| Screen stays awake | The publisher holds a wakelock (`wakelock_plus`) while it streams. Without it Android freezes the backgrounded app ~30 s in, the signalling socket closes, and every viewer keeps the last frame it decoded — the "camera runs a moment then stops" report |
 | Cleartext HTTP | Debug builds allow `http://` to any address (`android/app/src/debug/res/xml/network_security_config.xml`); the release config still permits only `10.0.2.2`, `localhost`, `127.0.0.1`. WebRTC itself is not affected |
 | A default MJPEG address | Optional: `--dart-define=CAMERA_URL=http://192.168.1.20:8080/video` |
 
@@ -54,6 +55,10 @@ Points that decide whether it works:
 
 A phone on the cable still needs a data path: `adb reverse` forwards a device port to the host, so the app can talk to
 the API on `127.0.0.1` without knowing the PC's address, and the phone keeps its Wi-Fi for the WebRTC media path.
+
+All five steps are automated by [`../setup-mobile.ps1`](../setup-mobile.ps1) — `.\setup-mobile.ps1 -StartEmulator
+-Run phone` for the publishing phone, `-Run emulator` (or `-Run both`) for the viewer. The steps below are what it
+does, and stay the reference when it fails.
 
 1. **Confirm adb sees the phone** — it must say `device`, not `unauthorized` or `offline`:
 
@@ -98,6 +103,7 @@ the API on `127.0.0.1` without knowing the PC's address, and the phone keeps its
 | `Đã kết nối nhưng camera không gửi được hình ảnh` | The peer connected but never produced a frame — typically the publisher screen was left or the camera was taken by another app |
 | Banner `RIGHT OVERFLOWED BY … PIXELS` | Pre-existing layout overflow on the dashboard, unrelated to the camera |
 | Phone disappears from `adb devices` mid-run | The cable/USB mode dropped; reconnect, then redo step 2. A debug `flutter run` session ends with *Lost connection to device* |
+| Picture plays ~30 s then freezes, no error text | The publishing phone slept (or the cable came out), its signalling socket closed, and the viewer keeps the last decoded frame — `onConnectionChange CLOSED` in `adb logcat --pid=$(pidof com.smartreptile.smart_reptile)`. The publisher now holds a wakelock while streaming; a crop of this on the emulator is `c2.goldfish.h264.decoder` being torn down and rebuilt |
 
 This is the demo's *live view*; FR-17 itself specifies a manual snapshot only, and the backend has no camera binding,
 so the URL preference is stored per app rather than per terrarium.

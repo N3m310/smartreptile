@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../data/api_client.dart';
 import '../services/camera_signaling.dart';
@@ -85,6 +86,7 @@ class _CameraPublisherScreenState extends State<CameraPublisherScreen> {
       });
       _localStream = stream;
       _localRenderer.srcObject = stream;
+      await _keepScreenOn(true);
 
       final signaling = CameraSignaling(
         baseUrl: api.baseUrl,
@@ -110,7 +112,25 @@ class _CameraPublisherScreenState extends State<CameraPublisherScreen> {
     }
   }
 
+  /// Keeps the screen awake while this phone is the camera.
+  ///
+  /// Android freezes a backgrounded app, which closes the signalling socket and leaves every viewer staring at the
+  /// last frame it managed to decode — the 35-second "camera just stopped" failure. A phone standing in for a
+  /// terrarium camera must therefore hold the screen on for as long as it publishes.
+  Future<void> _keepScreenOn(bool on) async {
+    try {
+      if (on) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+    } on Object {
+      // No wakelock on this platform (a widget test, desktop): publishing still works while the app is frontmost.
+    }
+  }
+
   Future<void> _stop() async {
+    await _keepScreenOn(false);
     await _subscription?.cancel();
     _subscription = null;
     await _signaling?.close();
@@ -176,6 +196,9 @@ class _CameraPublisherScreenState extends State<CameraPublisherScreen> {
         if (!mounted) return;
         setState(() => _status = 'Máy chủ từ chối: ${message['code']}');
         await _stop();
+      case 'socket-closed':
+        if (!mounted) return;
+        setState(() => _status = 'Mất kênh tín hiệu: máy xem không thấy hình cho tới khi bật lại camera.');
       case 'socket-error':
         if (!mounted) return;
         setState(() => _status = 'Lỗi kênh tín hiệu: ${message['error']}');
