@@ -91,6 +91,7 @@ flowchart LR
 | `03-implementation/06-threshold-and-species-profile-logic.md` | Threshold resolution, phase/day-night logic, exposure index, summary rollups, worked examples |
 | `03-implementation/07-implementation-roadmap.md` | 6 milestones, task breakdown, definition of done, FR coverage order, team allocation |
 | `03-implementation/08-work-distribution-w5-w10.md` | Who does what in weeks 5–10: app-first schedule with an end-of-W8 app freeze, Friday gates, workload, cut list |
+| `03-implementation/09-camera-live-connection.md` | How the live camera connects (signalling vs media, ICE/STUN/TURN candidates, which network layouts work, reading the ICE log) — in Vietnamese |
 
 ### 04 — Quality
 | File | Purpose |
@@ -99,7 +100,7 @@ flowchart LR
 | `04-quality/02-test-cases.md` | TC-U-FW-01…12, TC-U-01…50, TC-I-01…15, TC-W-01…18, TC-E2E-01…06 with reference skeletons, plus the automated `E2E-AI-01…15` register (§E.1) — 131 cases |
 | `04-quality/03-manual-qa-checklist.md` | Hardware bring-up, soak test, device matrix, bug report template |
 | `04-quality/04-requirements-traceability-matrix.md` | FR/NFR → design doc → code module → test → report section, and the manual-case → `E2E-AI` counterpart table |
-| `04-quality/05-e2e-ai-testing-plan.md` | The one mobile end-to-end suite (`app/integration_test/app_e2e_test.dart`): what it covers, what it deliberately leaves to widget tests and the manual checklist, how to run it on an emulator or a USB phone, and the determinism/locator rules that keep it trustworthy (2026-11-05) |
+| `04-quality/05-e2e-ai-testing-plan.md` | The one mobile end-to-end suite (`app/integration_test/app_e2e_test.dart`): what it covers, what it deliberately leaves to widget tests and the manual checklist, how to run it on an emulator or a USB phone, how its Markdown report is generated from the JSON reporter, and the determinism/locator rules that keep it trustworthy (2026-11-06) |
 
 ### 05 — Release
 | File | Purpose |
